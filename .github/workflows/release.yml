@@ -159,9 +159,6 @@ jobs:
           sudo apt-get install -y perl build-essential
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-      - name: Initialize the Android project
-        run: npm run tauri -- android init --ci --skip-targets-install
-
       - name: Write the release keystore
         if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
