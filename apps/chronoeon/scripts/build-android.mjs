@@ -34,6 +34,10 @@ const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriRoot = join(appRoot, "src-tauri");
 const androidRoot = join(tauriRoot, "gen", "android");
 const projectRoot = androidRoot;
+const tauriConfig = JSON.parse(readFileSync(join(tauriRoot, "tauri.conf.json"), "utf8"));
+const androidIdentifier = tauriConfig.identifier;
+const androidLibrary = "chronoeon_lib";
+const kotlinOutputDir = join(projectRoot, "app", "src", "main", "java", ...androidIdentifier.split("."), "generated");
 const buildRoot = join(appRoot, "..", "..", ".build", "android");
 const distRoot = join(appRoot, "dist");
 const frontendRoots = [
@@ -72,8 +76,13 @@ const env = {
   [`RANLIB_${target}`]: process.env[`RANLIB_${target}`] ?? posixPath(join(toolchain, "llvm-ranlib" + exeSuffix)),
   [`CARGO_TARGET_${target.replace(/-/g, "_").toUpperCase()}_LINKER`]: clangWrapper,
   TAURI_ANDROID_PROJECT_PATH: projectRoot,
+  TAURI_ANDROID_PACKAGE_UNESCAPED: androidIdentifier,
+  WRY_ANDROID_PACKAGE: androidIdentifier,
+  WRY_ANDROID_LIBRARY: androidLibrary,
+  WRY_ANDROID_KOTLIN_FILES_OUT_DIR: kotlinOutputDir,
 };
 
+mkdirSync(kotlinOutputDir, { recursive: true });
 writeTauriProperties();
 
 step("Frontend build", "npm", ["run", "build"], appRoot);
@@ -88,6 +97,12 @@ if (process.env.CHRONOEON_SKIP_CARGO === "1") {
   fail("`perl` is not on PATH. The Rust library vendors OpenSSL (git2), whose Configure step is a Perl script.\n"
     + "  Install Strawberry Perl, or set CHRONOEON_SKIP_CARGO=1 to repackage the existing library.");
 } else {
+  // cargo does not track Android-only build-script environment. On a fresh
+  // release checkout, tauri.settings.gradle is absent, so force Tauri to
+  // regenerate it and the proguard file.
+  if (!existsSync(join(projectRoot, "tauri.settings.gradle"))) {
+    run("cargo", ["clean", "-p", "tauri"], tauriRoot);
+  }
   // The custom-protocol feature tells Tauri to load embedded assets. Without it,
   // a direct cargo release build still tries the development URL at runtime.
   step("Rust library", "cargo", ["build", "--release", "--target", target, "--features", "custom-protocol"], tauriRoot);
@@ -189,9 +204,8 @@ function syncAndroidAssets() {
   cpSync(distRoot, assetsRoot, { recursive: true });
 }
 function writeTauriProperties() {
-  const config = JSON.parse(readFileSync(join(tauriRoot, "tauri.conf.json"), "utf8"));
-  const version = config.version;
-  const android = config.bundle?.android ?? {};
+  const version = tauriConfig.version;
+  const android = tauriConfig.bundle?.android ?? {};
   if (android.autoIncrementVersionCode) {
     fail("Android auto-incremented version codes require the Tauri build command; "
       + "the direct APK script intentionally builds with a deterministic code.");
