@@ -179,3 +179,11 @@ jobs:
           name: chronoeon-android
           path: .build/android/*.apk
           if-no-files-found: error
+
+      - name: Attach the APK to the draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          draft: true
+          files: .build/android/*.apk
+          fail_on_unmatched_files: true
