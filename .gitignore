@@ -1,0 +1,74 @@
+# vscode
+.vscode 
+.claude/
+
+# Intellij
+*.iml
+.idea
+
+# npm
+node_modules
+
+# Exclude sourcemaps
+*.map
+
+# Exclude macOS Finder (System Explorer) View States
+.DS_Store
+
+
+.specs
+docs/superpowers/
+
+*.gguf
+models/
+
+bin/
+
+# Local development notes and process docs stay outside the published repo.
+AGENTS.md
+PROJECT_TODO.md
+docs/
+
+# Local user data and disposable backups are never committed.
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+.audit/
+assets/
+%SystemDrive%/
+
+.opencode/
+.sisyphus/
+docs/CLAUDE.md
+CLAUDE.md
+
+# One-off CSV export / conversion scripts at repo root
+2026*.csv
+convert-*.js
+
+# standalone build outputs
+apps/chronoeon/dist/
+apps/chronoeon/src-tauri/target/
+*.tsbuildinfo
+.vite/
+
+# Tauri-generated schemas
+apps/chronoeon/src-tauri/gen/schemas/
+apps/chronoeon/src-tauri/gen/android/app/src/main/assets/
+
+# Local UI-audit harness (CDP drivers + screenshots); disposable
+.audit/
+
+# Disposable Android cross-build shims (OpenSSL AR response file + make)
+.build/
+
+# Vendored crates stay in Git as source; cargo/package publishing artefacts do not.
+vendor/**/.cargo-ok
+vendor/**/.cargo_vcs_info.json
+vendor/**/Cargo.lock
+vendor/**/Cargo.toml.orig
+vendor/**/api-iife.js
+vendor/**/banner.png
+!vendor/tauri-plugin-sql/api-iife.js

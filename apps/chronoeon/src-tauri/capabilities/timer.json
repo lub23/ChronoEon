@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "timer-capability",
+  "description": "Always-on-top timer window: draggable, closable, and able to exchange timer events with the main window.",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": [
+    "timer"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:event:allow-emit",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

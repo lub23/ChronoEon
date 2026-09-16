@@ -1,0 +1,14 @@
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+const app=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
+const manifest=path.join(app,"src-tauri","Cargo.toml");
+const build=spawnSync("cargo",["build","--manifest-path",manifest,"--example","sync_transport"],{stdio:"inherit",windowsHide:true});
+if(build.status!==0)process.exit(build.status??1);
+const metadata=spawnSync("cargo",["metadata","--no-deps","--format-version","1","--manifest-path",manifest],{encoding:"utf8",windowsHide:true});
+if(metadata.status!==0)throw new Error(metadata.stderr);
+const target=JSON.parse(metadata.stdout).target_directory;
+const binary=path.join(target,"debug","examples",`sync_transport${process.platform==="win32"?".exe":""}`);
+const vitest=path.resolve(app,"../../node_modules/vitest/vitest.mjs");
+const tests=spawnSync(process.execPath,[vitest,"run","src/sync/native.integration.test.ts"],{cwd:app,stdio:"inherit",windowsHide:true,env:{...process.env,CHRONOEON_NATIVE_SYNC_BIN:binary}});
+process.exit(tests.status??1);

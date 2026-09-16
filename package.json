@@ -1,0 +1,35 @@
+{
+  "name": "chronoeon-workspace",
+  "version": "0.1.3",
+  "private": true,
+  "description": "ChronoEon (时元) — a calm, local-first calendar and entries app.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @chronoeon/app",
+    "build": "npm run build --workspace @chronoeon/app",
+    "preview": "npm run preview --workspace @chronoeon/app",
+    "test": "npm run test:shared && npm run test:storage && npm run test:app",
+    "tauri": "npm run tauri --workspace @chronoeon/app",
+    "tauri:dev": "npm run tauri:dev --workspace @chronoeon/app",
+    "tauri:build": "npm run tauri:build --workspace @chronoeon/app",
+    "android:apk": "npm run android:apk --workspace @chronoeon/app",
+    "verify:windows": "npm run verify:windows --workspace @chronoeon/app",
+    "check": "npm run check:shared && npm run build && npm run test:shared && npm run test:storage && npm run test:app",
+    "test:shared": "npm run test --workspace @chronoeon/domain && npm run test --workspace @chronoeon/markdown",
+    "test:storage": "npm run test --workspace @chronoeon/storage",
+    "check:shared": "npm run check --workspace @chronoeon/domain && npm run check --workspace @chronoeon/markdown && npm run check --workspace @chronoeon/ports && npm run check --workspace @chronoeon/storage",
+    "test:app": "npm run test --workspace @chronoeon/app",
+    "test:diary": "npm run test:fixture --workspace=@chronoeon/markdown",
+    "doctor:windows": "npm install --include=optional --global=false && npm run verify:windows"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "vite-node": "^6.0.0"
+  }
+}

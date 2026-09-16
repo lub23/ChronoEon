@@ -1,0 +1,24 @@
+{
+  "name": "@chronoeon/markdown",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test:fixture": "vitest run src/local-vault.test.ts"
+  },
+  "dependencies": {
+    "@chronoeon/domain": "0.1.0",
+    "@chronoeon/ports": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.16"
+  }
+}

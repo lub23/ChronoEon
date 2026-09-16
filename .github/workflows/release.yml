@@ -1,0 +1,184 @@
+name: Release
+
+# Tag-driven release line. `v0.1.0` on main produces a draft GitHub Release with
+# Windows, macOS and Ubuntu installers plus the Android APK attached; publishing
+# the draft is a deliberate human step. Nothing here runs on ordinary pushes.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+            artifact: chronoeon-windows
+          # 22.04 keeps the glibc/webkit floor low enough for older desktops.
+          - platform: ubuntu-22.04
+            args: ""
+            artifact: chronoeon-linux
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+            artifact: chronoeon-macos
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Check out ChronoEon
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/chronoeon/src-tauri -> target
+
+      - name: Install Linux bundling dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            build-essential curl wget file libssl-dev libgtk-3-dev
+
+      - name: Install macOS bundling dependencies
+        if: matrix.platform == 'macos-latest'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Install JavaScript dependencies
+        run: npm ci --include=optional --global=false
+
+      - name: Check shared packages
+        run: npm run check:shared
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify Windows metadata
+        if: matrix.platform == 'windows-latest'
+        run: npm run verify:windows
+
+      - name: Build bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signature. Absent until a maintainer generates a keypair
+          # (`npm run tauri signer generate`); tauri-action then simply skips
+          # producing `.sig` files and `latest.json`.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Authenticode. Absent on forks and first-party dry runs; the build
+          # still succeeds and produces unsigned installers.
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        with:
+          projectPath: apps/chronoeon
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: "ChronoEon ${{ inputs.tag || github.ref_name }}"
+          releaseBody: "See CHANGELOG for details. Installers are attached below."
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Upload bundles as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            apps/chronoeon/src-tauri/target/release/bundle/nsis/*
+            apps/chronoeon/src-tauri/target/release/bundle/msi/*
+            apps/chronoeon/src-tauri/target/release/bundle/appimage/*.AppImage*
+            apps/chronoeon/src-tauri/target/release/bundle/deb/*.deb
+            apps/chronoeon/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            apps/chronoeon/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+          if-no-files-found: warn
+
+  # The Android package is a separate arm64 APK. Everything it needs — Node,
+  # JDK 17, the Android SDK/NDK and perl for the vendored OpenSSL in `git2` — is
+  # already on the Ubuntu runner, so `npm run android:apk` builds and signs it in
+  # one step. Without an `ANDROID_KEYSTORE_BASE64` secret it is signed with the
+  # debug key, which still installs.
+  android:
+    runs-on: ubuntu-22.04
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - name: Check out ChronoEon
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/chronoeon/src-tauri -> target
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Install Android bundling dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y perl build-essential
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+      - name: Initialize the Android project
+        run: npm run tauri -- android init --ci --skip-targets-install
+
+      - name: Write the release keystore
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          mkdir -p "$HOME/.android"
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$HOME/.android/chronoeon.jks"
+          echo "CHRONOEON_KEYSTORE=$HOME/.android/chronoeon.jks" >> "$GITHUB_ENV"
+          echo "CHRONOEON_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "CHRONOEON_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> "$GITHUB_ENV"
+
+      - name: Build the APK
+        run: npm run android:apk
+        env:
+          CHRONOEON_APK_OUTPUT: ${{ github.workspace }}/.build/android/chronoeon-arm64.apk
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: chronoeon-android
+          path: .build/android/*.apk
+          if-no-files-found: error

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ChronoEon",
+  "version": "0.1.3",
+  "identifier": "app.chronoeon.desktop",
+  "build": {
+    "beforeDevCommand": "npm run icons:sync && npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run icons:generate && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ChronoEon · 时元",
+        "width": 1240,
+        "height": 800,
+        "minWidth": 320,
+        "minHeight": 540,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "decorations": false,
+        "transparent": false,
+        "shadow": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "A calm, local-first home for schedules, tasks, ideas and expenses.",
+    "longDescription": "ChronoEon (时元) is a local-first calendar, diary and task application with SQLite storage and semantic cross-device sync.",
+    "copyright": "Copyright © 2026 ChronoEon contributors",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  }
+}

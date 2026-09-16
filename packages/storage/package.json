@@ -1,0 +1,28 @@
+{
+  "name": "@chronoeon/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./test": "./src/test-support.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@chronoeon/domain": "0.1.0",
+    "@chronoeon/markdown": "0.1.0",
+    "@chronoeon/ports": "0.1.0",
+    "@tauri-apps/plugin-sql": "^2.3.1",
+    "node-diff3": "^3.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.16",
+    "wa-sqlite": "^1.0.0"
+  }
+}
