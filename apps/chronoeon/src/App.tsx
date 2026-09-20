@@ -79,12 +79,12 @@ import {
   providerIsConfigured,
   warmUpAIProvider,
   fetchAIModels,
-  hasSecureAIKey,
+  hasLocalAIKey,
   normalizeAIProviderPreferences,
   readAIProviderPreferences,
   requestAICompletion,
-  saveSecureAIKey,
-  clearSecureAIKey,
+  saveLocalAIKey,
+  clearLocalAIKey,
   writeAIProviderPreferences,
   type AIProviderPreferences,
 } from "./ai/provider";
@@ -323,7 +323,7 @@ function App() {
 
   useEffect(() => {
     let disposed = false;
-    void hasSecureAIKey().then((stored) => { if (!disposed) setAIKeyStored(stored); }).catch(() => { if (!disposed) setAIKeyStored(false); });
+    void hasLocalAIKey().then((stored) => { if (!disposed) setAIKeyStored(stored); }).catch(() => { if (!disposed) setAIKeyStored(false); });
     return () => { disposed = true; };
   }, []);
 
@@ -1195,12 +1195,12 @@ function App() {
   }, []);
 
   const saveAIKey = useCallback(async (value: string) => {
-    await saveSecureAIKey(value);
+    await saveLocalAIKey(value);
     setAIKeyStored(Boolean(value.trim()));
   }, []);
 
   const clearAIKey = useCallback(async () => {
-    await clearSecureAIKey();
+    await clearLocalAIKey();
     setAIKeyStored(false);
   }, []);
 
@@ -1229,7 +1229,7 @@ function App() {
     miniShortcutStatus={miniShortcutStatus}
     initialSection={settingsInitialSection}
     aiPreferences={aiPreferences}
-    aiKeyStored={aiKeyStored}
+    localKeyStored={aiKeyStored}
     onAIPreferencesChange={changeAIPreferences}
     onSaveAIKey={saveAIKey}
     onClearAIKey={clearAIKey}

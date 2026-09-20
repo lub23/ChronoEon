@@ -3,7 +3,7 @@ import { createMotionPortal as createPortal } from "./MotionPresence";
 import type { Locale } from "../domain/entry";
 import { t } from "../i18n";
 import { Icon } from "./Icon";
-import { registerModalDismiss } from "./modalLayer";
+import { useModalDismiss } from "./modalLayer";
 
 interface QuickNoteDialogProps {
   locale: Locale;
@@ -17,7 +17,7 @@ export function QuickNoteDialog({ locale, onParse, onManualAdd, onClose }: Quick
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const [notice, setNotice] = useState("");
 
-  useEffect(() => registerModalDismiss(event => { event.preventDefault(); onClose(); }), [onClose]);
+  useModalDismiss((event) => { event.preventDefault(); onClose(); });
   useEffect(() => { areaRef.current?.focus({ preventScroll: true }); }, []);
   function submit() {
     const value = text.trim();

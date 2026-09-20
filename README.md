@@ -6,6 +6,11 @@
 A local-first home for **schedules, tasks, ideas and expenses**, for Windows,
 Linux, macOS and Android. SQLite is the authoritative store.
 
+![Agenda view with today's schedule](apps/chronoeon/public/screenshots/agenda.jpg)
+![Month calendar](apps/chronoeon/public/screenshots/month.jpg)
+![Day timeline](apps/chronoeon/public/screenshots/day.jpg)
+![Statistics and review](apps/chronoeon/public/screenshots/stats.jpg)
+
 The product code is `apps/chronoeon/` (`app.chronoeon.desktop`). `packages/*`
 holds the UI-independent rules: `domain`, `storage`, `ports`.
 

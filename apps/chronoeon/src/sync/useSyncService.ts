@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SyncEngine, stableJson, type MissingAttachmentDetail, type SyncConflict, type SyncLocalStatus, type SyncStore } from "@chronoeon/storage";
-import { NativeSyncBackend, prepareAttachmentImports } from "./client";
+import { NativeSyncBackend, fetchStorageUsage, prepareAttachmentImports } from "./client";
 import { SyncScheduler } from "./scheduler";
-import { syncConfigured, type SyncConfig, type SyncResult } from "./types";
+import { syncConfigured, type StorageUsage, type SyncConfig, type SyncResult } from "./types";
 
 export interface SyncServiceState {
   busy: boolean; result: SyncResult | null; status: SyncLocalStatus | null; conflicts: SyncConflict[]; missingAttachments: MissingAttachmentDetail[];
+  usage: StorageUsage | null;
 }
 export function useSyncService(journal: SyncStore | null, config: SyncConfig, settings: Record<string, unknown>, callbacks: {
   importSettings: (settings: Record<string, unknown>) => void; onApplied: () => Promise<void>; onConflicts: (count: number) => void;
 }) {
-  const [state, setState] = useState<SyncServiceState>({ busy: false, result: null, status: null, conflicts: [], missingAttachments: [] });
+  const [state, setState] = useState<SyncServiceState>({ busy: false, result: null, status: null, conflicts: [], missingAttachments: [], usage: null });
   const backend = useMemo(() => new NativeSyncBackend(config), [config]);
   const [ready, setReady] = useState<SyncStore | null>(null);
   const refs = useRef({ settings, callbacks }); refs.current = { settings, callbacks };
@@ -91,6 +92,13 @@ export function useSyncService(journal: SyncStore | null, config: SyncConfig, se
       document.removeEventListener("visibilitychange", visibility);
     };
   }, [applySettings, backend, config, journal, ready, refresh]);
+  // Folder walks are cheap but not free; measure only when the panel asks and
+  // after each completed run, never on every journal change.
+  const refreshUsage = useCallback(async () => {
+    if (!journal) return;
+    try { const usage = await fetchStorageUsage(config); setState((current) => ({ ...current, usage })); }
+    catch { setState((current) => ({ ...current, usage: null })); }
+  }, [config, journal]);
   const trigger = useCallback(async (rebuildSnapshot: boolean): Promise<SyncResult | null> => {
     const current = scheduler.current;
     if (!current) return { ok: false, code: "SYNC_NOT_READY", message: "Synchronization is not ready" };
@@ -98,8 +106,9 @@ export function useSyncService(journal: SyncStore | null, config: SyncConfig, se
     if (scheduler.current !== current) return { ok: false, code: "SYNC_CANCELLED", message: "Synchronization settings changed" };
     if (rebuildSnapshot && resultRef.current?.ok) await refs.current.callbacks.onApplied();
     await refresh();
+    void refreshUsage();
     return resultRef.current;
-  }, [refresh]);
+  }, [refresh, refreshUsage]);
   const run = useCallback(() => trigger(false), [trigger]);
   const rebuildSnapshot = useCallback(() => trigger(true), [trigger]);
   const resolve = useCallback(async (conflict: SyncConflict, operationId: string) => {
@@ -121,5 +130,5 @@ export function useSyncService(journal: SyncStore | null, config: SyncConfig, se
     await journal.clearMissingAttachments();
     await refresh();
   }, [journal, refresh]);
-  return { ...state, available: Boolean(journal && ready === journal && syncConfigured(config)), run, rebuildSnapshot, resolve, removeMissingAttachment, clearMissingAttachments };
+  return { ...state, available: Boolean(journal && ready === journal && syncConfigured(config)), run, rebuildSnapshot, resolve, removeMissingAttachment, clearMissingAttachments, refreshUsage };
 }

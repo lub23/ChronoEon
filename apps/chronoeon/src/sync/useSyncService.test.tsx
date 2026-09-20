@@ -9,6 +9,7 @@ import { DEFAULT_SYNC_CONFIG } from "./types";
 vi.mock("./client", () => ({
   NativeSyncBackend: class { readonly id: string; constructor(config: { gitRemote: string }) { this.id = config.gitRemote; } },
   prepareAttachmentImports: vi.fn(async () => {}),
+  fetchStorageUsage: vi.fn(async () => ({ syncCacheBytes: 0, attachmentBytes: 0, databaseBytes: 0 })),
 }));
 let host: HTMLDivElement, root: Root, current: ReturnType<typeof useSyncService>;
 const journal = {

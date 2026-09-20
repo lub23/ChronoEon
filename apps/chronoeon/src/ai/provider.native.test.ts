@@ -16,6 +16,11 @@ describe("native AI completion bridge", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke).toHaveBeenLastCalledWith("ai_chat_completion", { request: expect.objectContaining({ disableReasoning: false, timeoutMs: 90_000 }) });
   });
+  it("does not send the local credential on remote requests", async () => {
+    invoke.mockResolvedValue({ content: "ok" });
+    await requestAICompletion(provider, messages);
+    expect(invoke).toHaveBeenCalledWith("ai_chat_completion", { request: expect.objectContaining({ useApiKey: false }) });
+  });
   it("settles cancellation immediately and ignores a late native error without retrying", async () => {
     let reject!: (error: unknown) => void;
     invoke.mockReturnValue(new Promise((_yes, no) => { reject = no; }));
@@ -26,6 +31,22 @@ describe("native AI completion bridge", () => {
     controller.abort(); await assertion;
     reject("AI request failed: timed out"); await Promise.resolve();
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+  it("allows Bearer auth and tool calls for local-compatible endpoints", async () => {
+    invoke.mockResolvedValue({
+      content: "",
+      toolCalls: [{ id: "call-1", type: "function", function: { name: "search_entries", arguments: "{}" } }],
+    });
+    const local = { ...DEFAULT_AI_PROVIDER_PREFERENCES.local, baseUrl: "http://127.0.0.1:8080/v1" };
+    const result = await requestAICompletion(local, messages, undefined, undefined, {
+      tools: [{ type: "function", function: { name: "search_entries", description: "Search", parameters: { type: "object" } } }],
+    });
+    expect(result.toolCalls?.[0]?.function.name).toBe("search_entries");
+    expect(invoke).toHaveBeenCalledWith("ai_chat_completion", { request: expect.objectContaining({
+      useApiKey: true,
+      toolChoice: "auto",
+      tools: expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "search_entries" }) })]),
+    }) });
   });
   it("bounds native models-only warm-up to eight seconds even if invoke never returns", async () => {
     vi.useFakeTimers(); invoke.mockReturnValue(new Promise(() => {}));

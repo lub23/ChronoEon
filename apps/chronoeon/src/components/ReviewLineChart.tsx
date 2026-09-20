@@ -23,6 +23,26 @@ export function spreadEndLabels(points: Array<{ key: string; y: number }>, top: 
   return new Map(ordered.map((point, index) => [point.key, placed[index]]));
 }
 
+/**
+ * Measure endpoint labels with the chart's real font instead of a per-glyph
+ * estimate: the estimate over-reserved on phones and left a wide empty band
+ * between the names and the card edge. Falls back to the estimate when no
+ * canvas is available (tests).
+ */
+const measured = new Map<string, number>();
+function labelTextWidth(text: string, font: string): number {
+  const key = font + "|" + text;
+  const cached = measured.get(key);
+  if (cached !== undefined) return cached;
+  let width = [...text].reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 10 : 5.6), 0);
+  try {
+    const context = document.createElement("canvas").getContext("2d");
+    if (context) { context.font = font; width = context.measureText(text).width; }
+  } catch { /* jsdom has no canvas */ }
+  measured.set(key, width);
+  return width;
+}
+
 function tooltipDate(date: string, granularity: ReviewGranularity, locale: Locale) {
   const formatter = new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", {
     year: "numeric", ...(granularity !== "year" ? { month: "short" } : {}),
@@ -44,12 +64,19 @@ export function ReviewLineChart({ buckets, labels, series, ariaLabel, granularit
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(900);
+  const [labelFont, setLabelFont] = useState("");
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [touchActiveIndex, setTouchActiveIndex] = useState<number | null>(null);
   useLayoutEffect(() => {
     const element = chartRef.current;
     if (!element) return;
-    const measure = () => { if (element.clientWidth > 0) setWidth(element.clientWidth); };
+    const measure = () => {
+      if (element.clientWidth > 0) setWidth(element.clientWidth);
+      const style = getComputedStyle(element);
+      // The labels use the sans stack; custom properties inherit, so read it here.
+      const family = style.getPropertyValue("--font-sans").trim() || style.fontFamily;
+      if (family) setLabelFont(family);
+    };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure); observer.observe(element);
@@ -57,9 +84,11 @@ export function ReviewLineChart({ buckets, labels, series, ariaLabel, granularit
   }, []);
 
   const height = Math.max(190, series.length * 16 + 52);
-  const labelWidth = Math.min(width * .22, Math.max(36, ...series.map(item =>
-    [...item.label].reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 10 : 5.6), 14))));
-  const left = 10, right = Math.max(30, width - labelWidth - 18), top = 20, bottom = height - 24;
+  // Names sit flush against the card: the widest real label plus a hairline,
+  // capped so a very long category name cannot squeeze the plot on a phone.
+  const labelWidth = Math.min(Math.max(72, width * .3), Math.max(24, ...series.map(item =>
+    Math.ceil(labelTextWidth(item.label, `${item.total ? 700 : 400} 10px ${labelFont || "sans-serif"}`)) + 2)));
+  const left = 10, right = Math.max(30, width - labelWidth - 12), top = 20, bottom = height - 24;
   const extent = useMemo(() => {
     let min = 0, max = 0;
     for (const item of series) for (const value of item.values) { min = Math.min(min, value); max = Math.max(max, value); }

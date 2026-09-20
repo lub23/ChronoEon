@@ -9,6 +9,8 @@ import {
   defaultCategoryForKind,
   extractAIJson,
   formatEntryTime,
+  inferCategory,
+  inferLocation,
   normalizeAIStructuredResult,
   parseCapture,
   type CaptureHistoryItem,
@@ -27,7 +29,7 @@ import type { SmartCaptureRecoveryState } from "../ai/draftRecovery";
 import { paymentMethodLabel, t, type MessageKey } from "../i18n";
 import { GlassDatePicker, GlassTimePicker } from "./GlassDateTimePicker";
 import { GlassSelect } from "./GlassSelect";
-import { registerModalDismiss } from "./modalLayer";
+import { useModalDismiss } from "./modalLayer";
 import { Icon } from "./Icon";
 
 interface SmartCaptureDialogProps {
@@ -43,10 +45,38 @@ interface SmartCaptureDialogProps {
   onConfirm: (drafts: EntryDraft[]) => Promise<boolean>;
 }
 
+type AutofillField = "category" | "location";
+
 interface PreviewDraft {
   key: string;
   draft: EntryDraft;
   warnings: AIValidationIssue[];
+  /** Fields guessed from similar past items rather than parsed from the text. */
+  autofilled: AutofillField[];
+}
+
+/**
+ * A quick note rarely names its category or place. Borrow both from the most
+ * similar recent items, the same learner the composer uses, and say so: the
+ * user is asked to check a guess, never silently handed one.
+ */
+function autofillDraft(
+  draft: EntryDraft,
+  categoryConfidence: number,
+  history: readonly CaptureHistoryItem[],
+  settings: ChronoEonSettings,
+): { draft: EntryDraft; autofilled: AutofillField[] } {
+  const autofilled: AutofillField[] = [];
+  let next = draft;
+  if (categoryConfidence > 0) autofilled.push("category");
+  if (!next.location && next.kind !== "idea" && settings.locationAutofill) {
+    const location = inferLocation(next.title, history, next.date);
+    if (location) {
+      next = { ...next, location };
+      autofilled.push("location");
+    }
+  }
+  return { draft: next, autofilled };
 }
 
 const issueMessages: Record<AIValidationIssue["code"], MessageKey> = {
@@ -97,15 +127,16 @@ function scheduleSummary(draft: EntryDraft, locale: Locale): string {
 
 export function SmartCaptureDialog({ raw, locale, settings, history, aiPreferences, recovery, onRecoveryChange, onClose, onConfigureAI, onConfirm }: SmartCaptureDialogProps) {
   const today = useMemo(() => new Date(), []);
-  const seed = useMemo<PreviewDraft>(() => ({
-    key: "offline",
-    draft: parseCapture(raw, { now: today, locale, settings, history }).draft,
-    warnings: [],
-  }), [locale, raw, settings, history, today]);
+  const seed = useMemo<PreviewDraft>(() => {
+    const parsed = parseCapture(raw, { now: today, locale, settings, history });
+    const completed = autofillDraft(parsed.draft, parsed.confidence.category, history ?? [], settings);
+    return { key: "offline", draft: completed.draft, warnings: [], autofilled: completed.autofilled };
+  }, [locale, raw, settings, history, today]);
   const recoveredItems = useMemo<PreviewDraft[]>(() => (recovery?.drafts ?? []).map((draft, index) => ({
     key: `recovered-${index}-${draft.title}`,
     draft,
     warnings: [],
+    autofilled: [],
   })), [recovery?.drafts]);
   const [items, setItems] = useState<PreviewDraft[]>(recoveredItems.length ? recoveredItems : [seed]);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -138,10 +169,10 @@ export function SmartCaptureDialog({ raw, locale, settings, history, aiPreferenc
     onRecoveryChange?.({ mode, raw, drafts: items.map((item) => item.draft) });
   }, [items, mode, onRecoveryChange, raw]);
 
-  useEffect(() => registerModalDismiss((event) => {
+  useModalDismiss((event) => {
     event.preventDefault();
     if (busy !== "save") onClose();
-  }), [busy, onClose]);
+  });
 
   useEffect(() => {
     if (busy !== "ai") return;
@@ -160,7 +191,14 @@ export function SmartCaptureDialog({ raw, locale, settings, history, aiPreferenc
     // A slow model must never overwrite what the user has already corrected.
     editedRef.current = true;
     cancelAI();
-    setItems((current) => current.map((item) => item.key === key ? { ...item, draft: { ...item.draft, ...change } } : item));
+    setItems((current) => current.map((item) => item.key === key
+      ? {
+        ...item,
+        draft: { ...item.draft, ...change },
+        // Once the user owns a guessed field, it is no longer a guess.
+        autofilled: item.autofilled.filter((field) => !(field in change)),
+      }
+      : item));
     setError("");
   };
 
@@ -200,15 +238,27 @@ export function SmartCaptureDialog({ raw, locale, settings, history, aiPreferenc
       if (controller.signal.aborted || abortRef.current !== controller) return;
       const normalized = normalizeAIStructuredResult(extractAIJson(completion.content), format(today, "yyyy-MM-dd"), settings);
       if (!normalized.candidates.length) throw new Error(t("aiIssueEmptyResponse", locale));
-      setItems(normalized.candidates.map((candidate, index) => ({
-        key: `ai-${Date.now()}-${index}`,
-        draft: {
+      setItems(normalized.candidates.map((candidate, index) => {
+        let draft: EntryDraft = {
           ...candidate.draft,
           allDay: candidate.draft.kind === "task" || candidate.draft.kind === "event" ? candidate.draft.allDay : false,
           start: candidate.draft.kind === "task" || candidate.draft.kind === "event" ? candidate.draft.start ?? "09:00" : candidate.draft.start,
-        },
-        warnings: candidate.issues.filter((issue) => issue.severity === "warning"),
-      })));
+        };
+        let warnings = candidate.issues.filter((issue) => issue.severity === "warning");
+        // The model fell back to the default category: try the local learner
+        // before showing a default, and drop the "unknown" note if it helps.
+        let categoryConfidence = 0;
+        if (warnings.some((issue) => issue.code === "unknown-category")) {
+          const learned = inferCategory(draft.title, raw, draft.kind, settings, history ?? [], today, draft.amount, draft.calendar);
+          if (learned.confidence > 0) {
+            draft = { ...draft, category: learned.value };
+            categoryConfidence = learned.confidence;
+            warnings = warnings.filter((issue) => issue.code !== "unknown-category");
+          }
+        }
+        const completed = autofillDraft(draft, categoryConfidence, history ?? [], settings);
+        return { key: `ai-${Date.now()}-${index}`, draft: completed.draft, warnings, autofilled: completed.autofilled };
+      }));
       setMode("ai");
       setEditingKey(null);
     } catch (reason) {
@@ -304,7 +354,8 @@ export function SmartCaptureDialog({ raw, locale, settings, history, aiPreferenc
                       <small>
                         <span>{t(item.draft.kind, locale)}</span>
                         <span>{scheduleSummary(item.draft, locale)}</span>
-                        {category && <span className="smart-capture-category" style={{ "--category-color": categoryOption?.color ?? "var(--accent)" } as CSSProperties}><i aria-hidden="true" />{category}</span>}
+                        {category && <span className={item.autofilled.includes("category") ? "smart-capture-category is-autofilled" : "smart-capture-category"} style={{ "--category-color": categoryOption?.color ?? "var(--accent)" } as CSSProperties} title={item.autofilled.includes("category") ? t("smartCaptureAutofilled", locale) : undefined}><i aria-hidden="true" />{category}{item.autofilled.includes("category") && <em>{t("smartCaptureAutoTag", locale)}</em>}</span>}
+                        {item.draft.location && <span className={item.autofilled.includes("location") ? "smart-capture-place is-autofilled" : "smart-capture-place"} title={item.autofilled.includes("location") ? t("smartCaptureAutofilled", locale) : undefined}><Icon name="map-pin" size={10} />{item.draft.location}{item.autofilled.includes("location") && <em>{t("smartCaptureAutoTag", locale)}</em>}</span>}
                         {item.draft.kind === "bill" && item.draft.amount != null && <span>{item.draft.amount}</span>}
                       </small>
                     </span>
@@ -316,7 +367,7 @@ export function SmartCaptureDialog({ raw, locale, settings, history, aiPreferenc
                   <div className="smart-capture-editor">
                     <div className="smart-capture-row smart-capture-row--three">
                       <label><span>{t("type", locale)}</span><GlassSelect value={item.draft.kind} ariaLabel={t("type", locale)} options={kinds.map((kind) => ({ value: kind, label: t(kind, locale) }))} onChange={(value) => changeKind(item, value as EntryKind)} /></label>
-                      <label><span>{t("category", locale)}</span><GlassSelect value={item.draft.category} ariaLabel={t("category", locale)} options={categoryOptions.map((option) => ({ value: option.value, label: option.label, color: option.color, group: option.group }))} onChange={(value) => patch(item.key, { category: value })} /></label>
+                      <label className={item.autofilled.includes("category") ? "is-autofilled" : undefined}><span>{t("category", locale)}{item.autofilled.includes("category") && <em className="smart-capture-auto-tag">{t("smartCaptureAutoTag", locale)}</em>}</span><GlassSelect value={item.draft.category} ariaLabel={t("category", locale)} options={categoryOptions.map((option) => ({ value: option.value, label: option.label, color: option.color, group: option.group }))} onChange={(value) => patch(item.key, { category: value })} /></label>
                       {(item.draft.kind === "task" || item.draft.kind === "event") && (
                         <label className="all-day-toggle smart-capture-all-day">
                           <input type="checkbox" checked={Boolean(item.draft.allDay)} onChange={(event) => patch(item.key, { allDay: event.target.checked, start: event.target.checked ? undefined : item.draft.start ?? "09:00", end: event.target.checked ? undefined : item.draft.end })} />
@@ -327,7 +378,7 @@ export function SmartCaptureDialog({ raw, locale, settings, history, aiPreferenc
                     </div>
                     <div className="smart-capture-row smart-capture-row--split">
                       <label className="smart-capture-title-field"><span>{t("title", locale)}</span><input ref={firstTitleRef} className={firstErrorFor(item.draft, "title") ? "is-invalid" : ""} value={item.draft.title} onChange={(event) => patch(item.key, { title: event.target.value })} /></label>
-                      {item.draft.kind !== "idea" && <label><span>{t("location", locale)}</span><input value={item.draft.location ?? ""} onChange={(event) => patch(item.key, { location: event.target.value })} placeholder={t("locationPlaceholder", locale)} /></label>}
+                      {item.draft.kind !== "idea" && <label className={item.autofilled.includes("location") ? "is-autofilled" : undefined}><span>{t("location", locale)}{item.autofilled.includes("location") && <em className="smart-capture-auto-tag">{t("smartCaptureAutoTag", locale)}</em>}</span><input value={item.draft.location ?? ""} onChange={(event) => patch(item.key, { location: event.target.value })} placeholder={t("locationPlaceholder", locale)} /></label>}
                     </div>
                     <div className="smart-capture-when">
                       <div className="smart-capture-when-field smart-capture-when-field--date">
@@ -365,7 +416,10 @@ export function SmartCaptureDialog({ raw, locale, settings, history, aiPreferenc
                     <label className="smart-capture-note"><span>{t("note", locale)}</span><textarea rows={2} value={item.draft.note ?? ""} onChange={(event) => patch(item.key, { note: event.target.value })} placeholder={t("notePlaceholder", locale)} /></label>
                   </div>
                 )}
-                {issues.length > 0 && <ul className="smart-capture-issues">{issues.map((issue, issueIndex) => <li className={issue.severity} key={`${issue.code}-${issueIndex}`}>{t(issueMessages[issue.code], locale)}</li>)}</ul>}
+                {(issues.length > 0 || item.autofilled.length > 0) && <ul className="smart-capture-issues">
+                  {item.autofilled.length > 0 && <li className="autofill" key="autofill">{t(item.autofilled.length === 2 ? "smartCaptureAutofilledBoth" : item.autofilled[0] === "category" ? "smartCaptureAutofilledCategory" : "smartCaptureAutofilledLocation", locale)}</li>}
+                  {issues.map((issue, issueIndex) => <li className={issue.severity} key={`${issue.code}-${issueIndex}`}>{t(issueMessages[issue.code], locale)}</li>)}
+                </ul>}
               </article>
             );
           })}

@@ -4,8 +4,10 @@ import { entriesInRange, statsPresetRange, type StatsRange } from "@chronoeon/do
 import type { Entry, EntryKind, Locale } from "../domain/entry";
 import type { AiConversation, AiMessageRecord } from "@chronoeon/storage";
 import type { AiConversationApi } from "../ai/memoryConversationStore";
+import type { AIChatMessage } from "@chronoeon/domain";
 import { activeAIProvider, providerIsConfigured, requestAICompletion, type AIProviderPreferences } from "../ai/provider";
-import { localeTag, t } from "../i18n";
+import { advisorToolResultForModel, advisorTools, executeAdvisorToolCall, type AdvisorTool, type AdvisorToolResult } from "../ai/advisorAgent";
+import { localeTag, t, type MessageKey } from "../i18n";
 import { Icon } from "./Icon";
 import { renderChatMarkdown } from "./ChatMarkdown";
 import { registerModalDismiss } from "./modalLayer";
@@ -20,6 +22,25 @@ interface ChatDialogProps {
   onOpenEntry: (entryId: string) => void;
   onOpenSettings: () => void;
   onClose: () => void;
+}
+
+const toolMessages: Record<AdvisorTool, MessageKey> = {
+  search_entries: "aiToolSearchEntries",
+  date_range_entries: "aiToolDateRangeEntries",
+  read_recent_entries: "aiToolRecentEntries",
+  overdue_tasks: "aiToolOverdueTasks",
+  upcoming_tasks: "aiToolUpcomingTasks",
+  spending_summary: "aiToolSpendingSummary",
+};
+
+function toolDetail(result: AdvisorToolResult, locale: "en" | "zh"): string {
+  const details: string[] = [];
+  if (result.call.query?.trim()) details.push(t("aiToolTerms", locale).replace("{terms}", result.call.query.trim()));
+  if (result.call.range) details.push(t("aiToolRange", locale)
+    .replace("{start}", result.call.range.start)
+    .replace("{end}", result.call.range.end));
+  details.push(t("aiToolResultCount", locale).replace("{count}", String(result.entries.length)));
+  return details.join(" · ");
 }
 
 export function ChatDialog({ locale, entries, aiPreferences, conversations, refreshVersion = 0, onOpenEntry, onOpenSettings, onClose }: ChatDialogProps) {
@@ -50,6 +71,7 @@ export function ChatDialog({ locale, entries, aiPreferences, conversations, refr
     t("aiSuggestionThisWeek", locale),
     t("aiSuggestionOverdue", locale),
     t("aiSuggestionSpending", locale),
+    t("aiSuggestionWellbeing", locale),
   ], [locale]);
   const modelConfigured = providerIsConfigured(aiPreferences);
   const contextToday = format(new Date(), "yyyy-MM-dd");
@@ -89,7 +111,7 @@ export function ChatDialog({ locale, entries, aiPreferences, conversations, refr
       return next.length === current.length ? current : next;
     });
   }, [entryIdKey]);
-  const contextForPrompt = selectedContextEntries.length ? selectedContextEntries.slice(0, 120) : contextCandidates.slice(0, 80);
+  const [agentTraces, setAgentTraces] = useState<AdvisorToolResult[]>([]);
 
   const selectContextRange = useCallback((range: ChatContextRange) => {
     if (range === "custom" && !customContextRange) {
@@ -121,6 +143,8 @@ export function ChatDialog({ locale, entries, aiPreferences, conversations, refr
     if (!conversations || !activeId) return;
     void conversations.listMessages(activeId).then(setMessages);
   }, [activeId, conversations, refreshVersion]);
+
+  useEffect(() => { setAgentTraces([]); }, [activeId]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -193,7 +217,13 @@ export function ChatDialog({ locale, entries, aiPreferences, conversations, refr
       const next = [...messages, userMessage];
       setMessages(next);
       const provider = activeAIProvider(aiPreferences);
-      const recent = contextForPrompt.map((entry) => [
+      // Explicitly selected records stay authoritative and bypass tools. For an
+      // open question, the model picks the local function; this app only parses,
+      // executes, and returns its read-only tool_calls.
+      const useTools = selectedContextEntries.length === 0;
+      const contextEntries = selectedContextEntries;
+      setAgentTraces([]);
+      const recent = contextEntries.map((entry) => [
           entry.date,
           entry.start || (entry.allDay ? "all-day" : "anytime"),
           entry.kind,
@@ -201,30 +231,64 @@ export function ChatDialog({ locale, entries, aiPreferences, conversations, refr
           entry.title,
           entry.note ? entry.note.replace(/\s+/g, " ").slice(0, 140) : "",
         ].filter(Boolean).join(" | "));
-      const providerMessages = [
+      const providerMessages: AIChatMessage[] = [
         {
           role: "system" as const,
-          content: `You are ChronoEon's local calendar advisor. Answer in ${locale === "zh" ? "Simplified Chinese" : "English"}. Use only the local entries supplied here unless the user gives new information. Be concise and practical. Prefer short paragraphs, bullets and bold key facts. If the answer is not present, say what is missing.\n\nChronoEon entries chosen as context, most recent first (date | time | kind | status | title | note):\n${recent.join("\n")}`,
+          content: useTools
+            ? `You are ChronoEon's local calendar advisor. Current local date: ${contextToday}. Answer in ${locale === "zh" ? "Simplified Chinese" : "English"}. When a question depends on user records, call a read-only tool first; multiple focused tool_calls are better than one broad search when topics differ. Use only entries returned by tools unless the user supplies new information. Be concise and practical. Prefer short paragraphs, bullets and bold key facts. If no tool returns matching data, say what is missing.`
+            : `You are ChronoEon's local calendar advisor. Answer in ${locale === "zh" ? "Simplified Chinese" : "English"}. Use only the local entries supplied here unless the user gives new information. Be concise and practical. Prefer short paragraphs, bullets and bold key facts. If the answer is not present, say what is missing.\n\nChronoEon entries chosen by the user, most recent first (date | time | kind | status | title | note):\n${recent.join("\n")}`,
         },
         ...next.map((message) => ({ role: message.role as "user" | "assistant", content: message.content })),
       ];
-      const reply = await requestAICompletion(provider, providerMessages, undefined, controller.signal);
+      let promptTokens = 0;
+      let completionTokens = 0;
+      let reply = await requestAICompletion(
+        provider,
+        providerMessages,
+        undefined,
+        controller.signal,
+        useTools ? { tools: advisorTools, toolChoice: "auto" } : undefined,
+      );
+      promptTokens += reply.promptTokens ?? 0;
+      completionTokens += reply.completionTokens ?? 0;
+      const toolResults: AdvisorToolResult[] = [];
+      let toolRounds = 0;
+      while (reply.toolCalls?.length && toolRounds < 2) {
+        providerMessages.push({ role: "assistant", content: reply.content, tool_calls: reply.toolCalls });
+        for (const rawCall of reply.toolCalls) {
+          const result = executeAdvisorToolCall(rawCall, entries, contextToday);
+          toolResults.push(result);
+          providerMessages.push({
+            role: "tool",
+            content: advisorToolResultForModel(result),
+            tool_call_id: rawCall.id,
+            name: rawCall.function.name,
+          });
+        }
+        setAgentTraces([...toolResults]);
+        reply = await requestAICompletion(provider, providerMessages, undefined, controller.signal, { tools: advisorTools, toolChoice: "auto" });
+        promptTokens += reply.promptTokens ?? 0;
+        completionTokens += reply.completionTokens ?? 0;
+        toolRounds += 1;
+      }
+      if (useTools && toolResults.length) setAgentTraces(toolResults);
       const assistant = await conversations.appendMessage(activeId, {
         role: "assistant",
         content: reply.content,
         reasoningContent: reply.reasoningContent,
-        promptTokens: reply.promptTokens,
-        completionTokens: reply.completionTokens,
+        promptTokens,
+        completionTokens,
       });
       setMessages((current) => [...current, assistant]);
       await reloadList();
     } catch (sendError) {
       console.warn("Chat send failed", sendError);
-      if (!controller.signal.aborted) setError(t("aiRequestFailed", locale));
+      const message = sendError instanceof Error ? sendError.message : String(sendError);
+      if (!controller.signal.aborted) setError(t(/tool.?call|unsupported.*tool/i.test(message) ? "aiToolCallsUnsupported" : "aiRequestFailed", locale));
     } finally {
       setBusy(false);
     }
-  }, [activeId, aiPreferences, busy, conversations, contextForPrompt, draft, locale, messages, reloadList]);
+  }, [activeId, aiPreferences, busy, conversations, contextToday, draft, entries, locale, messages, reloadList, selectedContextEntries]);
 
   const toggleContextEntry = (id: string) => {
     setSelectedContextIds((current) => current.includes(id)
@@ -423,6 +487,13 @@ export function ChatDialog({ locale, entries, aiPreferences, conversations, refr
                     </div>
                   </div>
                 )}
+                {agentTraces.map((trace, index) => <div className="chat-tool-trace" role="status" key={`${trace.call.tool}-${index}`}>
+                  <Icon name="book" size={13} />
+                  <div>
+                    <strong>{t(toolMessages[trace.call.tool], locale)}</strong>
+                    <span>{toolDetail(trace, locale)}</span>
+                  </div>
+                </div>)}
                 {!messages.length && !busy && (
                   <div className="chat-welcome">
                     <span className="chat-welcome-orb" aria-hidden="true"><Icon name="sparkle" size={22} /></span>

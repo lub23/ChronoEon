@@ -32,8 +32,26 @@ export interface AIProviderConfig {
 }
 
 export interface AIChatMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  tool_calls?: AIToolCall[];
+  tool_call_id?: string;
+  name?: string;
+}
+
+export interface AIToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+export interface AIToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
 }
 
 export interface AIValidationIssue {

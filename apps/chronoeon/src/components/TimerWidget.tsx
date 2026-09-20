@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { registerModalDismiss } from "./modalLayer";
+import { useModalDismiss } from "./modalLayer";
 import { formatTimerDuration, inferCategory, type CaptureHistoryItem, type ChronoEonSettings, type Locale } from "@chronoeon/domain";
 import { t } from "../i18n";
 import type { LiveTimer } from "../hooks/useLiveTimer";
@@ -55,13 +55,10 @@ export function TimerWidget({ locale, settings, timer, open, compact = false, on
     if (suggestion.confidence > 0 && suggestion.value !== category) setCategory(suggestion.value);
   }, [category, history, open, settings, title]);
 
-  useEffect(() => {
-    if (!open) return;
-    return registerModalDismiss((event) => {
-      event.preventDefault();
-      onClose();
-    });
-  }, [onClose, open]);
+  useModalDismiss((event) => {
+    event.preventDefault();
+    onClose();
+  }, open);
 
   if (!open) return null;
 

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AttachmentMetadata, Publication, RemoteFetch, SyncBackend, SyncStore } from "@chronoeon/storage";
-import type { SyncConfig } from "./types";
+import type { StorageUsage, SyncConfig } from "./types";
 
 /** The native bridge transfers compressed immutable objects, not a database. */
 export class NativeSyncBackend implements SyncBackend {
@@ -14,6 +14,10 @@ export class NativeSyncBackend implements SyncBackend {
   publish(publication: Publication): Promise<{ conflict: boolean }> {
     return invoke("sync_backend_publish", { config: this.config, publication });
   }
+}
+/** Bytes the configured sync mirror, local photos and the database occupy on this device. */
+export function fetchStorageUsage(config: SyncConfig): Promise<StorageUsage> {
+  return invoke("sync_storage_usage", { config });
 }
 /** One-time import jobs preserve old local photos without ever sending their
  * raw bytes or original paths to a backend. Missing files remain marked missing. */

@@ -8,7 +8,7 @@ import { t } from "../i18n";
 import { ExpenseBox } from "./ExpenseBox";
 import { Icon } from "./Icon";
 import { ItemChip } from "./ItemChip";
-import { registerModalDismiss } from "./modalLayer";
+import { useModalDismiss } from "./modalLayer";
 
 interface MonthDayPeekProps {
   /** The cell the badge was clicked in; the panel is anchored over it. */
@@ -55,10 +55,10 @@ export function MonthDayPeek({
   // Own the next Escape through the shared modal bus rather than a private
   // window listener, so a peek opened over an open dialog still closes exactly
   // one layer per press.
-  useEffect(() => registerModalDismiss((event) => {
+  useModalDismiss((event) => {
     event.preventDefault();
     onClose();
-  }), [onClose]);
+  });
 
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {

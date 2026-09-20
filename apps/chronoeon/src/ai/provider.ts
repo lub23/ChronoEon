@@ -1,4 +1,4 @@
-import type { AIChatMessage, AIProviderConfig, SmartCapturePrompt } from "@chronoeon/domain";
+import type { AIChatMessage, AIProviderConfig, AIToolCall, AIToolDefinition, SmartCapturePrompt } from "@chronoeon/domain";
 import { isTauri } from "../platform/desktop";
 
 export type AIBackend = "remote" | "local";
@@ -12,6 +12,7 @@ export interface AIProviderPreferences {
 
 export interface AICompletionResult {
   content: string;
+  toolCalls?: AIToolCall[];
   reasoningContent?: string;
   model?: string;
   promptTokens?: number;
@@ -21,6 +22,12 @@ export interface AICompletionResult {
 
 export interface AIModelInfo {
   id: string;
+}
+
+export interface AICompletionOptions {
+  tools?: AIToolDefinition[];
+  toolChoice?: "auto" | "none";
+  disableReasoning?: boolean;
 }
 
 export const AI_PROVIDER_STORAGE_KEY = "chronoeon.ai.provider.v1";
@@ -45,10 +52,10 @@ export const DEFAULT_AI_PROVIDER_PREFERENCES: AIProviderPreferences = {
   },
 };
 
-// Browser builds have no OS keychain. A key may be used for the current page,
-// but is deliberately held only in module memory: never localStorage, exports,
+// Browser builds have no OS keychain. A local-model key may be used for the
+// current page, but is deliberately held only in module memory: never localStorage, exports,
 // logs, URLs, or tracked source.
-let browserSessionApiKey = "";
+let browserLocalApiKey = "";
 
 function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -110,27 +117,27 @@ export function providerIsConfigured(preferences: AIProviderPreferences): boolea
   return preferences.enabled && Boolean(provider.baseUrl.trim() && provider.model.trim());
 }
 
-export async function hasSecureAIKey(): Promise<boolean> {
-  if (!isTauri()) return Boolean(browserSessionApiKey);
+export async function hasLocalAIKey(): Promise<boolean> {
+  if (!isTauri()) return Boolean(browserLocalApiKey);
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<boolean>("ai_api_key_status");
+  return invoke<boolean>("local_ai_api_key_status");
 }
 
-export async function saveSecureAIKey(value: string): Promise<void> {
+export async function saveLocalAIKey(value: string): Promise<void> {
   const normalized = value.trim();
   if (!isTauri()) {
-    browserSessionApiKey = normalized;
+    browserLocalApiKey = normalized;
     return;
   }
   const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("set_ai_api_key", { value: normalized });
+  await invoke("set_local_ai_api_key", { value: normalized });
 }
 
-export async function clearSecureAIKey(): Promise<void> {
-  browserSessionApiKey = "";
+export async function clearLocalAIKey(): Promise<void> {
+  browserLocalApiKey = "";
   if (!isTauri()) return;
   const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("clear_ai_api_key");
+  await invoke("clear_local_ai_api_key");
 }
 
 function completionContent(payload: unknown): string {
@@ -161,7 +168,7 @@ async function browserCompletion(
   messages: AIChatMessage[],
   responseSchema?: Record<string, unknown>,
   signal?: AbortSignal,
-  disableReasoning = false,
+  options?: AICompletionOptions,
 ): Promise<AICompletionResult> {
   const endpoint = `${normalizeAIBaseUrl(provider.baseUrl)}/chat/completions`;
   const body: Record<string, unknown> = {
@@ -172,7 +179,11 @@ async function browserCompletion(
     max_tokens: provider.maxTokens ?? 1600,
   };
   if (responseSchema) body.response_format = { type: "json_schema", json_schema: { name: "chronoeon_entries", strict: true, schema: responseSchema } };
-  if (disableReasoning) {
+  if (options?.tools?.length) {
+    body.tools = options.tools;
+    body.tool_choice = options.toolChoice ?? "auto";
+  }
+  if (options?.disableReasoning) {
     body.chat_template_kwargs = { enable_thinking: false };
   }
   // Browser fetch has no portable request timeout in older WebViews. Use one
@@ -191,7 +202,9 @@ async function browserCompletion(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
-      ...(browserSessionApiKey ? { Authorization: `Bearer ${browserSessionApiKey}` } : {}),
+      ...(provider.kind === "local-openai-compatible" && browserLocalApiKey
+        ? { Authorization: `Bearer ${browserLocalApiKey}` }
+        : {}),
     },
     body: JSON.stringify(requestBody),
   });
@@ -214,9 +227,12 @@ async function browserCompletion(
     const reasoningContent = completionReasoning(payload);
     let content = completionContent(payload);
     if (!content && reasoningContent) content = reasoningContent;
-    if (!content) throw new Error("AI endpoint returned an empty message");
+    const rawToolCalls = payload.choices?.[0]?.message?.tool_calls;
+    const toolCalls = Array.isArray(rawToolCalls) ? rawToolCalls as AIToolCall[] : undefined;
+    if (!content && !toolCalls?.length) throw new Error("AI endpoint returned an empty message");
     return {
       content,
+      toolCalls,
       reasoningContent,
       model: typeof payload.model === "string" ? payload.model : undefined,
       promptTokens: payload.usage?.prompt_tokens,
@@ -250,21 +266,23 @@ export async function requestAICompletion(
   messages: AIChatMessage[],
   responseSchema?: Record<string, unknown>,
   signal?: AbortSignal,
-  options?: { disableReasoning?: boolean },
+  options?: AICompletionOptions,
 ): Promise<AICompletionResult> {
   normalizeAIBaseUrl(provider.baseUrl);
   if (!provider.model.trim()) throw new Error("AI model is empty");
   for (let attempt = 0; ; attempt++) {
     if (signal?.aborted) throw new DOMException("Request cancelled", "AbortError");
     try {
-      if (!isTauri()) return await browserCompletion(provider, messages, responseSchema, signal, options?.disableReasoning ?? false);
+      if (!isTauri()) return await browserCompletion(provider, messages, responseSchema, signal, options);
       const { invoke } = await import("@tauri-apps/api/core");
       if (signal?.aborted) throw new DOMException("Request cancelled", "AbortError");
       return await withAbort(invoke<AICompletionResult>("ai_chat_completion", {
         request: {
           baseUrl: provider.baseUrl, model: provider.model, messages, responseSchema,
           temperature: provider.temperature, maxTokens: provider.maxTokens, timeoutMs: provider.timeoutMs,
-          useApiKey: provider.kind === "openai-compatible", disableReasoning: options?.disableReasoning ?? false,
+          useApiKey: provider.kind === "local-openai-compatible",
+          tools: options?.tools, toolChoice: options?.toolChoice ?? "auto",
+          disableReasoning: options?.disableReasoning ?? false,
         },
       }), signal);
     } catch (error) {
@@ -279,7 +297,9 @@ export async function fetchAIModels(provider: AIProviderConfig, signal?: AbortSi
   if (!isTauri()) {
     const response = await fetch(endpoint, {
       signal,
-      headers: browserSessionApiKey ? { Authorization: `Bearer ${browserSessionApiKey}` } : {},
+      headers: provider.kind === "local-openai-compatible" && browserLocalApiKey
+        ? { Authorization: `Bearer ${browserLocalApiKey}` }
+        : {},
     });
     const payload = await response.json().catch(() => ({})) as any;
     if (!response.ok) throw new Error(`AI endpoint returned ${response.status}: ${String(payload?.error?.message ?? response.statusText).slice(0, 400)}`);
@@ -289,7 +309,7 @@ export async function fetchAIModels(provider: AIProviderConfig, signal?: AbortSi
   return withAbort(invoke<AIModelInfo[]>("ai_list_models", {
     request: {
       baseUrl: provider.baseUrl,
-      useApiKey: provider.kind === "openai-compatible",
+      useApiKey: provider.kind === "local-openai-compatible",
       timeoutMs: provider.timeoutMs,
     },
   }), signal);

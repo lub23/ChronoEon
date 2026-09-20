@@ -16,7 +16,7 @@ import {
 } from "date-fns";
 import { enUS, zhCN } from "date-fns/locale";
 import type { ChronoEonSettings, Locale } from "../domain/entry";
-import { registerModalDismiss } from "./modalLayer";
+import { useModalDismiss } from "./modalLayer";
 import { Icon } from "./Icon";
 
 interface PickerPosition {
@@ -89,13 +89,10 @@ function usePickerSurface(
     };
   }, [onClose, open, options.align, options.preferredWidth]);
 
-  useEffect(() => {
-    if (!open) return;
-    return registerModalDismiss((event) => {
-      event.preventDefault();
-      onClose();
-    });
-  }, [onClose, open]);
+  useModalDismiss((event) => {
+    event.preventDefault();
+    onClose();
+  }, open);
 
   return { position, placed };
 }

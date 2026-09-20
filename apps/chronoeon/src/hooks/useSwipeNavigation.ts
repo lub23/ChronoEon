@@ -5,6 +5,7 @@ import { isChipDragActive } from "../components/dragGesture";
 
 export const VIEW_ORDER: AppView[] = ["agenda", "day", "week", "month", "ideas", "insights"];
 const MOTION_MS = 200;
+const MIN_MOTION_MS = 110;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 /** A scroller with room owns the WHOLE gesture. Reaching its edge never throws
@@ -71,6 +72,7 @@ export function useSwipeNavigation(options: Options) {
     transitionCleanup.current = undefined;
     pagerRef.current?.classList.remove("is-settling", "is-swiping");
     pagerRef.current?.style.removeProperty("--page-offset");
+    pagerRef.current?.style.removeProperty("--page-motion");
     setPreview(null);
     busy.current = false;
     drainQueue();
@@ -79,6 +81,12 @@ export function useSwipeNavigation(options: Options) {
     const pager = pagerRef.current;
     const extent = (target.axis === "y" ? pager?.clientHeight : pager?.clientWidth) ?? 0;
     busy.current = true;
+    // Like a launcher, the remaining distance sets the time: a page released
+    // near its rest position lands quickly, a full programmatic switch takes
+    // the whole duration, and a cancelled short drag snaps back at once.
+    const offset = Math.abs(parseFloat(pager?.style.getPropertyValue("--page-offset") || "0")) || 0;
+    const remaining = commit ? Math.max(0, extent - offset) : offset;
+    const motion = extent ? clamp(Math.round(duration() * (0.35 + 0.65 * remaining / extent)), MIN_MOTION_MS, duration()) : 0;
     const done = () => {
       clearTimeout(timer.current);
       transitionCleanup.current?.();
@@ -93,13 +101,14 @@ export function useSwipeNavigation(options: Options) {
     };
     if (!pager || !extent || !duration()) { done(); return; }
     pager.classList.add("is-settling");
+    pager.style.setProperty("--page-motion", motion + "ms");
     pager.style.setProperty("--page-offset", commit ? (-target.side * extent) + "px" : "0px");
     const ended = (event: TransitionEvent) => {
       if (event.propertyName === "transform" && event.target instanceof Element && event.target.matches('[data-position="current"]')) done();
     };
     pager.addEventListener("transitionend", ended);
     transitionCleanup.current = () => pager.removeEventListener("transitionend", ended);
-    timer.current = setTimeout(done, MOTION_MS + 40);
+    timer.current = setTimeout(done, motion + 40);
   }, [resetPage]);
   const selectView = useCallback((view: AppView) => {
     const current = latest.current;

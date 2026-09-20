@@ -13,7 +13,7 @@ use tauri::Manager;
 
 pub mod attachments;
 pub mod sync;
-use sync::{sync_backend_fetch, sync_backend_publish};
+use sync::{sync_backend_fetch, sync_backend_publish, sync_storage_usage};
 
 const MAX_ATTACHMENT_BYTES: u64 = 16 * 1024 * 1024;
 /// Single-file text import limit; mirrors the front end's 20 MB guard.
@@ -37,13 +37,19 @@ struct AtomicWriteOptions {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const AI_KEYRING_SERVICE: &str = "app.chronoeon.desktop";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const AI_KEYRING_ACCOUNT: &str = "openai-compatible-api-key";
+const AI_KEYRING_ACCOUNT: &str = "local-openai-compatible-api-key";
 const MAX_AI_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Deserialize, Serialize, Clone)]
 struct AiChatMessage {
     role: String,
     content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -53,6 +59,8 @@ struct AiChatRequest {
     model: String,
     messages: Vec<AiChatMessage>,
     response_schema: Option<serde_json::Value>,
+    tools: Option<serde_json::Value>,
+    tool_choice: Option<String>,
     temperature: Option<f64>,
     max_tokens: Option<u32>,
     timeout_ms: Option<u64>,
@@ -77,6 +85,7 @@ struct AiModel {
 #[serde(rename_all = "camelCase")]
 struct AiChatResponse {
     content: String,
+    tool_calls: Option<serde_json::Value>,
     reasoning_content: Option<String>,
     model: Option<String>,
     prompt_tokens: Option<u64>,
@@ -544,12 +553,12 @@ async fn inspect_attachments(app: tauri::AppHandle, hashes: Vec<String>) -> Resu
 }
 
 #[tauri::command]
-fn ai_api_key_status() -> Result<bool, String> {
+fn local_ai_api_key_status() -> Result<bool, String> {
     Ok(read_ai_api_key()?.is_some())
 }
 
 #[tauri::command]
-fn set_ai_api_key(value: String) -> Result<(), String> {
+fn set_local_ai_api_key(value: String) -> Result<(), String> {
     #[cfg(desktop)]
     {
         let entry = ai_keyring_entry()?;
@@ -571,8 +580,8 @@ fn set_ai_api_key(value: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn clear_ai_api_key() -> Result<(), String> {
-    set_ai_api_key(String::new())
+fn clear_local_ai_api_key() -> Result<(), String> {
+    set_local_ai_api_key(String::new())
 }
 
 async fn send_ai_request(
@@ -597,6 +606,10 @@ async fn send_ai_request(
             });
         }
     }
+    if let Some(tools) = request.tools.clone() {
+        body["tools"] = tools;
+        body["tool_choice"] = serde_json::json!(request.tool_choice.clone().unwrap_or_else(|| "auto".into()));
+    }
     if request.disable_reasoning.unwrap_or(false) {
         body["chat_template_kwargs"] = serde_json::json!({ "enable_thinking": false });
     }
@@ -616,8 +629,9 @@ async fn ai_chat_completion(request: AiChatRequest) -> Result<AiChatResponse, St
     if request.messages.is_empty()
         || request.messages.len() > 32
         || request.messages.iter().any(|message| {
-            !matches!(message.role.as_str(), "system" | "user" | "assistant")
+            !matches!(message.role.as_str(), "system" | "user" | "assistant" | "tool")
                 || message.content.len() > 64_000
+                || (message.role == "tool" && message.tool_call_id.as_deref().unwrap_or_default().is_empty())
         })
     {
         return Err("AI messages are invalid or too large".into());
@@ -629,10 +643,9 @@ async fn ai_chat_completion(request: AiChatRequest) -> Result<AiChatResponse, St
         .timeout(timeout)
         .build()
         .map_err(|error| format!("Could not create AI client: {error}"))?;
-    // Keyless compatible endpoints are valid. If the desktop has no unlocked
-    // credential service, continue without a key rather than making all local/
-    // trusted-network models unusable; saving a requested key still reports the
-    // credential-store error explicitly.
+    // Local endpoints may require Bearer auth; keyless compatible endpoints
+    // remain valid. If no key is stored, continue without one rather than
+    // making trusted-network models unusable.
     let api_key = if request.use_api_key.unwrap_or(true) { read_ai_api_key().ok().flatten() } else { None };
     let wants_schema = request.response_schema.is_some();
     let mut schema_fallback = false;
@@ -653,23 +666,26 @@ async fn ai_chat_completion(request: AiChatRequest) -> Result<AiChatResponse, St
     }
     let payload: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("AI endpoint returned invalid JSON: {error}"))?;
-    let direct_content = payload.pointer("/choices/0/message/content")
+    let message = payload.pointer("/choices/0/message").cloned().unwrap_or_default();
+    let tool_calls = message.get("tool_calls").filter(|value| value.as_array().is_some_and(|items| !items.is_empty())).cloned();
+    let direct_content = message.get("content")
         .and_then(serde_json::Value::as_str)
         .or_else(|| payload.pointer("/choices/0/text").and_then(serde_json::Value::as_str))
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let reasoning = payload.pointer("/choices/0/message/reasoning_content")
+    let reasoning = message.get("reasoning_content")
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
     // Reasoning models can spend the whole budget in the hidden channel; keep
     // the answer and thinking separate instead of passing reasoning as prose.
     let content = direct_content.or(reasoning).unwrap_or("").to_string();
-    if content.is_empty() {
+    if content.is_empty() && tool_calls.is_none() {
         return Err("AI endpoint returned an empty message".into());
     }
     Ok(AiChatResponse {
         content,
+        tool_calls,
         reasoning_content: reasoning.map(str::to_string),
         model: payload.get("model").and_then(serde_json::Value::as_str).map(str::to_string),
         prompt_tokens: payload.pointer("/usage/prompt_tokens").and_then(serde_json::Value::as_u64),
@@ -837,9 +853,9 @@ pub fn run() {
             compress_photo,
             compress_photo_data,
             inspect_attachments,
-            ai_api_key_status,
-            set_ai_api_key,
-            clear_ai_api_key,
+            local_ai_api_key_status,
+            set_local_ai_api_key,
+            clear_local_ai_api_key,
             ai_chat_completion,
             ai_list_models,
             device::device_location,
@@ -847,7 +863,8 @@ pub fn run() {
             device::background_command,
             reverse_geocode,
             sync_backend_fetch,
-            sync_backend_publish
+            sync_backend_publish,
+            sync_storage_usage
         ])
         .run(tauri::generate_context!())
         .expect("error while running ChronoEon");

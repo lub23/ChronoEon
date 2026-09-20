@@ -156,6 +156,7 @@ describe("AI chat context selection", () => {
     expect(host.textContent).toContain("Recent idea");
     expect(host.textContent).not.toContain("Older idea");
 
+    act(() => { host.querySelector<HTMLInputElement>(".chat-context-item input")!.click(); });
     act(() => { host.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
     const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;

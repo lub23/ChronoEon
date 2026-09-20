@@ -1,11 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MotionPresence, createMotionPortal as createPortal } from "./MotionPresence";
 import { useConfirmDialog } from "./ConfirmDialog";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import type { Entry, Locale } from "../domain/entry";
 import type { SyncConflict } from "@chronoeon/storage";
 import type { useSyncService } from "../sync/useSyncService";
-import { syncConfigured, type SyncConfig, type SyncMode } from "../sync/types";
+import { formatBytes, syncConfigured, type SyncConfig, type SyncMode } from "../sync/types";
 import { localeTag, t, type MessageKey } from "../i18n";
 import { Icon } from "./Icon";
 
@@ -47,6 +47,9 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
     } catch { setNotice(t("syncRebuildFailed", locale)); }
     finally { rebuildPending.current = false; setRebuilding(false); }
   }
+  // Storage figures are measured when the panel opens and after each sync run.
+  const { refreshUsage, available } = service;
+  useEffect(() => { if (available) void refreshUsage(); }, [available, refreshUsage, service.status?.lastSuccess]);
   const nextSnapshot = service.status?.nextSnapshotAt;
   const snapshotDue = nextSnapshot && Date.parse(nextSnapshot) <= Date.now();
   const error = service.result && !service.result.ok ? service.result : null;
@@ -93,6 +96,12 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
     </div>
     <MotionPresence>{dialog && createPortal(dialog, document.body)}</MotionPresence>
     {service.status?.lastSuccess && <p className="settings-footnote">{t("syncLastSuccess", locale)}: {new Date(service.status.lastSuccess).toLocaleString(localeTag[locale])}</p>}
+    {service.usage && <dl className="sync-usage" aria-label={t("syncStorageUsage", locale)}>
+      <div><dt>{t(config.mode === "git" ? "syncStorageRepository" : "syncStorageRepositoryWebdav", locale)}</dt><dd>{formatBytes(service.usage.syncCacheBytes, locale)}</dd></div>
+      <div><dt>{t("syncStoragePhotos", locale)}</dt><dd>{formatBytes(service.usage.attachmentBytes, locale)}</dd></div>
+      <div><dt>{t("syncStorageDatabase", locale)}</dt><dd>{formatBytes(service.usage.databaseBytes, locale)}</dd></div>
+      <div className="sync-usage-total"><dt>{t("syncStorageTotal", locale)}</dt><dd>{formatBytes(service.usage.syncCacheBytes + service.usage.attachmentBytes + service.usage.databaseBytes, locale)}</dd></div>
+    </dl>}
     {error && <div role="status" className={error.code === "SYNC_OFFLINE" ? "settings-footnote" : "sync-error"}>
       <p>{t(errors[error.code] ?? "syncFailedSafe", locale)}</p>
       {error.code !== "SYNC_OFFLINE" && <details><summary>{t("syncErrorDetails", locale)}</summary><pre>{error.message}</pre></details>}

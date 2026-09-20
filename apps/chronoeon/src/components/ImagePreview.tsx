@@ -4,7 +4,7 @@ import type { Locale } from "../domain/entry";
 import { t } from "../i18n";
 import { resolveAttachmentUrl } from "../platform/attachments";
 import { Icon } from "./Icon";
-import { registerModalDismiss } from "./modalLayer";
+import { useModalDismiss } from "./modalLayer";
 
 interface ImagePreviewProps {
   locale: Locale;
@@ -38,10 +38,10 @@ export function ImagePreview({ locale, items, index, onIndexChange, onClose }: I
     return () => { disposed = true; };
   }, [items, urls]);
 
-  useEffect(() => registerModalDismiss((event) => {
+  useModalDismiss((event) => {
     event.preventDefault();
     onClose();
-  }), [onClose]);
+  });
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

@@ -171,6 +171,37 @@ pub fn publish_files(config: &TransportConfig, root: &Path, images: &Path, publi
     work().map_err(|error| redact(error, config))
 }
 
+/// Disk footprint of everything synchronization keeps on this device. The
+/// sync cache is the bare Git mirror for the configured remote (WebDAV keeps
+/// no local mirror); photos and the database are shared by every backend.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageUsage { sync_cache_bytes: u64, attachment_bytes: u64, database_bytes: u64 }
+
+fn directory_bytes(path: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(path) else { return 0; };
+    entries.flatten().map(|entry| {
+        // Symlinks are never followed: a cache must not count (or loop over) the rest of the disk.
+        let Ok(metadata) = entry.metadata() else { return 0; };
+        if metadata.is_dir() { directory_bytes(&entry.path()) } else if metadata.is_file() { metadata.len() } else { 0 }
+    }).sum()
+}
+
+#[tauri::command]
+pub async fn sync_storage_usage(app: tauri::AppHandle, config: TransportConfig) -> Result<StorageUsage, String> {
+    let root = cache_root(&app, &config)?;
+    let local = app.path().app_local_data_dir().map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let database_bytes = ["chronoeon.db", "chronoeon.db-wal", "chronoeon.db-shm"].iter()
+            .filter_map(|name| fs::metadata(local.join(name)).ok()).map(|metadata| metadata.len()).sum();
+        StorageUsage {
+            sync_cache_bytes: directory_bytes(&root),
+            attachment_bytes: directory_bytes(&local.join("attachments")),
+            database_bytes,
+        }
+    }).await.map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub async fn sync_backend_fetch(app: tauri::AppHandle, config: TransportConfig, known: BTreeMap<String,String>) -> Result<FetchResult, String> {
     let root = cache_root(&app, &config)?; let images = super::local_attachments_root(&app)?;
@@ -184,6 +215,18 @@ pub async fn sync_backend_publish(app: tauri::AppHandle, config: TransportConfig
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn measures_cache_folders_without_following_links() {
+        let root = std::env::temp_dir().join(format!("chronoeon-usage-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("objects/aa")).unwrap();
+        fs::write(root.join("objects/aa/one"), [0u8; 1200]).unwrap();
+        fs::write(root.join("HEAD"), b"ref: refs/heads/main
+").unwrap();
+        assert_eq!(directory_bytes(&root), 1200 + 21);
+        assert_eq!(directory_bytes(&root.join("missing")), 0);
+        fs::remove_dir_all(&root).unwrap();
+    }
     #[test]
     fn only_compressed_logs_snapshots_and_bounded_webp_are_transportable() {
         assert!(!valid_document_path("data/chronoeon.db")); assert!(!valid_document_path("sync/../../secret.jsonl.zst"));

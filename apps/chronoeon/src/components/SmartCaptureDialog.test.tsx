@@ -214,3 +214,80 @@ describe("compact capture presentation", () => {
     expect(host.querySelectorAll(".smart-capture-when > .smart-capture-when-field")).toHaveLength(4);
   });
 });
+
+describe("autofill from similar past items", () => {
+  const settingsWithHealth = {
+    ...DEFAULT_CHRONOEON_SETTINGS,
+    calendars: DEFAULT_CHRONOEON_SETTINGS.calendars.map((calendar) => ({
+      ...calendar,
+      categories: [...calendar.categories, { id: "health", name: "健康", color: "#2f8f5b" }],
+    })),
+  };
+  const history = [
+    { kind: "event" as const, title: "牙医复诊", category: "health", location: "口腔医院", date: "2026-09-01" },
+    { kind: "event" as const, title: "牙医复诊", category: "health", location: "口腔医院", date: "2026-08-20" },
+  ];
+  it("borrows category and location from a similar item and marks both as guesses", async () => {
+    act(() => {
+      root.render(
+        <SmartCaptureDialog
+          raw="明天 14:00 牙医复诊"
+          locale="zh"
+          settings={settingsWithHealth}
+          history={history}
+          aiPreferences={offlinePreferences}
+          onClose={() => undefined}
+          onConfigureAI={() => undefined}
+          onConfirm={async () => true}
+        />,
+      );
+    });
+    const card = host.querySelector<HTMLElement>(".smart-capture-card")!;
+    expect(card.querySelector(".smart-capture-place.is-autofilled")?.textContent).toContain("口腔医院");
+    expect(card.querySelector(".smart-capture-category.is-autofilled")).not.toBeNull();
+    expect(card.querySelector(".smart-capture-issues .autofill")?.textContent).toContain("分类和地点参考此前类似条目自动填入");
+
+    // Editing the guessed location makes it the user's own value.
+    await act(async () => { card.querySelector<HTMLButtonElement>(".smart-capture-summary")!.click(); });
+    const location = [...host.querySelectorAll<HTMLInputElement>(".smart-capture-editor input")].find((input) => input.value === "口腔医院")!;
+    expect(location.closest("label")?.className).toContain("is-autofilled");
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => { setValue.call(location, "家"); location.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(location.closest("label")?.className).not.toContain("is-autofilled");
+    expect(host.querySelector(".smart-capture-issues .autofill")?.textContent).toContain("分类参考此前类似条目自动填入");
+  });
+
+  it("does not guess a location when the setting is off or the text names one", () => {
+    act(() => {
+      root.render(
+        <SmartCaptureDialog
+          raw="明天 14:00 在诊所 牙医复诊"
+          locale="zh"
+          settings={settingsWithHealth}
+          history={history}
+          aiPreferences={offlinePreferences}
+          onClose={() => undefined}
+          onConfigureAI={() => undefined}
+          onConfirm={async () => true}
+        />,
+      );
+    });
+    expect(host.querySelector(".smart-capture-place")?.textContent).toContain("诊所");
+    expect(host.querySelector(".smart-capture-place.is-autofilled")).toBeNull();
+    act(() => {
+      root.render(
+        <SmartCaptureDialog
+          raw="明天 14:00 牙医复诊"
+          locale="zh"
+          settings={{ ...settingsWithHealth, locationAutofill: false }}
+          history={history}
+          aiPreferences={offlinePreferences}
+          onClose={() => undefined}
+          onConfigureAI={() => undefined}
+          onConfirm={async () => true}
+        />,
+      );
+    });
+    expect(host.querySelector(".smart-capture-place")).toBeNull();
+  });
+});

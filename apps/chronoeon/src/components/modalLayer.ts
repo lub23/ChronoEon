@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 type DismissHandler = (event: KeyboardEvent) => void;
 
 /**
@@ -31,24 +33,47 @@ function dispatch(event: KeyboardEvent) {
 
 let installedBack = false;
 let historyDepth = 0;
-let suppressNextPop = false;
+/**
+ * Every programmatic `history.back()` issued while unregistering produces one
+ * asynchronous popstate. Several dialogs can unregister before the first of
+ * those events arrives (a dialog closing while its successor opens, or a
+ * re-render chain), so the pending count is tracked rather than a flag: with
+ * a single boolean the second popstate looked like a real system back and
+ * closed the dialog that had just opened.
+ */
+let suppressedPops = 0;
 
 function dispatchBack() {
   const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
   dispatch(event);
 }
 
+/**
+ * A handler may keep its surface open (a dirty composer asks first, and the
+ * confirm registers on top). The entry the system back consumed is restored
+ * after React has committed, so every surface still on the bus is again backed
+ * by a history entry and the next back reaches the guard instead of leaving
+ * the activity.
+ */
+function restoreConsumedEntries() {
+  while (queue.length > historyDepth) {
+    window.history.pushState({ chronoeonModal: Date.now() }, "");
+    historyDepth += 1;
+  }
+}
+
 function installBackBus() {
   if (installedBack) return;
   installedBack = true;
   window.addEventListener("popstate", () => {
-    if (suppressNextPop) {
-      suppressNextPop = false;
+    if (suppressedPops > 0) {
+      suppressedPops -= 1;
       return;
     }
     if (historyDepth > 0) {
       historyDepth -= 1;
       dispatchBack();
+      window.setTimeout(restoreConsumedEntries, 0);
     }
   });
 }
@@ -76,7 +101,7 @@ export function registerModalDismiss(handler: DismissHandler): () => void {
     if (index >= 0) queue.splice(index, 1);
     if (historyDepth > 0 && typeof window.history?.back === "function") {
       historyDepth -= 1;
-      suppressNextPop = true;
+      suppressedPops += 1;
       window.history.back();
     }
     if (queue.length === 0 && installed) {
@@ -84,4 +109,16 @@ export function registerModalDismiss(handler: DismissHandler): () => void {
       window.removeEventListener("keydown", dispatch, true);
     }
   };
+}
+
+/**
+ * Register once per mount and always run the latest handler. Dialogs used to
+ * list an inline `onClose` prop as an effect dependency, which re-registered
+ * on every parent render; on Android each re-registration is a history
+ * back/push pair, and a burst of them closed the surface that had just opened.
+ */
+export function useModalDismiss(handler: DismissHandler, active = true): void {
+  const latest = useRef(handler);
+  latest.current = handler;
+  useEffect(() => active ? registerModalDismiss((event) => latest.current(event)) : undefined, [active]);
 }

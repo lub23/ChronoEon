@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_AI_PROVIDER_PREFERENCES,
+  clearLocalAIKey,
   normalizeAIBaseUrl,
   normalizeAIProviderPreferences,
+  saveLocalAIKey,
   requestAICompletion,
   warmUpAIProvider,
 } from "./provider";
@@ -55,6 +57,63 @@ describe("OpenAI-compatible provider adapter", () => {
     );
     expect(result.content).toBe("Visible answer");
     expect(result.reasoningContent).toBe("Hidden reasoning");
+  });
+
+  it("sends the configured local key with Bearer Authorization", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "ok" } }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", { localStorage: { getItem: () => null, setItem: () => undefined } });
+    await saveLocalAIKey("local-secret");
+    const result = await requestAICompletion(
+      { ...DEFAULT_AI_PROVIDER_PREFERENCES.local, baseUrl: "http://127.0.0.1:8080/v1", model: "local-model" },
+      [{ role: "user", content: "test" }],
+    );
+    expect(result.content).toBe("ok");
+    const headers = new Headers(fetchMock.mock.calls[0][1].headers);
+    expect(headers.get("Authorization")).toBe("Bearer local-secret");
+    await requestAICompletion(
+      { ...DEFAULT_AI_PROVIDER_PREFERENCES.remote, baseUrl: "https://example.test/v1", model: "remote-model" },
+      [{ role: "user", content: "test" }],
+    );
+    const remoteHeaders = new Headers(fetchMock.mock.calls[1][1].headers);
+    expect(remoteHeaders.get("Authorization")).toBeNull();
+    await clearLocalAIKey();
+  });
+
+  it("sends model-selected tools and preserves an empty tool-call message", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: "",
+            tool_calls: [{ id: "call-1", type: "function", function: { name: "search_entries", arguments: "{}" } }],
+          },
+        }],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", { localStorage: { getItem: () => null, setItem: () => undefined } });
+    const tools = [{
+      type: "function" as const,
+      function: { name: "search_entries", description: "Search", parameters: { type: "object" } },
+    }];
+    const result = await requestAICompletion(
+      { ...DEFAULT_AI_PROVIDER_PREFERENCES.local, baseUrl: "http://127.0.0.1:8080/v1", model: "local-model" },
+      [{ role: "user", content: "test" }],
+      undefined,
+      undefined,
+      { tools },
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.tools).toEqual(tools);
+    expect(body.tool_choice).toBe("auto");
+    expect(result.toolCalls?.[0]).toMatchObject({ id: "call-1", function: { name: "search_entries" } });
   });
 });
 

@@ -10,7 +10,7 @@ let host: HTMLDivElement, root: Root;
 const success = { ok: true as const, sent: 0, received: 0, conflicts: 0, snapshotCreated: true, attachmentCount: 0 };
 function service(patch: Partial<Service> = {}): Service {
   return {
-    available: true, busy: false, result: null, conflicts: [], missingAttachments: [],
+    available: true, busy: false, result: null, conflicts: [], missingAttachments: [], usage: null, refreshUsage: vi.fn(async () => {}),
     status: { pending: 0, conflicts: 0, failures: 0, nextAttempt: 0, lastSuccess: "2026-09-09T08:00:00.000Z", lastError: null, missingAttachments: 0, lastSnapshotAt: "2026-09-09T08:00:00.000Z", nextSnapshotAt: "2026-09-16T08:00:00.000Z" },
     run: vi.fn(async () => success), rebuildSnapshot: vi.fn(async () => success), resolve: vi.fn(async () => {}), removeMissingAttachment: vi.fn(async () => {}), clearMissingAttachments: vi.fn(async () => {}), ...patch,
   };
@@ -74,5 +74,25 @@ describe("snapshot rebuild settings", () => {
 
   it("does not invent a deadline before the first successful snapshot", () => {
     act(() => render(service({ status: null }))); expect(host.querySelector("time")).toBeNull(); expect(host.textContent).toContain("首次成功同步时创建");
+  });
+});
+
+describe("storage usage", () => {
+  it("measures when the panel is available and shows human sizes", async () => {
+    const refreshUsage = vi.fn(async () => {});
+    const sync = service({ refreshUsage, usage: { syncCacheBytes: 12_582_912, attachmentBytes: 2_048, databaseBytes: 1_048_576 } });
+    await act(async () => render(sync, "zh"));
+    expect(refreshUsage).toHaveBeenCalledTimes(1);
+    const usage = host.querySelector(".sync-usage")!;
+    expect(usage.textContent).toContain("同步仓库（本地镜像）");
+    expect(usage.textContent).toContain("12 MB");
+    expect(usage.textContent).toContain("2 KB");
+    expect(usage.querySelector(".sync-usage-total")?.textContent).toContain("13 MB");
+  });
+  it("does not measure or render figures while sync is unconfigured", async () => {
+    const refreshUsage = vi.fn(async () => {});
+    await act(async () => render(service({ refreshUsage, available: false }), "en", false));
+    expect(refreshUsage).not.toHaveBeenCalled();
+    expect(host.querySelector(".sync-usage")).toBeNull();
   });
 });

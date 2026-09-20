@@ -48,7 +48,7 @@ interface SettingsDialogProps {
   miniShortcutStatus: "registered" | "conflict" | "unsupported" | "off";
   initialSection?: SettingsSection;
   aiPreferences: AIProviderPreferences;
-  aiKeyStored: boolean;
+  localKeyStored: boolean;
   onAIPreferencesChange: (preferences: AIProviderPreferences) => void;
   onSaveAIKey: (value: string) => Promise<void>;
   onClearAIKey: () => Promise<void>;
@@ -120,7 +120,7 @@ export function SettingsDialog({
   miniShortcutStatus,
   initialSection = "general",
   aiPreferences,
-  aiKeyStored,
+  localKeyStored,
   onAIPreferencesChange,
   onSaveAIKey,
   onClearAIKey,
@@ -487,7 +487,7 @@ export function SettingsDialog({
               )}
             </>}
 
-            {section === "ai" && <AISettingsPanel locale={locale} preferences={aiPreferences} keyStored={aiKeyStored} onChange={onAIPreferencesChange} onSaveKey={onSaveAIKey} onClearKey={onClearAIKey} onTest={onTestAI} />}
+            {section === "ai" && <AISettingsPanel locale={locale} preferences={aiPreferences} localKeyStored={localKeyStored} onChange={onAIPreferencesChange} onSaveKey={onSaveAIKey} onClearKey={onClearAIKey} onTest={onTestAI} />}
 
             {section === "data" && <>
               <SectionHeading title={t("settingsData", locale)} detail={t("syncDataNote", locale)} />

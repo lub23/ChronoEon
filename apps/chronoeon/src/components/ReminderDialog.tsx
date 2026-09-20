@@ -3,7 +3,7 @@ import { format, parseISO } from "date-fns";
 import type { DueReminder, Entry, Locale } from "@chronoeon/domain";
 import { formatEntryTime } from "@chronoeon/domain";
 import { categoryLabel, compositeCategoryLabel, t } from "../i18n";
-import { registerModalDismiss } from "./modalLayer";
+import { useModalDismiss } from "./modalLayer";
 import { Icon } from "./Icon";
 
 interface ReminderDialogProps {
@@ -14,10 +14,10 @@ interface ReminderDialogProps {
 }
 
 export function ReminderDialog({ reminders, locale, onClose, onOpen }: ReminderDialogProps) {
-  useEffect(() => registerModalDismiss((event) => {
+  useModalDismiss((event) => {
     event.preventDefault();
     onClose();
-  }), [onClose]);
+  });
 
   return (
     <div className="confirm-backdrop reminder-backdrop" role="presentation" onMouseDown={(event) => {
