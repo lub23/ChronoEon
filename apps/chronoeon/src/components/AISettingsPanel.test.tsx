@@ -28,9 +28,12 @@ function render(local: boolean) {
         locale="zh"
         preferences={{ ...DEFAULT_AI_PROVIDER_PREFERENCES, enabled: true, backend: local ? "local" : "remote" }}
         localKeyStored={false}
+        remoteKeyStored={false}
         onChange={() => undefined}
-        onSaveKey={vi.fn(async () => undefined)}
-        onClearKey={vi.fn(async () => undefined)}
+        onSaveLocalKey={vi.fn(async () => undefined)}
+        onClearLocalKey={vi.fn(async () => undefined)}
+        onSaveRemoteKey={vi.fn(async () => undefined)}
+        onClearRemoteKey={vi.fn(async () => undefined)}
         onTest={vi.fn(async () => undefined)}
       />,
     );
@@ -38,9 +41,10 @@ function render(local: boolean) {
 }
 
 describe("AI provider credentials", () => {
-  it("shows the local key input only for the local provider", async () => {
+  it("shows the provider-specific key input", async () => {
     render(false);
-    expect(host.querySelector("input[type='password']")).toBeNull();
+    expect(host.querySelector<HTMLInputElement>("input[type='password']")?.placeholder).toBe("X-Api-Key");
+    expect(host.textContent).toContain("远程 API 密钥");
 
     render(true);
     const key = host.querySelector<HTMLInputElement>("input[type='password']")!;
@@ -50,16 +54,19 @@ describe("AI provider credentials", () => {
   });
 
   it("saves a drafted local key and clears the draft", async () => {
-    const onSaveKey = vi.fn(async () => undefined);
+    const onSaveLocalKey = vi.fn(async () => undefined);
     act(() => {
       root.render(
         <AISettingsPanel
           locale="zh"
           preferences={{ ...DEFAULT_AI_PROVIDER_PREFERENCES, enabled: true, backend: "local" }}
           localKeyStored={false}
+          remoteKeyStored={false}
           onChange={() => undefined}
-          onSaveKey={onSaveKey}
-          onClearKey={vi.fn(async () => undefined)}
+          onSaveLocalKey={onSaveLocalKey}
+          onClearLocalKey={vi.fn(async () => undefined)}
+          onSaveRemoteKey={vi.fn(async () => undefined)}
+          onClearRemoteKey={vi.fn(async () => undefined)}
           onTest={vi.fn(async () => undefined)}
         />,
       );
@@ -69,7 +76,7 @@ describe("AI provider credentials", () => {
     act(() => { setValue.call(key, "local-secret"); key.dispatchEvent(new Event("input", { bubbles: true })); });
     const save = [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("保存密钥"))!;
     await act(async () => { save.click(); });
-    expect(onSaveKey).toHaveBeenCalledWith("local-secret");
+    expect(onSaveLocalKey).toHaveBeenCalledWith("local-secret");
     expect(host.querySelector<HTMLInputElement>("input[type='password']")?.value).toBe("");
   });
 });

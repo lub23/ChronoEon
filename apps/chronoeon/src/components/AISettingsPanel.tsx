@@ -10,14 +10,20 @@ interface AISettingsPanelProps {
   locale: Locale;
   preferences: AIProviderPreferences;
   localKeyStored: boolean;
+  remoteKeyStored: boolean;
   onChange: (preferences: AIProviderPreferences) => void;
-  onSaveKey: (value: string) => Promise<void>;
-  onClearKey: () => Promise<void>;
+  onSaveLocalKey: (value: string) => Promise<void>;
+  onClearLocalKey: () => Promise<void>;
+  onSaveRemoteKey: (value: string) => Promise<void>;
+  onClearRemoteKey: () => Promise<void>;
   onTest: () => Promise<void>;
 }
 
-export function AISettingsPanel({ locale, preferences, localKeyStored, onChange, onSaveKey, onClearKey, onTest }: AISettingsPanelProps) {
-  const [keyDraft, setKeyDraft] = useState("");
+export function AISettingsPanel({
+  locale, preferences, localKeyStored, remoteKeyStored, onChange,
+  onSaveLocalKey, onClearLocalKey, onSaveRemoteKey, onClearRemoteKey, onTest,
+}: AISettingsPanelProps) {
+  const [keyDrafts, setKeyDrafts] = useState({ remote: "", local: "" });
   const [busy, setBusy] = useState<"key" | "test" | "models" | null>(null);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [models, setModels] = useState<AIModelInfo[] | null>(null);
@@ -31,12 +37,13 @@ export function AISettingsPanel({ locale, preferences, localKeyStored, onChange,
     setModels(null);
   };
 
-  async function saveKey() {
+  async function saveKey(kind: "remote" | "local") {
     setBusy("key");
     setResult(null);
     try {
-      await onSaveKey(keyDraft);
-      setKeyDraft("");
+      if (kind === "remote") await onSaveRemoteKey(keyDrafts.remote);
+      else await onSaveLocalKey(keyDrafts.local);
+      setKeyDrafts((current) => ({ ...current, [kind]: "" }));
       setResult({ ok: true, text: t("aiApiKeyStored", locale) });
     } catch (error) {
       setResult({ ok: false, text: error instanceof Error ? error.message : String(error) });
@@ -45,12 +52,13 @@ export function AISettingsPanel({ locale, preferences, localKeyStored, onChange,
     }
   }
 
-  async function clearKey() {
+  async function clearKey(kind: "remote" | "local") {
     setBusy("key");
     setResult(null);
     try {
-      await onClearKey();
-      setKeyDraft("");
+      if (kind === "remote") await onClearRemoteKey();
+      else await onClearLocalKey();
+      setKeyDrafts((current) => ({ ...current, [kind]: "" }));
     } catch (error) {
       setResult({ ok: false, text: error instanceof Error ? error.message : String(error) });
     } finally {
@@ -120,13 +128,23 @@ export function AISettingsPanel({ locale, preferences, localKeyStored, onChange,
             </button>
           </div>
         </label>
+        {preferences.backend === "remote" && (
+          <div className="settings-option ai-key-row">
+            <span className="settings-option-copy"><strong>{t("aiRemoteApiKey", locale)}</strong><small>{isTauri() ? t(remoteKeyStored ? "aiApiKeyStored" : "aiRemoteApiKeyMissing", locale) : t("aiRemoteApiKeySession", locale)}</small></span>
+            <div className="ai-key-controls">
+              <input type="password" value={keyDrafts.remote} onChange={(event) => setKeyDrafts((current) => ({ ...current, remote: event.target.value }))} placeholder={remoteKeyStored ? "••••••••" : "X-Api-Key"} autoComplete="new-password" />
+              <button type="button" className="secondary-button" disabled={busy !== null || !keyDrafts.remote.trim()} onClick={() => void saveKey("remote")}><Icon name="check" size={13} />{t("aiSaveKey", locale)}</button>
+              {(remoteKeyStored || keyDrafts.remote) && <button type="button" className="icon-button" disabled={busy !== null} onClick={() => void clearKey("remote")} title={t("aiClearKey", locale)} aria-label={t("aiClearKey", locale)}><Icon name="close" size={14} /></button>}
+            </div>
+          </div>
+        )}
         {preferences.backend === "local" && (
           <div className="settings-option ai-key-row">
-            <span className="settings-option-copy"><strong>{t("aiLocalApiKey", locale)}</strong><small>{isTauri() ? t(localKeyStored ? "aiApiKeyStored" : "aiApiKeyMissing", locale) : t("aiApiKeySession", locale)}</small></span>
+            <span className="settings-option-copy"><strong>{t("aiLocalApiKey", locale)}</strong><small>{isTauri() ? t(localKeyStored ? "aiApiKeyStored" : "aiLocalApiKeyMissing", locale) : t("aiLocalApiKeySession", locale)}</small></span>
             <div className="ai-key-controls">
-              <input type="password" value={keyDraft} onChange={(event) => setKeyDraft(event.target.value)} placeholder={localKeyStored ? "••••••••" : "Bearer api-key"} autoComplete="new-password" />
-              <button type="button" className="secondary-button" disabled={busy !== null || !keyDraft.trim()} onClick={() => void saveKey()}><Icon name="check" size={13} />{t("aiSaveKey", locale)}</button>
-              {(localKeyStored || keyDraft) && <button type="button" className="icon-button" disabled={busy !== null} onClick={() => void clearKey()} title={t("aiClearKey", locale)} aria-label={t("aiClearKey", locale)}><Icon name="close" size={14} /></button>}
+              <input type="password" value={keyDrafts.local} onChange={(event) => setKeyDrafts((current) => ({ ...current, local: event.target.value }))} placeholder={localKeyStored ? "••••••••" : "Bearer api-key"} autoComplete="new-password" />
+              <button type="button" className="secondary-button" disabled={busy !== null || !keyDrafts.local.trim()} onClick={() => void saveKey("local")}><Icon name="check" size={13} />{t("aiSaveKey", locale)}</button>
+              {(localKeyStored || keyDrafts.local) && <button type="button" className="icon-button" disabled={busy !== null} onClick={() => void clearKey("local")} title={t("aiClearKey", locale)} aria-label={t("aiClearKey", locale)}><Icon name="close" size={14} /></button>}
             </div>
           </div>
         )}

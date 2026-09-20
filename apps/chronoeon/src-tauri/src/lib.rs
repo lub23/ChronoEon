@@ -34,10 +34,12 @@ struct AtomicWriteOptions {
     backup_path: Option<String>,
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(desktop)]
 const AI_KEYRING_SERVICE: &str = "app.chronoeon.desktop";
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-const AI_KEYRING_ACCOUNT: &str = "local-openai-compatible-api-key";
+#[cfg(desktop)]
+const AI_REMOTE_KEYRING_ACCOUNT: &str = "openai-compatible-api-key";
+#[cfg(desktop)]
+const AI_LOCAL_KEYRING_ACCOUNT: &str = "local-openai-compatible-api-key";
 const MAX_AI_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -64,7 +66,7 @@ struct AiChatRequest {
     temperature: Option<f64>,
     max_tokens: Option<u32>,
     timeout_ms: Option<u64>,
-    use_api_key: Option<bool>,
+    provider_kind: Option<String>,
     disable_reasoning: Option<bool>,
 }
 
@@ -72,7 +74,7 @@ struct AiChatRequest {
 #[serde(rename_all = "camelCase")]
 struct AiModelListRequest {
     base_url: String,
-    use_api_key: Option<bool>,
+    provider_kind: Option<String>,
     timeout_ms: Option<u64>,
 }
 
@@ -109,14 +111,19 @@ fn normalize_ai_base_url(value: &str) -> Result<String, String> {
 }
 
 #[cfg(desktop)]
-fn ai_keyring_entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new(AI_KEYRING_SERVICE, AI_KEYRING_ACCOUNT)
+fn ai_keyring_entry(provider_kind: &str) -> Result<keyring::Entry, String> {
+    let account = match provider_kind {
+        "openai-compatible" => AI_REMOTE_KEYRING_ACCOUNT,
+        "local-openai-compatible" => AI_LOCAL_KEYRING_ACCOUNT,
+        _ => return Err("Unknown AI provider kind".into()),
+    };
+    keyring::Entry::new(AI_KEYRING_SERVICE, account)
         .map_err(|error| format!("Could not open the OS credential store: {error}"))
 }
 
 #[cfg(desktop)]
-fn read_ai_api_key() -> Result<Option<String>, String> {
-    let entry = ai_keyring_entry()?;
+fn read_ai_api_key(provider_kind: &str) -> Result<Option<String>, String> {
+    let entry = ai_keyring_entry(provider_kind)?;
     match entry.get_password() {
         Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
         Ok(_) => Ok(None),
@@ -126,7 +133,10 @@ fn read_ai_api_key() -> Result<Option<String>, String> {
 }
 
 #[cfg(not(desktop))]
-fn read_ai_api_key() -> Result<Option<String>, String> {
+fn read_ai_api_key(provider_kind: &str) -> Result<Option<String>, String> {
+    if !matches!(provider_kind, "openai-compatible" | "local-openai-compatible") {
+        return Err("Unknown AI provider kind".into());
+    }
     Ok(None)
 }
 
@@ -553,15 +563,15 @@ async fn inspect_attachments(app: tauri::AppHandle, hashes: Vec<String>) -> Resu
 }
 
 #[tauri::command]
-fn local_ai_api_key_status() -> Result<bool, String> {
-    Ok(read_ai_api_key()?.is_some())
+fn ai_api_key_status(provider_kind: String) -> Result<bool, String> {
+    Ok(read_ai_api_key(&provider_kind)?.is_some())
 }
 
 #[tauri::command]
-fn set_local_ai_api_key(value: String) -> Result<(), String> {
+fn set_ai_api_key(provider_kind: String, value: String) -> Result<(), String> {
     #[cfg(desktop)]
     {
-        let entry = ai_keyring_entry()?;
+        let entry = ai_keyring_entry(&provider_kind)?;
         if value.trim().is_empty() {
             return match entry.delete_credential() {
                 Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -574,20 +584,22 @@ fn set_local_ai_api_key(value: String) -> Result<(), String> {
     }
     #[cfg(not(desktop))]
     {
+        let _ = provider_kind;
         let _ = value;
         Err("Secure API-key storage is not available on this platform yet".into())
     }
 }
 
 #[tauri::command]
-fn clear_local_ai_api_key() -> Result<(), String> {
-    set_local_ai_api_key(String::new())
+fn clear_ai_api_key(provider_kind: String) -> Result<(), String> {
+    set_ai_api_key(provider_kind, String::new())
 }
 
 async fn send_ai_request(
     client: &reqwest::Client,
     endpoint: &str,
     request: &AiChatRequest,
+    provider_kind: &str,
     api_key: Option<&str>,
     include_schema: bool,
 ) -> Result<reqwest::Response, String> {
@@ -615,7 +627,11 @@ async fn send_ai_request(
     }
     let mut builder = client.post(endpoint).json(&body);
     if let Some(key) = api_key.filter(|value| !value.is_empty()) {
-        builder = builder.bearer_auth(key);
+        builder = if provider_kind == "local-openai-compatible" {
+            builder.bearer_auth(key)
+        } else {
+            builder.header("X-Api-Key", key)
+        };
     }
     builder.send().await.map_err(|error| format!("AI request failed: {error}"))
 }
@@ -646,13 +662,14 @@ async fn ai_chat_completion(request: AiChatRequest) -> Result<AiChatResponse, St
     // Local endpoints may require Bearer auth; keyless compatible endpoints
     // remain valid. If no key is stored, continue without one rather than
     // making trusted-network models unusable.
-    let api_key = if request.use_api_key.unwrap_or(true) { read_ai_api_key().ok().flatten() } else { None };
+    let provider_kind = request.provider_kind.as_deref().unwrap_or("openai-compatible");
+    let api_key = read_ai_api_key(provider_kind).ok().flatten();
     let wants_schema = request.response_schema.is_some();
     let mut schema_fallback = false;
-    let mut response = send_ai_request(&client, &endpoint, &request, api_key.as_deref(), wants_schema).await?;
+    let mut response = send_ai_request(&client, &endpoint, &request, provider_kind, api_key.as_deref(), wants_schema).await?;
     if wants_schema && matches!(response.status().as_u16(), 400 | 404 | 415 | 422) {
         schema_fallback = true;
-        response = send_ai_request(&client, &endpoint, &request, api_key.as_deref(), false).await?;
+        response = send_ai_request(&client, &endpoint, &request, provider_kind, api_key.as_deref(), false).await?;
     }
     let status = response.status();
     let bytes = response.bytes().await.map_err(|error| format!("Could not read AI response: {error}"))?;
@@ -705,9 +722,14 @@ async fn ai_list_models(request: AiModelListRequest) -> Result<Vec<AiModel>, Str
         .build()
         .map_err(|error| format!("Could not create AI client: {error}"))?;
     let mut builder = client.get(endpoint);
-    let api_key = if request.use_api_key.unwrap_or(true) { read_ai_api_key().ok().flatten() } else { None };
+    let provider_kind = request.provider_kind.as_deref().unwrap_or("openai-compatible");
+    let api_key = read_ai_api_key(provider_kind).ok().flatten();
     if let Some(key) = api_key.filter(|value| !value.is_empty()) {
-        builder = builder.bearer_auth(key);
+        builder = if provider_kind == "local-openai-compatible" {
+            builder.bearer_auth(key)
+        } else {
+            builder.header("X-Api-Key", key)
+        };
     }
     let response = builder.send().await.map_err(|error| format!("AI request failed: {error}"))?;
     let status = response.status();
@@ -853,9 +875,9 @@ pub fn run() {
             compress_photo,
             compress_photo_data,
             inspect_attachments,
-            local_ai_api_key_status,
-            set_local_ai_api_key,
-            clear_local_ai_api_key,
+            ai_api_key_status,
+            set_ai_api_key,
+            clear_ai_api_key,
             ai_chat_completion,
             ai_list_models,
             device::device_location,

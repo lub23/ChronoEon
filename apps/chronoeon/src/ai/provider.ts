@@ -52,10 +52,11 @@ export const DEFAULT_AI_PROVIDER_PREFERENCES: AIProviderPreferences = {
   },
 };
 
-// Browser builds have no OS keychain. A local-model key may be used for the
-// current page, but is deliberately held only in module memory: never localStorage, exports,
+// Browser builds have no OS keychain. Keys may be used for the current page,
+// but are deliberately held only in module memory: never localStorage, exports,
 // logs, URLs, or tracked source.
 let browserLocalApiKey = "";
+let browserRemoteApiKey = "";
 
 function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -120,7 +121,7 @@ export function providerIsConfigured(preferences: AIProviderPreferences): boolea
 export async function hasLocalAIKey(): Promise<boolean> {
   if (!isTauri()) return Boolean(browserLocalApiKey);
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<boolean>("local_ai_api_key_status");
+  return invoke<boolean>("ai_api_key_status", { providerKind: "local-openai-compatible" });
 }
 
 export async function saveLocalAIKey(value: string): Promise<void> {
@@ -130,14 +131,37 @@ export async function saveLocalAIKey(value: string): Promise<void> {
     return;
   }
   const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("set_local_ai_api_key", { value: normalized });
+  await invoke("set_ai_api_key", { providerKind: "local-openai-compatible", value: normalized });
 }
 
 export async function clearLocalAIKey(): Promise<void> {
   browserLocalApiKey = "";
   if (!isTauri()) return;
   const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("clear_local_ai_api_key");
+  await invoke("clear_ai_api_key", { providerKind: "local-openai-compatible" });
+}
+
+export async function hasRemoteAIKey(): Promise<boolean> {
+  if (!isTauri()) return Boolean(browserRemoteApiKey);
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<boolean>("ai_api_key_status", { providerKind: "openai-compatible" });
+}
+
+export async function saveRemoteAIKey(value: string): Promise<void> {
+  const normalized = value.trim();
+  if (!isTauri()) {
+    browserRemoteApiKey = normalized;
+    return;
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("set_ai_api_key", { providerKind: "openai-compatible", value: normalized });
+}
+
+export async function clearRemoteAIKey(): Promise<void> {
+  browserRemoteApiKey = "";
+  if (!isTauri()) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("clear_ai_api_key", { providerKind: "openai-compatible" });
 }
 
 function completionContent(payload: unknown): string {
@@ -204,7 +228,9 @@ async function browserCompletion(
       Accept: "application/json",
       ...(provider.kind === "local-openai-compatible" && browserLocalApiKey
         ? { Authorization: `Bearer ${browserLocalApiKey}` }
-        : {}),
+        : provider.kind === "openai-compatible" && browserRemoteApiKey
+          ? { "X-Api-Key": browserRemoteApiKey }
+          : {}),
     },
     body: JSON.stringify(requestBody),
   });
@@ -280,7 +306,7 @@ export async function requestAICompletion(
         request: {
           baseUrl: provider.baseUrl, model: provider.model, messages, responseSchema,
           temperature: provider.temperature, maxTokens: provider.maxTokens, timeoutMs: provider.timeoutMs,
-          useApiKey: provider.kind === "local-openai-compatible",
+          providerKind: provider.kind,
           tools: options?.tools, toolChoice: options?.toolChoice ?? "auto",
           disableReasoning: options?.disableReasoning ?? false,
         },
@@ -299,7 +325,9 @@ export async function fetchAIModels(provider: AIProviderConfig, signal?: AbortSi
       signal,
       headers: provider.kind === "local-openai-compatible" && browserLocalApiKey
         ? { Authorization: `Bearer ${browserLocalApiKey}` }
-        : {},
+        : provider.kind === "openai-compatible" && browserRemoteApiKey
+          ? { "X-Api-Key": browserRemoteApiKey }
+          : {},
     });
     const payload = await response.json().catch(() => ({})) as any;
     if (!response.ok) throw new Error(`AI endpoint returned ${response.status}: ${String(payload?.error?.message ?? response.statusText).slice(0, 400)}`);
@@ -309,7 +337,7 @@ export async function fetchAIModels(provider: AIProviderConfig, signal?: AbortSi
   return withAbort(invoke<AIModelInfo[]>("ai_list_models", {
     request: {
       baseUrl: provider.baseUrl,
-      useApiKey: provider.kind === "local-openai-compatible",
+      providerKind: provider.kind,
       timeoutMs: provider.timeoutMs,
     },
   }), signal);

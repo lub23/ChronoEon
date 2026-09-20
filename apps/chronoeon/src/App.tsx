@@ -79,12 +79,15 @@ import {
   providerIsConfigured,
   warmUpAIProvider,
   fetchAIModels,
-  hasLocalAIKey,
+  hasLocalAIKey as hasStoredLocalAIKey,
+  hasRemoteAIKey as hasStoredRemoteAIKey,
   normalizeAIProviderPreferences,
   readAIProviderPreferences,
   requestAICompletion,
-  saveLocalAIKey,
-  clearLocalAIKey,
+  saveLocalAIKey as storeLocalAIKey,
+  clearLocalAIKey as clearStoredLocalAIKey,
+  saveRemoteAIKey as storeRemoteAIKey,
+  clearRemoteAIKey as clearStoredRemoteAIKey,
   writeAIProviderPreferences,
   type AIProviderPreferences,
 } from "./ai/provider";
@@ -198,7 +201,8 @@ function App() {
   const [reminderNotice, setReminderNotice] = useState<DueReminder[] | null>(null);
   const [imagePreview, setImagePreview] = useState<{ items: string[]; index: number } | null>(null);
   const [aiPreferences, setAIPreferencesState] = useState<AIProviderPreferences>(readAIProviderPreferences);
-  const [aiKeyStored, setAIKeyStored] = useState(false);
+  const [localKeyStored, setLocalKeyStored] = useState(false);
+  const [remoteKeyStored, setRemoteKeyStored] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -323,7 +327,8 @@ function App() {
 
   useEffect(() => {
     let disposed = false;
-    void hasLocalAIKey().then((stored) => { if (!disposed) setAIKeyStored(stored); }).catch(() => { if (!disposed) setAIKeyStored(false); });
+    void hasStoredLocalAIKey().then((stored) => { if (!disposed) setLocalKeyStored(stored); }).catch(() => { if (!disposed) setLocalKeyStored(false); });
+    void hasStoredRemoteAIKey().then((stored) => { if (!disposed) setRemoteKeyStored(stored); }).catch(() => { if (!disposed) setRemoteKeyStored(false); });
     return () => { disposed = true; };
   }, []);
 
@@ -1194,14 +1199,24 @@ function App() {
     setAIPreferencesState(normalizeAIProviderPreferences(next));
   }, []);
 
-  const saveAIKey = useCallback(async (value: string) => {
-    await saveLocalAIKey(value);
-    setAIKeyStored(Boolean(value.trim()));
+  const saveLocalAIKey = useCallback(async (value: string) => {
+    await storeLocalAIKey(value);
+    setLocalKeyStored(Boolean(value.trim()));
   }, []);
 
-  const clearAIKey = useCallback(async () => {
-    await clearLocalAIKey();
-    setAIKeyStored(false);
+  const clearLocalAIKey = useCallback(async () => {
+    await clearStoredLocalAIKey();
+    setLocalKeyStored(false);
+  }, []);
+
+  const saveRemoteAIKey = useCallback(async (value: string) => {
+    await storeRemoteAIKey(value);
+    setRemoteKeyStored(Boolean(value.trim()));
+  }, []);
+
+  const clearRemoteAIKey = useCallback(async () => {
+    await clearStoredRemoteAIKey();
+    setRemoteKeyStored(false);
   }, []);
 
   const testAI = useCallback(async () => {
@@ -1229,10 +1244,13 @@ function App() {
     miniShortcutStatus={miniShortcutStatus}
     initialSection={settingsInitialSection}
     aiPreferences={aiPreferences}
-    localKeyStored={aiKeyStored}
+    localKeyStored={localKeyStored}
+    remoteKeyStored={remoteKeyStored}
     onAIPreferencesChange={changeAIPreferences}
-    onSaveAIKey={saveAIKey}
-    onClearAIKey={clearAIKey}
+    onSaveLocalKey={saveLocalAIKey}
+    onClearLocalKey={clearLocalAIKey}
+    onSaveRemoteKey={saveRemoteAIKey}
+    onClearRemoteKey={clearRemoteAIKey}
     onTestAI={testAI}
     onTestNotification={() => { void sendTestNotification(); }}
     onClose={() => setSettingsOpen(false)}

@@ -49,9 +49,12 @@ interface SettingsDialogProps {
   initialSection?: SettingsSection;
   aiPreferences: AIProviderPreferences;
   localKeyStored: boolean;
+  remoteKeyStored: boolean;
   onAIPreferencesChange: (preferences: AIProviderPreferences) => void;
-  onSaveAIKey: (value: string) => Promise<void>;
-  onClearAIKey: () => Promise<void>;
+  onSaveLocalKey: (value: string) => Promise<void>;
+  onClearLocalKey: () => Promise<void>;
+  onSaveRemoteKey: (value: string) => Promise<void>;
+  onClearRemoteKey: () => Promise<void>;
   onTestAI: () => Promise<void>;
   onClose: () => void;
   onLocaleChange: (locale: Locale) => void;
@@ -121,9 +124,12 @@ export function SettingsDialog({
   initialSection = "general",
   aiPreferences,
   localKeyStored,
+  remoteKeyStored,
   onAIPreferencesChange,
-  onSaveAIKey,
-  onClearAIKey,
+  onSaveLocalKey,
+  onClearLocalKey,
+  onSaveRemoteKey,
+  onClearRemoteKey,
   onTestAI,
   onClose,
   onLocaleChange,
@@ -487,7 +493,20 @@ export function SettingsDialog({
               )}
             </>}
 
-            {section === "ai" && <AISettingsPanel locale={locale} preferences={aiPreferences} localKeyStored={localKeyStored} onChange={onAIPreferencesChange} onSaveKey={onSaveAIKey} onClearKey={onClearAIKey} onTest={onTestAI} />}
+            {section === "ai" && (
+              <AISettingsPanel
+                locale={locale}
+                preferences={aiPreferences}
+                localKeyStored={localKeyStored}
+                remoteKeyStored={remoteKeyStored}
+                onChange={onAIPreferencesChange}
+                onSaveLocalKey={onSaveLocalKey}
+                onClearLocalKey={onClearLocalKey}
+                onSaveRemoteKey={onSaveRemoteKey}
+                onClearRemoteKey={onClearRemoteKey}
+                onTest={onTestAI}
+              />
+            )}
 
             {section === "data" && <>
               <SectionHeading title={t("settingsData", locale)} detail={t("syncDataNote", locale)} />

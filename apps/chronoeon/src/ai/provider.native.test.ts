@@ -16,10 +16,10 @@ describe("native AI completion bridge", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke).toHaveBeenLastCalledWith("ai_chat_completion", { request: expect.objectContaining({ disableReasoning: false, timeoutMs: 90_000 }) });
   });
-  it("does not send the local credential on remote requests", async () => {
+  it("sends provider kind so Rust can choose the credential transport", async () => {
     invoke.mockResolvedValue({ content: "ok" });
     await requestAICompletion(provider, messages);
-    expect(invoke).toHaveBeenCalledWith("ai_chat_completion", { request: expect.objectContaining({ useApiKey: false }) });
+    expect(invoke).toHaveBeenCalledWith("ai_chat_completion", { request: expect.objectContaining({ providerKind: "openai-compatible" }) });
   });
   it("settles cancellation immediately and ignores a late native error without retrying", async () => {
     let reject!: (error: unknown) => void;
@@ -43,7 +43,7 @@ describe("native AI completion bridge", () => {
     });
     expect(result.toolCalls?.[0]?.function.name).toBe("search_entries");
     expect(invoke).toHaveBeenCalledWith("ai_chat_completion", { request: expect.objectContaining({
-      useApiKey: true,
+      providerKind: "local-openai-compatible",
       toolChoice: "auto",
       tools: expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "search_entries" }) })]),
     }) });

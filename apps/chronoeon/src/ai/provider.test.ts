@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_AI_PROVIDER_PREFERENCES,
   clearLocalAIKey,
+  clearRemoteAIKey,
   normalizeAIBaseUrl,
   normalizeAIProviderPreferences,
   saveLocalAIKey,
+  saveRemoteAIKey,
   requestAICompletion,
   warmUpAIProvider,
 } from "./provider";
@@ -82,6 +84,15 @@ describe("OpenAI-compatible provider adapter", () => {
     const remoteHeaders = new Headers(fetchMock.mock.calls[1][1].headers);
     expect(remoteHeaders.get("Authorization")).toBeNull();
     await clearLocalAIKey();
+    await saveRemoteAIKey("remote-secret");
+    await requestAICompletion(
+      { ...DEFAULT_AI_PROVIDER_PREFERENCES.remote, baseUrl: "https://example.test/v1", model: "remote-model" },
+      [{ role: "user", content: "test" }],
+    );
+    const remoteKeyHeaders = new Headers(fetchMock.mock.calls[2][1].headers);
+    expect(remoteKeyHeaders.get("X-Api-Key")).toBe("remote-secret");
+    expect(remoteKeyHeaders.get("Authorization")).toBeNull();
+    await clearRemoteAIKey();
   });
 
   it("sends model-selected tools and preserves an empty tool-call message", async () => {
