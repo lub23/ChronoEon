@@ -1,5 +1,4 @@
 import { TimeDial } from "./TimeDial";
-import { useTouchDevice } from "../hooks/useTouchDevice";
 import { useLayoutEffect, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { MotionPresence, createMotionPortal as createPortal } from "./MotionPresence";
@@ -113,9 +112,11 @@ interface GlassDatePickerProps {
   weekStartsOn?: ChronoEonSettings["firstDay"];
   /** Render the calendar itself for an already-open host popover. */
   inline?: boolean;
+  /** Hosts that already read as buttons drop the trailing glyph. */
+  hideIcon?: boolean;
 }
 
-export function GlassDatePicker({ value, onChange, ariaLabel, placeholder = "", locale, min, max, disabled, clearable = true, highlight, weekStartsOn, inline = false }: GlassDatePickerProps) {
+export function GlassDatePicker({ value, onChange, ariaLabel, placeholder = "", locale, min, max, disabled, clearable = true, highlight, weekStartsOn, inline = false, hideIcon = false }: GlassDatePickerProps) {
   const [open, setOpen] = useState(false);
   const [viewDate, setViewDate] = useState(() => new Date());
   const rootRef = useRef<HTMLDivElement>(null);
@@ -224,7 +225,7 @@ export function GlassDatePicker({ value, onChange, ariaLabel, placeholder = "", 
         onClick={() => setOpen((current) => !current)}
       >
         <span className="glass-picker-value">{display || (placeholder ? <em aria-hidden="true">{placeholder}</em> : "")}</span>
-        <Icon name="calendar" size={14} />
+        {!hideIcon && <Icon name="calendar" size={14} />}
       </button>
       <MotionPresence>{open && createPortal(
         <div
@@ -250,151 +251,65 @@ interface GlassTimePickerProps {
   locale: Locale;
   disabled?: boolean;
   clearable?: boolean;
+  /** Hosts that already read as buttons drop the trailing glyph. */
+  hideIcon?: boolean;
 }
 
-export function GlassTimePicker({ value, onChange, ariaLabel, locale, disabled, clearable = true }: GlassTimePickerProps) {
+export function GlassTimePicker({ value, onChange, ariaLabel, locale, disabled, clearable = true, hideIcon = false }: GlassTimePickerProps) {
   const [open, setOpen] = useState(false);
-  const touchDevice = useTouchDevice();
   const rootRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const { position, placed } = usePickerSurface(open, rootRef, popupRef, () => setOpen(false), {
-    preferredWidth: touchDevice ? 288 : 218,
+    preferredWidth: 288,
     align: "end",
   });
   useEffect(() => {
     // Focus only after the portal is visible, not while it is being measured.
-    if (!open || !placed || !touchDevice) return;
+    if (!open || !placed) return;
     const frame = requestAnimationFrame(() => popupRef.current?.querySelector<SVGElement>('[role="slider"]')?.focus({ preventScroll: true }));
     return () => cancelAnimationFrame(frame);
-  }, [open, placed, touchDevice]);
+  }, [open, placed]);
   const [hour, minute] = value ? value.split(":").map((part) => Number(part) || 0) : [9, 0];
 
   function commit(nextHour: number, nextMinute: number) {
     onChange(`${String(nextHour).padStart(2, "0")}:${String(nextMinute).padStart(2, "0")}`, true);
   }
 
-  const cyclicValues = (count: number, selected: number, step = 1, visible = 7) =>
-    Array.from({ length: visible }, (_, offset) => {
-      const raw = selected + (offset - Math.floor(visible / 2)) * step;
-      return ((raw % count) + count) % count;
-    });
-  const hourValues = cyclicValues(24, hour);
-  const minuteValues = cyclicValues(60, minute, 5);
-
-  const stepHour = (delta: number) => commit((((hour + delta) % 24) + 24) % 24, minute);
-  const stepMinute = (delta: number) => commit(hour, (((minute + delta) % 60) + 60) % 60);
-
-  if (touchDevice) {
-    return (
-      <div ref={rootRef} className={open ? "glass-time-picker is-open is-touch" : "glass-time-picker is-touch"}>
-        <button
-          ref={toggleRef}
-          type="button"
-          className="glass-time-trigger"
-          disabled={disabled}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-label={ariaLabel}
-          onClick={() => setOpen((current) => !current)}
-        >
-          {value || <em aria-hidden="true">--:--</em>}
-          <Icon name="clock" size={14} />
-        </button>
-        <MotionPresence>{open && createPortal(
-          <div
-            ref={popupRef}
-            role="dialog"
-            aria-label={ariaLabel}
-            className={[position.above ? "glass-picker-popup glass-picker-popup--dial is-above" : "glass-picker-popup glass-picker-popup--dial", placed ? "" : "is-unplaced"].filter(Boolean).join(" ")}
-            style={pickerStyle(position)}
-          >
-            <TimeDial hour={hour} minute={minute} locale={locale} onChange={commit} />
-            <div className="time-dial-actions">
-              {clearable && <button type="button" className="glass-picker-clear" onClick={() => { onChange(undefined, true); setOpen(false); toggleRef.current?.focus(); }}>
-                <Icon name="close" size={12} />{locale === "zh" ? "清除" : "Clear"}
-              </button>}
-              <button type="button" className="glass-picker-clear" onClick={() => { if (!value) commit(hour, minute); setOpen(false); toggleRef.current?.focus(); }}>
-                <Icon name="check" size={12} />{locale === "zh" ? "完成" : "Done"}
-              </button>
-            </div>
-          </div>,
-          document.body,
-        )}</MotionPresence>
-      </div>
-    );
-  }
-
+  // One dial everywhere: the wheel is the only time control, on touch and on
+  // desktop alike, so a time is always set the same way.
   return (
     <div ref={rootRef} className={open ? "glass-time-picker is-open" : "glass-time-picker"}>
-      <input
-        type="time"
-        step={60}
-        className="glass-time-input"
-        value={value ?? ""}
-        disabled={disabled}
-        aria-label={ariaLabel}
-        onChange={(event) => onChange(event.target.value || undefined)}
-        onBlur={() => onChange(value, true)}
-      />
       <button
         ref={toggleRef}
         type="button"
-        className="glass-time-toggle"
+        className="glass-time-trigger"
         disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={locale === "zh" ? `${ariaLabel}：打开时间滚轮` : `${ariaLabel}: open time wheel`}
-        title={locale === "zh" ? "时间滚轮" : "Time wheel"}
+        aria-label={ariaLabel}
         onClick={() => setOpen((current) => !current)}
       >
-        <Icon name="clock" size={14} />
+        {value || <em aria-hidden="true">--:--</em>}
+        {!hideIcon && <Icon name="clock" size={14} />}
       </button>
       <MotionPresence>{open && createPortal(
         <div
           ref={popupRef}
           role="dialog"
           aria-label={ariaLabel}
-          className={[position.above ? "glass-picker-popup glass-picker-popup--time is-above" : "glass-picker-popup glass-picker-popup--time", placed ? "" : "is-unplaced"].filter(Boolean).join(" ")}
+          className={[position.above ? "glass-picker-popup glass-picker-popup--dial is-above" : "glass-picker-popup glass-picker-popup--dial", placed ? "" : "is-unplaced"].filter(Boolean).join(" ")}
           style={pickerStyle(position)}
         >
-          <div className="glass-time-columns">
-            <section className="glass-time-column" aria-label={locale === "zh" ? "小时" : "Hour"} onWheel={(event) => { event.preventDefault(); stepHour(event.deltaY > 0 ? 1 : -1); }}>
-              <button type="button" className="glass-time-step" disabled={disabled} aria-label={locale === "zh" ? "上一小时" : "Previous hour"} onClick={() => stepHour(-1)}>
-                <Icon name="chevron-up" size={12} />
-              </button>
-              <div role="listbox" aria-label={locale === "zh" ? "小时" : "Hour"}>
-                {hourValues.map((item) => (
-                  <button key={item} type="button" role="option" aria-selected={item === hour} className={item === hour ? "is-selected" : ""} onClick={() => commit(item, minute)}>
-                    {String(item).padStart(2, "0")}
-                  </button>
-                ))}
-              </div>
-              <button type="button" className="glass-time-step" disabled={disabled} aria-label={locale === "zh" ? "下一小时" : "Next hour"} onClick={() => stepHour(1)}>
-                <Icon name="chevron-down" size={12} />
-              </button>
-            </section>
-            <section className="glass-time-column" aria-label={locale === "zh" ? "分钟" : "Minute"} onWheel={(event) => { event.preventDefault(); stepMinute(event.deltaY > 0 ? 5 : -5); }}>
-              <button type="button" className="glass-time-step" disabled={disabled} aria-label={locale === "zh" ? "往前五分钟" : "Five minutes earlier"} onClick={() => stepMinute(-5)}>
-                <Icon name="chevron-up" size={12} />
-              </button>
-              <div role="listbox" aria-label={locale === "zh" ? "分钟" : "Minute"}>
-                {minuteValues.map((item) => (
-                  <button key={item} type="button" role="option" aria-selected={item === minute} className={item === minute ? "is-selected" : ""} onClick={() => commit(hour, item)}>
-                    {String(item).padStart(2, "0")}
-                  </button>
-                ))}
-              </div>
-              <button type="button" className="glass-time-step" disabled={disabled} aria-label={locale === "zh" ? "往后五分钟" : "Five minutes later"} onClick={() => stepMinute(5)}>
-                <Icon name="chevron-down" size={12} />
-              </button>
-            </section>
-          </div>
-          {clearable && (
-            <button type="button" className="glass-picker-clear" onClick={() => { onChange(undefined, true); setOpen(false); }}>
+          <TimeDial hour={hour} minute={minute} locale={locale} onChange={commit} />
+          <div className="time-dial-actions">
+            {clearable && <button type="button" className="glass-picker-clear" onClick={() => { onChange(undefined, true); setOpen(false); toggleRef.current?.focus(); }}>
               <Icon name="close" size={12} />{locale === "zh" ? "清除" : "Clear"}
+            </button>}
+            <button type="button" className="glass-picker-clear" onClick={() => { if (!value) commit(hour, minute); setOpen(false); toggleRef.current?.focus(); }}>
+              <Icon name="check" size={12} />{locale === "zh" ? "完成" : "Done"}
             </button>
-          )}
+          </div>
         </div>,
         document.body,
       )}</MotionPresence>

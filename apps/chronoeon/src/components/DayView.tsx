@@ -29,7 +29,7 @@ import { ExpenseBox } from "./ExpenseBox";
 import { Icon } from "./Icon";
 import { ItemChip } from "./ItemChip";
 import { MonthDayPeek } from "./MonthDayPeek";
-import { PhotoWall } from "./PhotoWall";
+import { PhotoWallView } from "./PhotoWallView";
 import { clearChipDrag, markChipDragActive } from "./dragGesture";
 
 interface DayViewProps {
@@ -430,8 +430,9 @@ export function DayView({
     [dayKeys, entries],
   );
   // The timeline layout never paints a photo backdrop; reading them would be
-  // disk work per visible day for nothing.
-  const photos = useDayPhotos(entriesByDate, photosOnly || showPhotos, photosOnly ? "slideshow" : undefined);
+  // disk work per visible day for nothing. Photo appreciation reads its own,
+  // annotated view of the same days below.
+  const photos = useDayPhotos(entriesByDate, showPhotos && !photosOnly);
 
   function beginGesture(
     event: React.PointerEvent<HTMLElement>,
@@ -835,14 +836,14 @@ export function DayView({
 
   if (photosOnly) {
     return (
-      <section className="day-view panel day-view--photos">
-        <PhotoWall
-          locale={locale}
-          days={dayKeys}
-          photos={photos}
-          onSelectDate={(key) => onSelectDate(parseISO(key))}
-        />
-      </section>
+      <PhotoWallView
+        entries={entries}
+        selectedDate={rangeStart}
+        days={visibleDays}
+        locale={locale}
+        settings={settings}
+        onSelectDate={onSelectDate}
+      />
     );
   }
 

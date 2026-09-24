@@ -1,7 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import type { Entry } from "../domain/entry";
 import type { PhotoDisplayMode } from "@chronoeon/domain";
-import { isDisplayableAttachment, resolveAttachmentUrl } from "../platform/attachments";
+import { isDisplayableAttachment } from "../platform/attachments";
+import { useAttachmentUrls } from "./useAttachmentUrls";
+
+/** One record's photos on one civil day, with the annotations they carry. */
+export interface DayPhotoGroup {
+  id: string;
+  /** The record itself: title, kind, category, location and note all live here. */
+  entry: Entry;
+  /** Displayable URLs, in the record's own order. */
+  urls: string[];
+}
+
+/** Every stored photo a record carries, de-duplicated and displayable. */
+function displayableImages(entry: Entry): string[] {
+  return [...new Set((entry.images ?? []).filter((image) => Boolean(image) && isDisplayableAttachment(image)))];
+}
 
 /**
  * Resolve the photos attached to each visible day into displayable URLs.
@@ -17,18 +32,13 @@ export function useDayPhotos(
   enabled = true,
   mode: PhotoDisplayMode = "first",
 ): Record<string, string[]> {
-  const [resolved, setResolved] = useState<Record<string, string>>({});
-  const pending = useRef(new Set<string>());
-
   const references = useMemo(() => {
     const map: Record<string, string[]> = {};
     if (!enabled) return map;
     for (const [date, entries] of Object.entries(entriesByDate)) {
       const images: string[] = [];
       for (const entry of entries) {
-        for (const image of entry.images ?? []) {
-          if (image && isDisplayableAttachment(image) && !images.includes(image)) images.push(image);
-        }
+        for (const image of displayableImages(entry)) if (!images.includes(image)) images.push(image);
       }
       if (!images.length) continue;
       if (mode === "first") {
@@ -44,35 +54,7 @@ export function useDayPhotos(
     return map;
   }, [enabled, entriesByDate, mode]);
 
-  useEffect(() => {
-    if (!enabled) return;
-    let disposed = false;
-    const missing = [...new Set(Object.values(references).flat())]
-      .filter((reference) => !(reference in resolved) && !pending.current.has(reference));
-    if (!missing.length) return;
-    missing.forEach((reference) => pending.current.add(reference));
-    void Promise.all(missing.map(async (reference) => {
-      const url = await resolveAttachmentUrl(reference).catch(() => null);
-      return [reference, url] as const;
-    })).then((pairs) => {
-      pairs.forEach(([reference]) => pending.current.delete(reference));
-      if (disposed) return;
-      setResolved((current) => {
-        const next = { ...current };
-        // Unreadable references are cached as an empty string so a missing file
-        // is not retried on every re-render.
-        for (const [reference, url] of pairs) next[reference] = url ?? "";
-        return next;
-      });
-    });
-    return () => {
-      disposed = true;
-      // React StrictMode deliberately runs an effect setup/cleanup/setup cycle.
-      // Releasing this attempt lets the second setup retry instead of seeing a
-      // permanently "pending" URL whose first result was correctly discarded.
-      missing.forEach((reference) => pending.current.delete(reference));
-    };
-  }, [enabled, mode, references, resolved]);
+  const resolved = useAttachmentUrls(useMemo(() => [...new Set(Object.values(references).flat())], [references]));
 
   return useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -82,4 +64,53 @@ export function useDayPhotos(
     }
     return map;
   }, [references, resolved]);
+}
+
+/**
+ * The photo wall's own view of the visible days: one group per record that
+ * carries photos, so a record's several photos stay together and each frame
+ * can be annotated with the title, category, location and note it belongs to.
+ */
+export function useDayPhotoGroups(
+  entriesByDate: Record<string, Entry[]>,
+  enabled = true,
+): Record<string, DayPhotoGroup[]> {
+  const groups = useMemo(() => {
+    const map: Record<string, DayPhotoGroup[]> = {};
+    if (!enabled) return map;
+    for (const [date, entries] of Object.entries(entriesByDate)) {
+      const dayGroups: DayPhotoGroup[] = [];
+      for (const entry of entries) {
+        const urls = displayableImages(entry);
+        if (!urls.length) continue;
+        dayGroups.push({
+          id: entry.id,
+          entry,
+          urls,
+        });
+      }
+      if (dayGroups.length) map[date] = dayGroups;
+    }
+    return map;
+  }, [enabled, entriesByDate]);
+
+  const references = useMemo(
+    () => [...new Set(Object.values(groups).flatMap((day) => day.flatMap((group) => group.urls)))],
+    [groups],
+  );
+  const resolved = useAttachmentUrls(references);
+
+  return useMemo(() => {
+    const map: Record<string, DayPhotoGroup[]> = {};
+    for (const [date, day] of Object.entries(groups)) {
+      const visible = day
+        .map((group) => ({
+          ...group,
+          urls: group.urls.map((reference) => resolved[reference]).filter((url): url is string => Boolean(url)),
+        }))
+        .filter((group) => group.urls.length);
+      if (visible.length) map[date] = visible;
+    }
+    return map;
+  }, [groups, resolved]);
 }

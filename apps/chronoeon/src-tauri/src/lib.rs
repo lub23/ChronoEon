@@ -13,6 +13,7 @@ use tauri::Manager;
 
 pub mod attachments;
 pub mod sync;
+pub mod update;
 use sync::{sync_backend_fetch, sync_backend_publish, sync_storage_usage};
 
 const MAX_ATTACHMENT_BYTES: u64 = 16 * 1024 * 1024;
@@ -40,12 +41,49 @@ const AI_KEYRING_SERVICE: &str = "app.chronoeon.desktop";
 const AI_REMOTE_KEYRING_ACCOUNT: &str = "openai-compatible-api-key";
 #[cfg(desktop)]
 const AI_LOCAL_KEYRING_ACCOUNT: &str = "local-openai-compatible-api-key";
+#[cfg(desktop)]
+const AI_LOCAL_HEADERS_KEYRING_ACCOUNT: &str = "local-openai-compatible-headers";
 const MAX_AI_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+/// Inline photo budget per message; base64 of a compressed webp stays well below.
+const MAX_AI_INLINE_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_AI_INLINE_IMAGES: usize = 4;
+
+/// Text stays small; a content-part array may carry inline images, so it is
+/// bounded by part count and by the size of every `image_url` payload.
+fn ai_content_is_valid(content: &serde_json::Value) -> bool {
+    if let Some(text) = content.as_str() {
+        return text.len() <= 64_000;
+    }
+    let Some(parts) = content.as_array() else { return false };
+    if parts.is_empty() || parts.len() > MAX_AI_INLINE_IMAGES + 8 {
+        return false;
+    }
+    let mut images = 0usize;
+    for part in parts {
+        match part.get("type").and_then(serde_json::Value::as_str) {
+            Some("text") => match part.get("text").and_then(serde_json::Value::as_str) {
+                Some(text) if text.len() <= 64_000 => {}
+                _ => return false,
+            },
+            Some("image_url") => {
+                let url = part.pointer("/image_url/url").and_then(serde_json::Value::as_str);
+                match url {
+                    Some(url) if url.starts_with("data:image/") && url.len() <= MAX_AI_INLINE_IMAGE_BYTES => {}
+                    _ => return false,
+                }
+                images += 1;
+            }
+            _ => return false,
+        }
+    }
+    images <= MAX_AI_INLINE_IMAGES
+}
 
 #[derive(Deserialize, Serialize, Clone)]
 struct AiChatMessage {
     role: String,
-    content: String,
+    /// Either plain text or OpenAI-style content parts (text + inline images).
+    content: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -95,6 +133,13 @@ struct AiChatResponse {
     schema_fallback: bool,
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct AiCustomHeader {
+    name: String,
+    value: String,
+}
+
 fn normalize_ai_base_url(value: &str) -> Result<String, String> {
     let trimmed = value.trim().trim_end_matches('/');
     if trimmed.is_empty() {
@@ -138,6 +183,48 @@ fn read_ai_api_key(provider_kind: &str) -> Result<Option<String>, String> {
         return Err("Unknown AI provider kind".into());
     }
     Ok(None)
+}
+
+fn normalize_ai_custom_headers(headers: Vec<AiCustomHeader>) -> Result<Vec<AiCustomHeader>, String> {
+    if headers.len() > 10 {
+        return Err("AI custom headers exceed the 10-item limit".into());
+    }
+    let mut seen: Vec<String> = Vec::new();
+    let mut normalized = Vec::with_capacity(headers.len());
+    for mut header in headers {
+        header.name = header.name.trim().to_string();
+        header.value = header.value.trim().to_string();
+        if header.name.is_empty() || header.value.is_empty() { continue; }
+        reqwest::header::HeaderName::from_bytes(header.name.as_bytes())
+            .map_err(|_| format!("Invalid AI custom header name: {}", header.name))?;
+        reqwest::header::HeaderValue::from_str(&header.value)
+            .map_err(|_| format!("Invalid AI custom header value: {}", header.name))?;
+        if header.name.len() > 128 || header.value.len() > 2048
+            || matches!(header.name.to_ascii_lowercase().as_str(), "host" | "content-length" | "connection") {
+            return Err(format!("Invalid AI custom header: {}", header.name));
+        }
+        let key = header.name.to_ascii_lowercase();
+        if seen.contains(&key) {
+            return Err(format!("Duplicate AI custom header: {}", header.name));
+        }
+        seen.push(key);
+        normalized.push(header);
+    }
+    Ok(normalized)
+}
+
+#[cfg(desktop)]
+fn read_ai_custom_headers() -> Result<Vec<AiCustomHeader>, String> {
+    let entry = keyring::Entry::new(AI_KEYRING_SERVICE, AI_LOCAL_HEADERS_KEYRING_ACCOUNT)
+        .map_err(|error| format!("Could not open the OS credential store: {error}"))?;
+    let Ok(value) = entry.get_password() else { return Ok(Vec::new()) };
+    if value.trim().is_empty() { return Ok(Vec::new()); }
+    serde_json::from_str(&value).map_err(|error| format!("Could not read local AI headers: {error}"))
+}
+
+#[cfg(not(desktop))]
+fn read_ai_custom_headers() -> Result<Vec<AiCustomHeader>, String> {
+    Ok(Vec::new())
 }
 
 fn canonical_directory(path: &str) -> Result<PathBuf, String> {
@@ -595,6 +682,66 @@ fn clear_ai_api_key(provider_kind: String) -> Result<(), String> {
     set_ai_api_key(provider_kind, String::new())
 }
 
+#[tauri::command]
+fn ai_custom_headers() -> Result<Vec<AiCustomHeader>, String> {
+    read_ai_custom_headers()
+}
+
+#[tauri::command]
+fn set_ai_custom_headers(headers: Vec<AiCustomHeader>) -> Result<Vec<AiCustomHeader>, String> {
+    #[cfg(not(desktop))]
+    {
+        normalize_ai_custom_headers(headers)?;
+        return Err("Secure custom-header storage is not available on this platform yet".into());
+    }
+    #[cfg(desktop)]
+    let headers = normalize_ai_custom_headers(headers)?;
+    #[cfg(desktop)]
+    {
+        let entry = keyring::Entry::new(AI_KEYRING_SERVICE, AI_LOCAL_HEADERS_KEYRING_ACCOUNT)
+            .map_err(|error| format!("Could not open the OS credential store: {error}"))?;
+        let value = serde_json::to_string(&headers)
+            .map_err(|error| format!("Could not encode local AI headers: {error}"))?;
+        entry
+            .set_password(&value)
+            .map_err(|error| format!("Could not save local AI headers in the OS credential store: {error}"))?;
+    }
+    #[cfg(desktop)]
+    Ok(headers)
+}
+
+fn ai_request_headers(
+    provider_kind: &str,
+    api_key: Option<&str>,
+) -> Result<reqwest::header::HeaderMap, String> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static("application/json"),
+    );
+    if let Some(key) = api_key.filter(|value| !value.is_empty()) {
+        if provider_kind == "local-openai-compatible" {
+            let bearer = reqwest::header::HeaderValue::from_str(&format!("Bearer {key}"))
+                .map_err(|_| "AI API key contains invalid header characters".to_string())?;
+            headers.insert(reqwest::header::AUTHORIZATION, bearer);
+        } else {
+            let value = reqwest::header::HeaderValue::from_str(key)
+                .map_err(|_| "AI API key contains invalid header characters".to_string())?;
+            headers.insert(reqwest::header::HeaderName::from_static("x-api-key"), value);
+        }
+    }
+    if provider_kind == "local-openai-compatible" {
+        for header in read_ai_custom_headers().ok().unwrap_or_default() {
+            let name = reqwest::header::HeaderName::from_bytes(header.name.as_bytes())
+                .map_err(|_| format!("Invalid AI custom header name: {}", header.name))?;
+            let value = reqwest::header::HeaderValue::from_str(&header.value)
+                .map_err(|_| format!("Invalid AI custom header value: {}", header.name))?;
+            headers.insert(name, value);
+        }
+    }
+    Ok(headers)
+}
+
 async fn send_ai_request(
     client: &reqwest::Client,
     endpoint: &str,
@@ -625,14 +772,10 @@ async fn send_ai_request(
     if request.disable_reasoning.unwrap_or(false) {
         body["chat_template_kwargs"] = serde_json::json!({ "enable_thinking": false });
     }
-    let mut builder = client.post(endpoint).json(&body);
-    if let Some(key) = api_key.filter(|value| !value.is_empty()) {
-        builder = if provider_kind == "local-openai-compatible" {
-            builder.bearer_auth(key)
-        } else {
-            builder.header("X-Api-Key", key)
-        };
-    }
+    let builder = client
+        .post(endpoint)
+        .headers(ai_request_headers(provider_kind, api_key)?)
+        .json(&body);
     builder.send().await.map_err(|error| format!("AI request failed: {error}"))
 }
 
@@ -646,7 +789,7 @@ async fn ai_chat_completion(request: AiChatRequest) -> Result<AiChatResponse, St
         || request.messages.len() > 32
         || request.messages.iter().any(|message| {
             !matches!(message.role.as_str(), "system" | "user" | "assistant" | "tool")
-                || message.content.len() > 64_000
+                || !ai_content_is_valid(&message.content)
                 || (message.role == "tool" && message.tool_call_id.as_deref().unwrap_or_default().is_empty())
         })
     {
@@ -721,16 +864,11 @@ async fn ai_list_models(request: AiModelListRequest) -> Result<Vec<AiModel>, Str
         .timeout(timeout)
         .build()
         .map_err(|error| format!("Could not create AI client: {error}"))?;
-    let mut builder = client.get(endpoint);
     let provider_kind = request.provider_kind.as_deref().unwrap_or("openai-compatible");
     let api_key = read_ai_api_key(provider_kind).ok().flatten();
-    if let Some(key) = api_key.filter(|value| !value.is_empty()) {
-        builder = if provider_kind == "local-openai-compatible" {
-            builder.bearer_auth(key)
-        } else {
-            builder.header("X-Api-Key", key)
-        };
-    }
+    let builder = client
+        .get(endpoint)
+        .headers(ai_request_headers(provider_kind, api_key.as_deref())?);
     let response = builder.send().await.map_err(|error| format!("AI request failed: {error}"))?;
     let status = response.status();
     let bytes = response.bytes().await.map_err(|error| format!("Could not read AI response: {error}"))?;
@@ -878,6 +1016,8 @@ pub fn run() {
             ai_api_key_status,
             set_ai_api_key,
             clear_ai_api_key,
+            ai_custom_headers,
+            set_ai_custom_headers,
             ai_chat_completion,
             ai_list_models,
             device::device_location,
@@ -886,7 +1026,11 @@ pub fn run() {
             reverse_geocode,
             sync_backend_fetch,
             sync_backend_publish,
-            sync_storage_usage
+            sync_storage_usage,
+            update::app_update_check,
+            update::app_update_download,
+            update::app_update_install,
+            update::app_update_open_page
         ])
         .run(tauri::generate_context!())
         .expect("error while running ChronoEon");
@@ -894,7 +1038,31 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_ai_base_url, safe_relative_path, sha256_revision};
+    use super::{ai_content_is_valid, normalize_ai_base_url, normalize_ai_custom_headers, safe_relative_path, sha256_revision, AiCustomHeader};
+
+    #[test]
+    fn accepts_text_and_bounded_inline_images() {
+        assert!(ai_content_is_valid(&serde_json::json!("tomorrow 14:00 meeting")));
+        assert!(ai_content_is_valid(&serde_json::json!([
+            { "type": "text", "text": "parse this receipt" },
+            { "type": "image_url", "image_url": { "url": "data:image/webp;base64,AAAA" } }
+        ])));
+    }
+
+    #[test]
+    fn rejects_unbounded_or_remote_content_parts() {
+        // Remote URLs would make the app fetch an unvetted resource.
+        assert!(!ai_content_is_valid(&serde_json::json!([
+            { "type": "image_url", "image_url": { "url": "https://example.invalid/photo.png" } }
+        ])));
+        // More inline photos than the composer allows.
+        let many: Vec<serde_json::Value> = (0..5)
+            .map(|_| serde_json::json!({ "type": "image_url", "image_url": { "url": "data:image/webp;base64,AAAA" } }))
+            .collect();
+        assert!(!ai_content_is_valid(&serde_json::Value::Array(many)));
+        assert!(!ai_content_is_valid(&serde_json::json!([{ "type": "audio", "audio": {} }])));
+        assert!(!ai_content_is_valid(&serde_json::json!("x".repeat(64_001))));
+    }
 
     #[test]
     fn calculates_stable_sha256_revisions() {
@@ -918,6 +1086,21 @@ mod tests {
         assert_eq!(normalize_ai_base_url("http://127.0.0.1:8080/v1/").unwrap(), "http://127.0.0.1:8080/v1");
         assert!(normalize_ai_base_url("file:///tmp/model").is_err());
         assert!(normalize_ai_base_url("https://user:secret@example.com/v1").is_err());
+    }
+
+    #[test]
+    fn normalizes_local_ai_headers() {
+        let headers = normalize_ai_custom_headers(vec![
+            AiCustomHeader { name: " X-Tenant ".into(), value: " home ".into() },
+            AiCustomHeader { name: "".into(), value: "empty".into() },
+        ]).unwrap();
+        assert_eq!(headers, vec![AiCustomHeader { name: "X-Tenant".into(), value: "home".into() }]);
+        assert!(normalize_ai_custom_headers(vec![
+            AiCustomHeader { name: "X-Tenant".into(), value: "one".into() },
+            AiCustomHeader { name: "x-tenant".into(), value: "two".into() },
+        ]).is_err());
+        assert!(normalize_ai_custom_headers(vec![AiCustomHeader { name: "Host".into(), value: "example.test".into() }]).is_err());
+        assert!(normalize_ai_custom_headers(vec![AiCustomHeader { name: "X-Bad".into(), value: "line\nbreak".into() }]).is_err());
     }
 
 }

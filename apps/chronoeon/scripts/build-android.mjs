@@ -81,6 +81,7 @@ const env = {
   WRY_ANDROID_LIBRARY: androidLibrary,
   WRY_ANDROID_KOTLIN_FILES_OUT_DIR: kotlinOutputDir,
 };
+if (process.env.CHRONOEON_PERL) env.PATH = `${process.env.CHRONOEON_PERL}${delimiter()}${env.PATH}`;
 
 mkdirSync(kotlinOutputDir, { recursive: true });
 writeTauriProperties();
@@ -93,9 +94,9 @@ if (process.env.CHRONOEON_SKIP_CARGO === "1") {
       "Tauri release embeds the frontend in that library.");
   }
   console.log("\n▸ Rust library\n  skipped (CHRONOEON_SKIP_CARGO=1): reusing the built library");
-} else if (!hasCommand("perl")) {
+} else if (!process.env.CHRONOEON_PERL && !hasCommand("perl")) {
   fail("`perl` is not on PATH. The Rust library vendors OpenSSL (git2), whose Configure step is a Perl script.\n"
-    + "  Install Strawberry Perl, or set CHRONOEON_SKIP_CARGO=1 to repackage the existing library.");
+    + "  Install Strawberry Perl, set CHRONOEON_PERL to its bin folder, or set CHRONOEON_SKIP_CARGO=1 to repackage the existing library.");
 } else {
   // cargo does not track Android-only build-script environment. On a fresh
   // release checkout, tauri.settings.gradle is absent, so force Tauri to

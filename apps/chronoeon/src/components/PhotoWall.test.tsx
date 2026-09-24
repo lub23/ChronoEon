@@ -49,36 +49,54 @@ afterEach(() => {
 });
 
 describe("photo appreciation", () => {
-  it("lists each day's photos and opens the enlarged viewer on click", () => {
+  it("stacks a record's photos behind one frame and annotates it", () => {
     const requests: Array<{ items: string[]; index: number }> = [];
     const unsubscribe = subscribeImagePreview((request) => requests.push(request));
     act(() => {
       root.render(
         <PhotoWall
           locale="zh"
+          settings={DEFAULT_CHRONOEON_SETTINGS}
           days={["2026-08-10", "2026-08-11"]}
-          photos={{ "2026-08-10": [PHOTO, PHOTO_B] }}
+          groups={{
+            "2026-08-10": [
+              { id: "a", entry: entry({ id: "a", title: "露营", category: "Life", location: "西湖", note: "带上了新帐篷", images: [PHOTO, PHOTO_B, PHOTO] }), urls: [PHOTO, PHOTO_B] },
+              { id: "b", entry: entry({ id: "b", title: "收据", kind: "bill", category: "Life", images: [PHOTO] }), urls: [PHOTO] },
+            ],
+          }}
         />,
       );
     });
 
-    const frames = [...host.querySelectorAll<HTMLButtonElement>(".photo-wall-frame")];
+    const frames = [...host.querySelectorAll<HTMLButtonElement>(".photo-wall-stack")];
     expect(frames).toHaveLength(2);
     expect(host.querySelectorAll(".photo-wall-day")).toHaveLength(1);
+    expect(host.querySelectorAll(".photo-wall-item")).toHaveLength(2);
+    // Two photos stack: the front sheet plus one tilted sheet behind it.
+    expect(host.querySelectorAll(".photo-wall-item")[0]!.querySelectorAll(".photo-wall-sheet")).toHaveLength(2);
+    expect(host.querySelectorAll(".photo-wall-item")[1]!.querySelectorAll(".photo-wall-sheet")).toHaveLength(1);
+    const captions = [...host.querySelectorAll(".photo-wall-item")].map((item) => item.textContent);
+    expect(captions[0]).toContain("露营");
+    // Kind and category are dots before the title, so no words for them.
+    expect(host.querySelectorAll(".photo-wall-item")[0]!.querySelector(".photo-wall-dot.is-event")).toBeTruthy();
+    expect(host.querySelectorAll(".photo-wall-item")[0]!.querySelector(".photo-wall-dot.is-category")).toBeTruthy();
+    // Note before location, matching the day view's item.
+    expect(captions[0]!.indexOf("带上了新帐篷")).toBeLessThan(captions[0]!.indexOf("西湖"));
+    expect(captions[1]).toContain("收据");
 
-    act(() => { frames[1].click(); });
+    act(() => { frames[0].click(); });
     unsubscribe();
-    expect(requests).toEqual([{ items: [PHOTO, PHOTO_B], index: 1 }]);
+    expect(requests).toEqual([{ items: [PHOTO, PHOTO_B], index: 0 }]);
   });
 
   it("says so when the visible days carry no photos", () => {
-    act(() => { root.render(<PhotoWall locale="en" days={["2026-08-10"]} photos={{}} />); });
+    act(() => { root.render(<PhotoWall locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} days={["2026-08-10"]} groups={{}} />); });
     expect(host.querySelector(".photo-wall-empty")?.textContent).toContain("No photos");
   });
 
   it("hides every item chip in the Day view and shows the day's photos", async () => {
     const items = [
-      entry({ id: "a", title: "Standup", images: [PHOTO] }),
+      entry({ id: "a", title: "Standup", category: "Work", images: [PHOTO] }),
       entry({ id: "b", title: "Groceries", kind: "bill", amount: -20 }),
     ];
     await act(async () => {
@@ -105,5 +123,8 @@ describe("photo appreciation", () => {
     expect(host.querySelector(".item-chip")).toBeNull();
     expect(host.querySelector(".calendar-grid-canvas")).toBeNull();
     expect(host.querySelector(".photo-wall")).toBeTruthy();
+    // The photo carries the record it belongs to, not just the image.
+    expect(host.querySelector(".photo-wall-caption")?.textContent).toContain("Standup");
+    expect(host.querySelector(".photo-wall-location")).toBeNull();
   });
 });

@@ -31,9 +31,14 @@ export interface AIProviderConfig {
   temperature?: number;
 }
 
+/** OpenAI-compatible content parts; photos travel inline as data URLs. */
+export type AIChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface AIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content: string | AIChatContentPart[];
   tool_calls?: AIToolCall[];
   tool_call_id?: string;
   name?: string;

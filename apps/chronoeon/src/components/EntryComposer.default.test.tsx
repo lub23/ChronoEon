@@ -128,7 +128,7 @@ describe("EntryComposer defaults", () => {
     expect(location.value).toBe("");
   });
 
-  it("allows an earlier intermediate end hour before normalizing on blur", async () => {
+  it("sets both times with the wheel instead of a free-text clock field", async () => {
     act(() => {
       root.render(
         <EntryComposer
@@ -142,13 +142,15 @@ describe("EntryComposer defaults", () => {
         />,
       );
     });
-    const end = host.querySelectorAll<HTMLInputElement>(".glass-time-input")[1]!;
-    expect(end.value).toBe("09:30");
-    await act(async () => { setInputValue(end, "01:30"); });
-    expect(end.value).toBe("01:30");
-    await act(async () => { setInputValue(end, "10:30"); });
-    await act(async () => { end.dispatchEvent(new Event("blur")); });
-    expect(end.value).toBe("10:30");
+    expect(host.querySelector(".glass-time-input")).toBeNull();
+    const triggers = [...host.querySelectorAll<HTMLButtonElement>(".glass-time-trigger")];
+    expect(triggers.map((trigger) => trigger.textContent)).toEqual(["09:00", "09:30"]);
+
+    await act(async () => { triggers[1].click(); });
+    const hours = document.querySelector<SVGGElement>('[role="slider"][aria-label="小时"]')!;
+    await act(async () => { hours.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true })); });
+    await act(async () => { [...document.querySelectorAll<HTMLButtonElement>(".time-dial-actions button")].find((button) => button.textContent === "完成")!.click(); });
+    expect([...host.querySelectorAll<HTMLButtonElement>(".glass-time-trigger")].map((trigger) => trigger.textContent)).toEqual(["09:00", "23:30"]);
   });
 });
 

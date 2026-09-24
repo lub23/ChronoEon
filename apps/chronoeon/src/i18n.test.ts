@@ -22,4 +22,14 @@ describe("standalone localization", () => {
     expect(compositeCategoryLabel("收入/工资", "zh")).toBe("工资");
     expect(catalogLabel("Team budget", "zh")).toBe("Team budget");
   });
+
+  it("keeps the two composers' labels short and balanced", () => {
+    // Equal-ish lengths keep the header switch from looking lopsided.
+    expect(t("quickNote", "en")).toBe("Note");
+    expect(t("aiChatTitle", "en")).toBe("Ask");
+    // The manual form says what it does in one word.
+    expect(t("createTitle", "en")).toBe("New");
+    expect(t("newEntry", "en")).toBe("New");
+    expect(t("save", "en")).toBe("Save");
+  });
 });

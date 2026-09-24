@@ -77,6 +77,39 @@ describe("ai conversation persistence", () => {
     })).rejects.toThrow(/does not exist/);
   });
 
+  it("keeps the pending capture review on the device, out of the sync journal", async () => {
+    const { backend } = await openMemoryStore();
+    const conversations = new AiConversationStore(backend);
+    const conversation = await conversations.createConversation({ providerKind: "openai-compatible", mode: "capture" });
+    const message = await conversations.appendMessage(conversation.id, { role: "assistant", content: "已解析" });
+
+    expect(await conversations.loadCaptureReview(conversation.id)).toBeNull();
+    await conversations.saveCaptureReview({
+      conversationId: conversation.id,
+      messageId: message.id,
+      source: "明天 14:00 开会",
+      drafts: [{ key: "ai-0", draft: { title: "开会" }, warnings: [] }],
+      edited: true,
+      saved: false,
+      updatedAt: "2026-09-20T00:00:00.000Z",
+    });
+    const stored = await conversations.loadCaptureReview(conversation.id);
+    expect(stored?.drafts).toEqual([{ key: "ai-0", draft: { title: "开会" }, warnings: [] }]);
+    expect(stored?.edited).toBe(true);
+    expect(stored?.saved).toBe(false);
+
+    // Overwriting is an upsert, and the review never becomes a synced entity.
+    await conversations.saveCaptureReview({ ...stored!, edited: false, saved: true, updatedAt: "2026-09-20T00:01:00.000Z" });
+    expect((await conversations.loadCaptureReview(conversation.id))?.saved).toBe(true);
+    const journal = await backend.select("SELECT entity FROM sync_changes WHERE entity = 'conversation'");
+    expect(journal.length).toBe(1);
+
+    await conversations.deleteCaptureReview(conversation.id);
+    expect(await conversations.loadCaptureReview(conversation.id)).toBeNull();
+    await conversations.deleteConversation(conversation.id);
+    expect(await backend.select("SELECT * FROM ai_capture_reviews")).toEqual([]);
+  });
+
   it("renames a conversation (auto-title path)", async () => {
     const { backend } = await openMemoryStore();
     const conversations = new AiConversationStore(backend);

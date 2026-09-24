@@ -29,3 +29,40 @@ it("draws selected series and separate expense/income averages", () => {
   act(() => first.click()); expect(open).toHaveBeenCalledWith("2026-09-07");
   expect(host.querySelector(".review-chart-tooltip")?.textContent).toContain("Food");
 });
+
+it("highlights one category on a line, and only highlights from its name", () => {
+  const buckets = Array.from({ length: 3 }, (_, index) => ({ date: `2026-09-${String(7 + index * 7).padStart(2, "0")}` }));
+  act(() => root.render(<ReviewLineChart buckets={buckets} labels={["9/7", "9/14", "9/21"]}
+    series={[{ key: "total", label: "Total expenses", color: "#0f5c6b", values: [50, 25, 60], total: true },
+      { key: "food", label: "Food", color: "#112233", values: [-50, -25, -60] },
+      { key: "travel", label: "Travel", color: "#445566", values: [-10, -5, -12] }]}
+    ariaLabel="Cash flow" granularity="week" locale="en" formatValue={String} />));
+
+  const foodHit = host.querySelector<SVGPolylineElement>('.review-chart-hitline[data-series="food"]')!;
+  act(() => { foodHit.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); });
+  expect(host.querySelector('.review-chart-line[data-series="food"]')?.getAttribute("class")).toContain("is-active");
+  expect(host.querySelector('.review-chart-line[data-series="travel"]')?.getAttribute("class")).toContain("is-muted");
+  // The totals stay readable whatever is selected.
+  expect(host.querySelector('.review-chart-end-label[data-series="total"]')?.getAttribute("class")).toContain("is-total");
+
+  // Pointing at the line reads only that category's value at that x.
+  act(() => {
+    foodHit.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 100 }));
+  });
+  const tooltip = host.querySelector(".review-chart-tooltip")!;
+  expect(tooltip.textContent).toContain("Food");
+  expect(tooltip.textContent).not.toContain("Travel");
+
+  // A tap has no hover, so tapping the line both pins and reads the value.
+  act(() => {
+    foodHit.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 100 }));
+  });
+  expect(host.querySelector(".review-chart-tooltip")).not.toBeNull();
+
+  // Pointing at the right-hand name highlights without answering a value.
+  act(() => { host.querySelector<HTMLElement>('.review-chart-end-label[data-series="travel"]')!.click(); });
+  act(() => { host.querySelector<HTMLElement>('.review-chart-end-label[data-series="travel"]')!
+    .dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); });
+  expect(host.querySelector('.review-chart-end-label[data-series="travel"]')?.getAttribute("class")).toContain("is-active");
+  expect(host.querySelector(".review-chart-tooltip")).toBeNull();
+});

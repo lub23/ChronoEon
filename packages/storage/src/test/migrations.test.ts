@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { SCHEMA_SQL, SCHEMA_V2_SQL, SCHEMA_V3_SQL, SCHEMA_V4_SQL, SCHEMA_V5_SQL, SCHEMA_V6_SQL, SCHEMA_V8_SQL } from "../schema/schemaSql";
+import { SCHEMA_SQL, SCHEMA_V2_SQL, SCHEMA_V3_SQL, SCHEMA_V4_SQL, SCHEMA_V5_SQL, SCHEMA_V6_SQL, SCHEMA_V8_SQL, SCHEMA_V9_SQL, SCHEMA_V10_SQL } from "../schema/schemaSql";
 import { MemorySqliteBackend } from "../persistence/MemorySqliteBackend";
 import { AiConversationStore } from "../ai/aiConversationStore";
-import { ensureMigrated, SCHEMA_VERSION, verifyIntegrity } from "../migrations";
+import { ensureMigrated, MIGRATION_STEPS, SCHEMA_VERSION, verifyIntegrity } from "../migrations";
 
 describe("migrations", () => {
   it("applies all steps and lands on the latest schema version", async () => {
@@ -10,7 +10,7 @@ describe("migrations", () => {
     await ensureMigrated(backend);
     const version = await backend.select<{ user_version: number }>("PRAGMA user_version");
     expect(version[0].user_version).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe(8);
+    expect(SCHEMA_VERSION).toBe(10);
 
     const tables = await backend.select<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('timer_session', 'timer_segments')"
@@ -43,7 +43,7 @@ describe("migrations", () => {
     await ensureMigrated(backend, [{ version: 1, sql: SCHEMA_SQL }]);
     expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(1);
     await ensureMigrated(backend);
-    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(8);
+    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(10);
     await backend.close();
   });
 
@@ -62,7 +62,7 @@ describe("migrations", () => {
        VALUES ('x2', 'task', 'T2', NULL, 'body only', '2026-08-01', 1, '2026-08-01 00:00')`
     );
     await ensureMigrated(backend);
-    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(8);
+    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(10);
     const rows = await backend.select<{ id: string; note: string | null }>("SELECT id, note FROM entries ORDER BY id");
     expect(rows[0].note).toBe("short note\n\nlong\nbody");
     expect(rows[1].note).toBe("body only");
@@ -82,6 +82,29 @@ describe("migrations", () => {
     expect(SCHEMA_V5_SQL).toContain("WHERE modality = 'idea'");
     expect(SCHEMA_V6_SQL).toContain("SET amount = abs(amount)");
     expect(SCHEMA_V8_SQL).toContain("CREATE TABLE deleted_entries");
+    expect(SCHEMA_V9_SQL).toContain("ADD COLUMN mode");
+    expect(SCHEMA_V10_SQL).toContain("CREATE TABLE ai_capture_reviews");
+    // The parsed review is device-local: it must never enter the sync journal.
+    expect(SCHEMA_V10_SQL).not.toContain("sync_changes");
+  });
+
+  it("labels existing conversations with their composer when upgrading from v8", async () => {
+    const backend = await MemorySqliteBackend.open([]);
+    await ensureMigrated(backend, MIGRATION_STEPS.filter((step) => step.version <= 8));
+    await backend.execute(
+      `INSERT INTO ai_conversations (id, provider_kind, title, created_at, updated_at)
+       VALUES ('c1', 'openai-compatible', '随心记 明天开会', '2026-08-01 00:00', '2026-08-01 00:00'),
+              ('c2', 'openai-compatible', '随心问 上周花了多少', '2026-08-01 00:00', '2026-08-01 00:00'),
+              ('c3', 'openai-compatible', NULL, '2026-08-01 00:00', '2026-08-01 00:00')`
+    );
+    await ensureMigrated(backend);
+    const rows = await backend.select<{ id: string; mode: string }>("SELECT id, mode FROM ai_conversations ORDER BY id");
+    expect(rows).toEqual([
+      { id: "c1", mode: "capture" },
+      { id: "c2", mode: "ask" },
+      { id: "c3", mode: "ask" },
+    ]);
+    await backend.close();
   });
 
   it("clears idea priority metadata when upgrading from v4", async () => {

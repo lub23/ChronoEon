@@ -1,6 +1,6 @@
 import type { PersistencePort } from "./persistence/PersistencePort";
 import { StorageError } from "./errors";
-import { SCHEMA_SQL, SCHEMA_V2_SQL, SCHEMA_V3_SQL, SCHEMA_V4_SQL, SCHEMA_V5_SQL, SCHEMA_V6_SQL, SCHEMA_V7_SQL, SCHEMA_V8_SQL } from "./schema/schemaSql";
+import { SCHEMA_SQL, SCHEMA_V2_SQL, SCHEMA_V3_SQL, SCHEMA_V4_SQL, SCHEMA_V5_SQL, SCHEMA_V6_SQL, SCHEMA_V7_SQL, SCHEMA_V8_SQL, SCHEMA_V9_SQL, SCHEMA_V10_SQL } from "./schema/schemaSql";
 
 export interface MigrationStep {
   version: number;
@@ -17,6 +17,8 @@ export const MIGRATION_STEPS: MigrationStep[] = [
   { version: 6, sql: SCHEMA_V6_SQL },
   { version: 7, sql: SCHEMA_V7_SQL },
   { version: 8, sql: SCHEMA_V8_SQL },
+  { version: 9, sql: SCHEMA_V9_SQL },
+  { version: 10, sql: SCHEMA_V10_SQL },
 ];
 
 export const SCHEMA_VERSION = MIGRATION_STEPS[MIGRATION_STEPS.length - 1].version;

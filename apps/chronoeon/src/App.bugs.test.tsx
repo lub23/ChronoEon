@@ -62,7 +62,7 @@ beforeEach(() => {
   Element.prototype.scrollBy = vi.fn();
   window.localStorage.clear();
   // This suite exercises UI, not real model/network access.
-  window.localStorage.setItem("chronoeon.ai.provider.v1", JSON.stringify({ enabled: false }));
+  window.localStorage.setItem("chronoeon.ai.provider.v2", JSON.stringify({ enabled: false }));
   // Demo entries can become due during a real clock run; Escape-layer tests
   // should not depend on whether a reminder happens to fire first.
   window.localStorage.setItem("chronoeon.preference.remindersEnabled", JSON.stringify(false));
@@ -329,12 +329,9 @@ describe("app: create flow (browser demo)", () => {
     await act(async () => { ideaTab.click(); });
     await flush();
     expect(sheet.querySelectorAll(".glass-time-picker").length).toBe(1);
-    const ideaDetails = [...sheet.querySelectorAll<HTMLButtonElement>("button.details-toggle")]
-      .find((button) => button.textContent?.includes("更多字段"))!;
-    await act(async () => { ideaDetails.click(); });
-    await flush();
+    // Priority and urgency are always on screen; only tasks and events carry them.
     expect([...sheet.querySelectorAll("button.glass-select-trigger")]
-      .some((button) => ["优先级", "紧急度"].includes(button.getAttribute("aria-label") ?? ""))).toBe(false);
+      .some((button) => ["重要性", "紧急性"].includes(button.getAttribute("aria-label") ?? ""))).toBe(false);
 
     const taskTab = [...sheet.querySelectorAll<HTMLButtonElement>(".kind-switcher button")][0]!;
     await act(async () => { taskTab.click(); });
@@ -353,7 +350,7 @@ describe("app: create flow (browser demo)", () => {
     await flush();
     expect(sheet.querySelectorAll(".glass-time-picker").length, "all-day must hide both clocks").toBe(0);
     expect([...sheet.querySelectorAll("button.glass-select-trigger")]
-      .some((button) => button.getAttribute("aria-label") === "优先级")).toBe(true);
+      .some((button) => button.getAttribute("aria-label") === "重要性")).toBe(true);
 
     // Four glass kind dots, one per entry kind.
     const dots = sheet.querySelectorAll(".kind-switcher .kind-dot");
@@ -363,16 +360,16 @@ describe("app: create flow (browser demo)", () => {
     }
   });
 
-  it("hands Quick Note text to the visible capture preview", async () => {
+  it("keeps Quick Capture text inside the unified capture conversation", async () => {
     act(() => { root.render(<App />); });
     await flush(150);
     await act(async () => { document.querySelector<HTMLButtonElement>(".view-dock-quicknote")!.click(); });
-    const input = document.querySelector<HTMLTextAreaElement>(".quick-note-input")!;
+    const input = document.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
     await act(async () => { setInputValue(input, "明天 14:00 在图书馆看书"); });
-    await act(async () => { document.querySelector<HTMLButtonElement>(".quick-note-actions .primary-action")!.click(); });
+    await act(async () => { document.querySelector<HTMLButtonElement>(".chat-send")!.click(); });
     await flush();
-    expect(document.querySelector(".smart-capture-dialog")).toBeTruthy();
-    expect(document.querySelector(".smart-capture-raw")?.textContent).toContain("明天 14:00 在图书馆看书");
+    expect(document.querySelector(".chat-capture-review")).toBeTruthy();
+    expect(document.body.textContent).toContain("明天 14:00 在图书馆看书");
   });
 
   it("resets the reminder to none when the all-day toggle invalidates its mode", async () => {
@@ -388,11 +385,7 @@ describe("app: create flow (browser demo)", () => {
     await flush();
     const sheet = host.querySelector(".composer-sheet")!;
 
-    // Open the details section to reach the reminder select.
-    const detailsToggle = [...sheet.querySelectorAll<HTMLButtonElement>("button.details-toggle")].find((button) => button.textContent?.includes("更多字段"))!;
-    await act(async () => { detailsToggle.click(); });
-    await flush();
-
+    // Repeat and reminder are plain fields on the sheet, always visible.
     const reminderTrigger = [...sheet.querySelectorAll<HTMLButtonElement>("button.glass-select-trigger")]
       .find((button) => button.getAttribute("aria-label") === "提醒")!;
     expect(reminderTrigger, "reminder select must be visible").toBeTruthy();
@@ -422,9 +415,9 @@ describe("app: create flow (browser demo)", () => {
 
     // Setting a timed value again, then toggling away and back, keeps the
     // select in a resolvable state in both modes (no stale cross-mode values).
-    await chooseOption("提前 15 分钟");
+    await chooseOption("提前 15min");
     await flush();
-    expect(reminderTrigger.textContent).toContain("提前 15 分钟");
+    expect(reminderTrigger.textContent).toContain("提前 15min");
     await act(async () => { allDayToggle.click(); }); // → all-day: 15min invalid → none
     await flush();
     await act(async () => { allDayToggle.click(); }); // → timed: none stays none

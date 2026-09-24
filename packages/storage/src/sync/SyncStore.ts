@@ -261,7 +261,15 @@ export class SyncStore {
       const header = JSON.parse(document.content.slice(0,document.content.indexOf("\n")));
       await this.db.execute("INSERT INTO sync_documents(path,hash,frontier_json) VALUES (?,?,?) ON CONFLICT(path) DO UPDATE SET hash=excluded.hash,frontier_json=excluded.frontier_json",[document.path,document.hash,JSON.stringify(header.frontier)]);
       const pending = await this.meta<SnapshotCandidate[]>(`pendingSnapshots:${backend}`,[]);
-      if (!pending.some((item)=>item.path===document.path)) { pending.push({path:document.path,hash:document.hash,createdAt:header.createdAt}); await this.putMeta(`pendingSnapshots:${backend}`,pending); }
+      if (!pending.some((item)=>item.path===document.path)) {
+        pending.push({path:document.path,hash:document.hash,createdAt:header.createdAt});
+        await this.putMeta(`pendingSnapshots:${backend}`,pending);
+        // The recycle bin expires by identity, not by comparing this device's
+        // delete timestamps against a snapshot's wall clock: the rows that
+        // exist at this cut are exactly the rows the snapshot covers.
+        const covered = await this.db.select<{ id: string }>("SELECT id FROM deleted_entries");
+        await this.putMeta(`snapshotCoverage:${backend}`, { path: document.path, ids: covered.map((row) => row.id) });
+      }
     }));
   }
   pendingGarbage(backend: string): Promise<string[]> { return this.run(() => this.meta<string[]>(`pendingGarbage:${backend}`, [])); }
@@ -275,9 +283,17 @@ export class SyncStore {
       }
       const previous = await this.meta<{ path: string; createdAt: string } | null>("snapshot:" + backend, null);
       if (previous?.path !== snapshot.path) {
-        // Only an acknowledged snapshot expires recovery. Preserve deletes made
-        // after its logical cut (including while a slow upload is in flight).
-        await this.db.execute("DELETE FROM deleted_entries WHERE julianday(deleted_at) <= julianday(?)", [snapshot.createdAt]);
+        // Only an acknowledged snapshot expires recovery, and only the rows its
+        // own cut covered — a delete made while the upload was in flight is
+        // never in that set, and no second clock can move the boundary.
+        const coverage = await this.meta<{ path: string; ids: string[] } | null>(`snapshotCoverage:${backend}`, null);
+        if (coverage?.path === snapshot.path) {
+          for (let start = 0; start < coverage.ids.length; start += 500) {
+            const chunk = coverage.ids.slice(start, start + 500);
+            await this.db.execute(`DELETE FROM deleted_entries WHERE id IN (${chunk.map(() => "?").join(",")})`, chunk);
+          }
+        }
+        await this.putMeta(`snapshotCoverage:${backend}`, null);
       }
       await this.putMeta("snapshot:" + backend, snapshot);
       await this.putMeta("lastBackend", backend);

@@ -83,12 +83,17 @@ export function DayPhotoBackground({ images, intervalMs = 7000, className, onOpe
   }, [incoming]);
 
   if (!shown) return null;
-  const frames = incoming && incoming !== shown ? [shown, incoming] : [shown];
+  const next = photos.length > 1 ? photos[(photos.indexOf(shown) + 1) % photos.length] : shown;
+  const frames = incoming && incoming !== shown
+    ? [shown, incoming]
+    : shown === next ? [shown] : [shown, next];
   return <>
     <span className={className ? `day-photo-bg ${className}` : "day-photo-bg"} aria-hidden="true">
-      <span className="day-photo-images">{frames.map(url => <img key={url} src={url} alt="" draggable={false}
+      <span className="day-photo-images">{frames.map((url, index) => <img key={index} src={url} alt="" draggable={false}
         ref={url === incoming ? incomingRef : undefined}
-        className={url === incoming ? `day-photo-frame is-incoming${fading ? " is-ready" : ""}` : "day-photo-frame is-current"} />)}</span>
+        className={url === incoming
+          ? `day-photo-frame is-incoming${fading ? " is-ready" : ""}`
+          : index === 0 ? "day-photo-frame is-current" : "day-photo-frame is-standby"} />)}</span>
       <span className="day-photo-scrim" />
     </span>
     {onOpen && <button type="button" className="day-photo-open" aria-label={openLabel} title={openLabel}

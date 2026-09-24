@@ -21,6 +21,7 @@ interface ChatContextPickerProps {
   onCustomRangeChange: (range: Partial<StatsRange>) => void;
   onToggle: (id: string) => void;
   onClear: () => void;
+  onClose: () => void;
 }
 
 const contextKinds: EntryKind[] = ["task", "event", "bill", "idea"];
@@ -46,6 +47,7 @@ export function ChatContextPicker({
   onCustomRangeChange,
   onToggle,
   onClear,
+  onClose,
 }: ChatContextPickerProps) {
   return (
     <section className="chat-context-panel" aria-label={t("aiChatContext", locale)}>
@@ -59,6 +61,9 @@ export function ChatContextPicker({
         </div>
         <div className="chat-context-actions">
           <button type="button" onClick={onClear} disabled={!selectedIds.length}>{t("aiChatContextClear", locale)}</button>
+          <button type="button" onClick={onClose} aria-label={t("close", locale)} title={t("close", locale)}>
+            <Icon name="close" size={12} />
+          </button>
         </div>
       </header>
       <div className="chat-context-controls">

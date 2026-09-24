@@ -45,6 +45,18 @@ pub async fn device_reverse_geocode(app: AppHandle, latitude: f64, longitude: f6
     call(app, "reverseGeocode", serde_json::json!({ "latitude": latitude, "longitude": longitude, "language": language })).await
 }
 
+/** Hand a downloaded APK to the system package installer for this app. */
+#[cfg(target_os = "android")]
+pub async fn install_update(app: AppHandle, path: String) -> Result<(), String> {
+    call(app, "installApk", serde_json::json!({ "path": path })).await.map(|_| ())
+}
+
+#[cfg(not(target_os = "android"))]
+#[allow(dead_code)] // Desktop installs go through the OS handler in `update`.
+pub async fn install_update(_app: AppHandle, _path: String) -> Result<(), String> {
+    Err("Native update install requires Android".into())
+}
+
 #[tauri::command]
 pub async fn background_command(app: AppHandle, action: String, language: Option<String>, reminders_enabled: Option<bool>, keys: Option<Vec<String>>) -> Result<Value, String> {
     if !["sync", "timerSync", "timerSnapshot", "consumeReminders", "ackReminders", "status", "alarmSettings", "batterySettings"].contains(&action.as_str()) {

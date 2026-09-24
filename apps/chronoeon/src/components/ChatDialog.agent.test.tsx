@@ -3,9 +3,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AIProviderConfig, AIChatMessage } from "@chronoeon/domain";
+import { createDefaultSettings } from "@chronoeon/domain";
 import type { Entry } from "../domain/entry";
 import { createMemoryConversationStore } from "../ai/memoryConversationStore";
 import { requestAICompletion } from "../ai/provider";
+import { askPresets } from "../ai/askPresets";
 import { ChatDialog } from "./ChatDialog";
 
 let host: HTMLDivElement;
@@ -13,11 +15,17 @@ let root: Root;
 let requests: AIChatMessage[][] = [];
 
 vi.mock("../ai/provider", () => ({
-  activeAIProvider: (preferences: { local: AIProviderConfig }) => preferences.local,
-  providerIsConfigured: () => true,
-  requestAICompletion: vi.fn(async (_provider: AIProviderConfig, messages: AIChatMessage[]) => {
+  activeAIProvider: (choice: { remote: AIProviderConfig }) => choice.remote,
+  askIsReady: () => true,
+  requestAICompletion: vi.fn(async (
+    _provider: AIProviderConfig,
+    messages: AIChatMessage[],
+    _schema: unknown,
+    _signal: unknown,
+    options?: { tools?: unknown[]; disableReasoning?: boolean },
+  ) => {
     requests.push(messages);
-    if (requests.length === 1) {
+    if (options?.tools?.length && requests.length === 1) {
       return {
         content: "",
         toolCalls: [{
@@ -30,7 +38,7 @@ vi.mock("../ai/provider", () => ({
         }],
       };
     }
-    return { content: "Tool answer." };
+    return { content: options?.tools?.length ? "Tool answer." : "Planned answer." };
   }),
 }));
 
@@ -56,12 +64,15 @@ function render(entries: Entry[]) {
         entries={entries}
         aiPreferences={{
           enabled: true,
-          backend: "local",
-          remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" },
-          local: { kind: "local-openai-compatible", baseUrl: "http://166.111.240.129:8080/v1", model: "Qwen3.8-27B" },
+          ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+          capture: { mode: "offline" },
         }}
         conversations={createMemoryConversationStore()}
+        settings={createDefaultSettings()}
+        initialMode="ask"
         onOpenEntry={() => undefined}
+        onConfirmCapture={vi.fn(async () => true)}
+        onOpenManualCapture={() => undefined}
         onOpenSettings={() => undefined}
         onClose={() => undefined}
       />,
@@ -100,5 +111,38 @@ describe("AI advisor model tool workflow", () => {
     expect(trace.textContent).toContain("饮食");
     expect(trace.textContent).toContain("1 条记录");
     expect(host.textContent).toContain("Tool answer.");
+  });
+
+  it("executes a preset's deterministic plan and asks for a grounded summary", async () => {
+    render([
+      { id: "breakfast", kind: "event", title: "早餐", date: "2026-09-18", start: "07:40", end: "08:00", category: "饮食", color: "#77787b", createdAt: "2026-09-18T12:00:00.000Z" },
+      { id: "old", kind: "event", title: "旧早餐", date: "2025-09-18", start: "07:40", end: "08:00", category: "饮食", color: "#77787b", createdAt: "2025-09-18T12:00:00.000Z" },
+    ]);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+
+    const preset = askPresets("zh").find((item) => item.id === "dietPattern")!;
+    const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    act(() => { setValue.call(textarea, preset.prompt); textarea.dispatchEvent(new Event("input", { bubbles: true })); });
+    act(() => { host.querySelector<HTMLButtonElement>(".chat-send")!.click(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+
+    expect(requests).toHaveLength(1);
+    const call = vi.mocked(requestAICompletion).mock.calls[0];
+    expect(call[4]?.tools).toBeUndefined();
+    expect(call[4]?.disableReasoning).toBe(true);
+    const messages = call[1];
+    expect(messages.at(-2)).toMatchObject({
+      role: "assistant",
+      tool_calls: [expect.objectContaining({ id: "dietPattern-0", function: expect.objectContaining({ name: "search_entries" }) })],
+    });
+    const toolMessage = messages.at(-1)!;
+    expect(toolMessage.role).toBe("tool");
+    expect(toolMessage.content).toContain("早餐");
+    expect(toolMessage.content).not.toContain("旧早餐");
+    expect(toolMessage.content).toContain("\"duration_minutes\":20");
+    expect(toolMessage.content).toContain("kinds=event=1");
+    expect(host.querySelector(".chat-tool-trace")?.textContent).toContain("检索条目");
+    expect(host.textContent).toContain("Planned answer.");
   });
 });

@@ -22,11 +22,13 @@ export { computeVaultImportId } from "./seed/seedIdempotency";
 export { AiConversationStore } from "./ai/aiConversationStore";
 export type {
   AiConversation,
+  AiConversationMode,
   AiConversationProviderKind,
   AiMessageRecord,
   AiMessageRole,
   NewAiConversation,
   NewAiMessage,
+  AiCaptureReviewRecord,
 } from "./ai/aiConversationStore";
 
 export { SyncStore } from "./sync/SyncStore";

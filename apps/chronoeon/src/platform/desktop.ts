@@ -13,6 +13,18 @@ export function isAndroidTauri(): boolean {
   return isTauri() && /Android/i.test(navigator.userAgent);
 }
 
+/** The running build. Native shells report their bundle version; the browser
+ *  demo reports the workspace version Vite embedded at build time. */
+export async function readAppVersion(): Promise<string> {
+  if (!isTauri()) return __APP_VERSION__;
+  try {
+    const { getVersion } = await import("@tauri-apps/api/app");
+    return await getVersion();
+  } catch {
+    return __APP_VERSION__;
+  }
+}
+
 export type DesktopWindowAction = "minimize" | "toggle-maximize" | "close";
 export type DesktopResizeDirection = "East" | "North" | "NorthEast" | "NorthWest" | "South" | "SouthEast" | "SouthWest" | "West";
 

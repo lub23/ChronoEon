@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AIProviderConfig, AIChatMessage } from "@chronoeon/domain";
+import { createDefaultSettings } from "@chronoeon/domain";
 import type { Entry } from "../domain/entry";
 import { createMemoryConversationStore } from "../ai/memoryConversationStore";
 import { requestAICompletion } from "../ai/provider";
@@ -12,12 +13,18 @@ import { ChatDialog } from "./ChatDialog";
 let host: HTMLDivElement;
 let root: Root;
 let capturedSystem = "";
+const dialogExtras = {
+  initialMode: "ask" as const,
+  settings: createDefaultSettings(),
+  onConfirmCapture: vi.fn(async () => true),
+  onOpenManualCapture: () => undefined,
+};
 
 vi.mock("../ai/provider", () => ({
-  activeAIProvider: (preferences: { local: AIProviderConfig }) => preferences.local,
-  providerIsConfigured: () => true,
+  activeAIProvider: (choice: { remote: AIProviderConfig }) => choice.remote,
+  askIsReady: () => true,
   requestAICompletion: vi.fn(async (_provider: AIProviderConfig, messages: AIChatMessage[]) => {
-    capturedSystem = messages[0]?.content ?? "";
+    capturedSystem = String(messages[0]?.content ?? "");
     return { content: "Context received." };
   }),
 }));
@@ -52,11 +59,11 @@ function ContextHost({ initialEntries, removeId }: { initialEntries: Entry[]; re
         entries={entries}
         aiPreferences={{
           enabled: true,
-          backend: "local",
-          remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" },
-          local: { kind: "local-openai-compatible", baseUrl: "http://166.111.240.129:8080/v1", model: "Qwen3.8-27B" },
+          ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+          capture: { mode: "offline" },
         }}
         conversations={createMemoryConversationStore()}
+        {...dialogExtras}
         onOpenEntry={() => undefined}
         onOpenSettings={() => undefined}
         onClose={() => undefined}
@@ -92,11 +99,11 @@ describe("AI chat context selection", () => {
           ]}
           aiPreferences={{
             enabled: true,
-            backend: "local",
-            remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" },
-            local: { kind: "local-openai-compatible", baseUrl: "http://166.111.240.129:8080/v1", model: "Qwen3.8-27B" },
+            ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+            capture: { mode: "offline" },
           }}
           conversations={conversations}
+          {...dialogExtras}
           onOpenEntry={() => undefined}
           onOpenSettings={() => undefined}
           onClose={() => undefined}
@@ -105,9 +112,9 @@ describe("AI chat context selection", () => {
     });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
 
-    act(() => { host.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
+    act(() => { host.querySelector<HTMLButtonElement>(".chat-tool")!.click(); });
     act(() => { host.querySelector<HTMLInputElement>(".chat-context-item input")!.click(); });
-    act(() => { host.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
+    act(() => { host.querySelector<HTMLButtonElement>(".chat-tool")!.click(); });
     const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
     if (!setValue) throw new Error("textarea value setter is unavailable");
@@ -118,7 +125,7 @@ describe("AI chat context selection", () => {
     act(() => { host.querySelector<HTMLButtonElement>(".chat-send")!.click(); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
 
-    expect(host.querySelector(".chat-context-toggle b")?.textContent).toBe("1");
+    expect(host.querySelector(".chat-tool b")?.textContent).toBe("1");
     expect(capturedSystem).toContain("Selected idea");
     expect(capturedSystem).not.toContain("Excluded task");
     expect(host.textContent).toContain("Context received.");
@@ -136,11 +143,11 @@ describe("AI chat context selection", () => {
           ]}
           aiPreferences={{
             enabled: true,
-            backend: "local",
-            remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" },
-            local: { kind: "local-openai-compatible", baseUrl: "http://166.111.240.129:8080/v1", model: "Qwen3.8-27B" },
+            ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+            capture: { mode: "offline" },
           }}
           conversations={conversations}
+          {...dialogExtras}
           onOpenEntry={() => undefined}
           onOpenSettings={() => undefined}
           onClose={() => undefined}
@@ -149,7 +156,7 @@ describe("AI chat context selection", () => {
     });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
 
-    act(() => { host.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
+    act(() => { host.querySelector<HTMLButtonElement>(".chat-tool")!.click(); });
     const lastWeek = [...host.querySelectorAll<HTMLButtonElement>(".chat-context-range-options button")]
       .find((button) => button.textContent === "Last 7 days")!;
     act(() => { lastWeek.click(); });
@@ -157,7 +164,7 @@ describe("AI chat context selection", () => {
     expect(host.textContent).not.toContain("Older idea");
 
     act(() => { host.querySelector<HTMLInputElement>(".chat-context-item input")!.click(); });
-    act(() => { host.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
+    act(() => { host.querySelector<HTMLButtonElement>(".chat-tool")!.click(); });
     const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
     if (!setValue) throw new Error("textarea value setter is unavailable");
@@ -186,11 +193,11 @@ describe("AI chat context selection", () => {
             ]}
             aiPreferences={{
               enabled: true,
-              backend: "local",
-              remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" },
-              local: { kind: "local-openai-compatible", baseUrl: "http://166.111.240.129:8080/v1", model: "Qwen3.8-27B" },
+              ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+              capture: { mode: "offline" },
             }}
             conversations={conversations}
+            {...dialogExtras}
             onOpenEntry={() => undefined}
             onOpenSettings={() => undefined}
             onClose={() => undefined}
@@ -199,7 +206,7 @@ describe("AI chat context selection", () => {
       });
       await act(async () => { await vi.advanceTimersByTimeAsync(30); });
 
-      act(() => { host.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
+      act(() => { host.querySelector<HTMLButtonElement>(".chat-tool")!.click(); });
       const custom = [...host.querySelectorAll<HTMLButtonElement>(".chat-context-range-options button")]
         .find((button) => button.textContent === "Custom")!;
       act(() => { custom.click(); });
@@ -230,11 +237,11 @@ describe("AI chat context selection", () => {
           entries={[entry("sel", "Carried idea", "2026-08-10"), entry("other", "Other idea", "2026-08-11")]}
           aiPreferences={{
             enabled: true,
-            backend: "local",
-            remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" },
-            local: { kind: "local-openai-compatible", baseUrl: "http://166.111.240.129:8080/v1", model: "Qwen3.8-27B" },
+            ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+            capture: { mode: "offline" },
           }}
           conversations={conversations}
+          {...dialogExtras}
           onOpenEntry={() => undefined}
           onOpenSettings={() => undefined}
           onClose={() => undefined}
@@ -244,13 +251,13 @@ describe("AI chat context selection", () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
 
     // The composer status line names the answering model from the start.
-    expect(host.querySelector(".chat-composer-meta .chat-composer-model")?.textContent).toContain("Qwen3.8-27B");
+    expect(host.querySelector(".chat-composer-meta .chat-composer-model")?.textContent).toContain("remote");
     expect(host.querySelector(".chat-composer-tokens")).toBeNull();
 
     // Selecting an entry grows a thumbnail button; the popup lists it.
-    act(() => { host.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
+    act(() => { host.querySelector<HTMLButtonElement>(".chat-tool")!.click(); });
     act(() => { host.querySelector<HTMLInputElement>(".chat-context-item input")!.click(); });
-    act(() => { host.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
+    act(() => { host.querySelector<HTMLButtonElement>(".chat-tool")!.click(); });
     const thumb = host.querySelector<HTMLButtonElement>(".chat-carried-toggle")!;
     expect(thumb.querySelectorAll("i")).toHaveLength(1);
     act(() => { thumb.click(); });
@@ -262,9 +269,9 @@ describe("AI chat context selection", () => {
     expect(host.querySelector(".chat-carried-toggle")).toBeNull();
 
     // A reply reports its token spend on the composer status line.
-    act(() => { host.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
+    act(() => { host.querySelector<HTMLButtonElement>(".chat-tool")!.click(); });
     act(() => { host.querySelector<HTMLInputElement>(".chat-context-item input")!.click(); });
-    act(() => { host.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
+    act(() => { host.querySelector<HTMLButtonElement>(".chat-tool")!.click(); });
     const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
     if (!setValue) throw new Error("textarea value setter is unavailable");
@@ -286,14 +293,14 @@ describe("AI chat context selection", () => {
     const localRoot = createRoot(localHost);
     act(() => { localRoot.render(<ContextHost initialEntries={[entry("gone", "Temporary idea", "2026-08-10")]} removeId="gone" />); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
-    act(() => { localHost.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
+    act(() => { localHost.querySelector<HTMLButtonElement>(".chat-tool")!.click(); });
     act(() => { localHost.querySelector<HTMLInputElement>(".chat-context-item input")!.click(); });
-    act(() => { localHost.querySelector<HTMLButtonElement>(".chat-context-toggle")!.click(); });
-    expect(localHost.querySelector(".chat-context-toggle b")?.textContent).toBe("1");
+    act(() => { localHost.querySelector<HTMLButtonElement>(".chat-tool")!.click(); });
+    expect(localHost.querySelector(".chat-tool b")?.textContent).toBe("1");
 
     act(() => { localHost.querySelector<HTMLButtonElement>(".remove-entry")!.click(); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
-    expect(localHost.querySelector(".chat-context-toggle b")).toBeNull();
+    expect(localHost.querySelector(".chat-tool b")).toBeNull();
     act(() => { localRoot.unmount(); });
     localHost.remove();
   });

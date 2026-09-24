@@ -1,7 +1,7 @@
 import type { SVGProps } from "react";
 
 export type IconName =
-  | "agenda" | "month" | "week" | "day" | "idea" | "insights" | "plus" | "search" | "folder"
+  | "agenda" | "month" | "week" | "day" | "idea" | "insights" | "plus" | "minus" | "search" | "folder"
   | "sun" | "moon" | "languages" | "chevron-left" | "chevron-right" | "calendar"
   | "check" | "clock" | "wallet" | "sparkle" | "more" | "pin" | "expand"
   | "chevron-double-left" | "chevron-double-right"
@@ -19,6 +19,7 @@ const paths: Record<IconName, React.ReactNode> = {
   idea: <><path d="M9 18h6M10 22h4"/><path d="M8.4 14.7A7 7 0 1 1 15.6 14.7C14.6 15.4 14 16.6 14 18h-4c0-1.4-.6-2.6-1.6-3.3Z"/></>,
   insights: <><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></>,
   plus: <path d="M12 5v14M5 12h14"/>,
+  minus: <path d="M5 12h14"/>,
   search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
   folder: <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>,
   sun: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></>,

@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe("GlassTimePicker", () => {
-  it("accepts exact minutes in the field and opens a cyclic wheel from the icon", async () => {
+  it("is the mobile dial on every device, with no text field to keep in sync", async () => {
     let committed: string | undefined;
     let current = "09:00";
     function StatefulTimePicker() {
@@ -42,30 +42,22 @@ describe("GlassTimePicker", () => {
     act(() => {
       root.render(<StatefulTimePicker />);
     });
-    const input = host.querySelector<HTMLInputElement>(".glass-time-input")!;
-    expect(input).toBeTruthy();
-    expect(input.step).toBe("60");
-    expect(input.value).toBe("09:00");
+    expect(host.querySelector(".glass-time-input")).toBeNull();
+    const trigger = host.querySelector<HTMLButtonElement>(".glass-time-trigger")!;
+    expect(trigger.textContent).toContain("09:00");
 
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set?.call(input, "09:07");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    expect(committed).toBe("09:07");
-
-    await act(async () => {
-      host.querySelector<HTMLButtonElement>(".glass-time-toggle")!.click();
-    });
-    const popup = document.querySelector(".glass-picker-popup--time");
+    await act(async () => { trigger.click(); });
+    const popup = document.querySelector(".glass-picker-popup--dial");
     expect(popup).toBeTruthy();
-    expect(popup?.querySelector(".glass-time-entry")).toBeNull();
-    expect([...popup!.querySelectorAll(".glass-time-column")].map((column) => column.getAttribute("aria-label")))
-      .toEqual(["小时", "分钟"]);
+    const hours = popup!.querySelector<SVGGElement>('[role="slider"][aria-label="小时"]')!;
+    const minutes = popup!.querySelector<SVGGElement>('[role="slider"][aria-label="分钟"]')!;
+    expect(hours.getAttribute("aria-valuenow")).toBe("9");
+    expect(minutes.getAttribute("aria-valuenow")).toBe("0");
 
-    const hourButton = [...popup!.querySelectorAll<HTMLButtonElement>(".glass-time-column > div button")]
-      .find((button) => button.textContent === "10")!;
-    await act(async () => { hourButton.click(); });
-    expect(committed).toBe("10:07");
+    await act(async () => { hours.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true })); });
+    expect(committed).toBe("10:00");
+    await act(async () => { minutes.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true })); });
+    expect(committed).toBe("10:01");
+    expect(host.querySelector<HTMLButtonElement>(".glass-time-trigger")!.textContent).toContain("10:01");
   });
 });

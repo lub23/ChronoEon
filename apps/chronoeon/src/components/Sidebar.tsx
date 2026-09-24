@@ -1,10 +1,11 @@
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useTouchDevice } from "../hooks/useTouchDevice";
 import type { AppView, Locale } from "../domain/entry";
 import { t, type MessageKey } from "../i18n";
 import { formatAccelerator } from "../platform/globalShortcut";
 import { Brand } from "./Brand";
 import { Icon, type IconName } from "./Icon";
+import { SidebarUpdate } from "./SidebarUpdate";
 
 interface SidebarProps {
   locale: Locale;
@@ -16,7 +17,6 @@ interface SidebarProps {
   onCollapsedChange: (collapsed: boolean) => void;
   onNew: () => void;
   onCompact: () => void;
-  onChat: () => void;
   onOpenSettings: () => void;
 }
 
@@ -39,12 +39,38 @@ export function Sidebar({
   onCollapsedChange,
   onNew,
   onCompact,
-  onChat,
   onOpenSettings,
 }: SidebarProps) {
   const touchDevice = useTouchDevice();
   const label = (key: MessageKey) => t(key, locale);
   const keyboardHint = t("keyboardHint", locale);
+  const [dayMenuOpen, setDayMenuOpen] = useState(false);
+  const dayGroupRef = useRef<HTMLDivElement>(null);
+  const minDayCount = 1;
+  const maxDayCount = 6;
+  // The day menu exists for the collapsed rail only: expanded, the stepper is
+  // already on screen and a menu would duplicate it.
+  const dayMenuVisible = collapsed && dayMenuOpen && activeView === "day";
+
+  useEffect(() => {
+    if (!dayMenuVisible) return;
+    const dismiss = (event: Event) => {
+      if (dayGroupRef.current?.contains(event.target as Node)) return;
+      // The day row is the trigger: its own click decides open or closed.
+      if ((event.target as Element | null)?.closest?.(".nav-day-item")) return;
+      setDayMenuOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setDayMenuOpen(false); };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [dayMenuVisible]);
+
+  useEffect(() => { if (!collapsed) setDayMenuOpen(false); }, [collapsed]);
+  useEffect(() => { if (activeView !== "day") setDayMenuOpen(false); }, [activeView]);
 
   return (
     <aside className={collapsed ? "sidebar is-collapsed" : "sidebar"}>
@@ -72,25 +98,70 @@ export function Sidebar({
           <Fragment key={item.id}>
             <button
               type="button"
-              className={activeView === item.id ? "nav-item is-active" : "nav-item"}
-              onClick={() => onViewChange(item.id)}
+              className={(activeView === item.id ? "nav-item is-active" : "nav-item") + (item.id === "day" ? " nav-day-item" : "")}
+              onClick={() => {
+                // Collapsed, the day row behaves like the Dock: selecting the
+                // calendar opens the day-range menu instead of a dead click.
+                if (item.id === "day" && collapsed) {
+                  if (activeView === "day") setDayMenuOpen((open) => !open);
+                  else onViewChange("day");
+                  return;
+                }
+                onViewChange(item.id);
+              }}
               aria-label={label(item.label)}
               aria-current={activeView === item.id ? "page" : undefined}
+              aria-expanded={item.id === "day" && collapsed ? dayMenuVisible : undefined}
               title={label(item.label)}
             >
               <Icon name={item.icon} size={19} />
               {!collapsed && <span>{t(item.label, locale)}</span>}
+              {item.id === "day" && collapsed && dayCount > 1 && <b className="nav-day-badge">{dayCount}</b>}
               {item.id === "ideas" && !collapsed && <span className="nav-dot" />}
             </button>
-            {item.id === "day" && activeView === "day" && !collapsed && onDayCountChange && (
-              <label className="sidebar-day-count">
-                <span>{t("dayCount", locale)}</span>
-                <select value={dayCount} onChange={(event) => onDayCountChange(Number(event.target.value))} aria-label={t("dayCount", locale)}>
-                  {[1, 2, 3, 4, 5, 6].map((days) => (
-                    <option key={days} value={days}>{locale === "zh" ? `${days} 天` : days === 1 ? "1 day" : `${days} days`}</option>
+            {item.id === "day" && dayMenuVisible && (
+              <div className="nav-day-wrap" ref={dayGroupRef}>
+                <div className="view-dock-days-menu nav-day-menu" role="menu" aria-label={t("dayCount", locale)}>
+                  {Array.from({ length: maxDayCount }, (_, index) => index + 1).map((count) => (
+                    <button
+                      key={count}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={count === dayCount}
+                      className={count === dayCount ? "is-selected" : ""}
+                      onClick={() => { onDayCountChange?.(count); onViewChange("day"); setDayMenuOpen(false); }}
+                    >
+                      {count === dayCount ? <Icon name="check" size={12} /> : <i />}
+                      {locale === "zh" ? `${count} 天` : count === 1 ? "1 day" : `${count} days`}
+                    </button>
                   ))}
-                </select>
-              </label>
+                </div>
+              </div>
+            )}
+            {item.id === "day" && activeView === "day" && !collapsed && onDayCountChange && (
+              <div className="sidebar-day-count" role="group" aria-label={t("dayCount", locale)}>
+                <button
+                  type="button"
+                  className="sidebar-day-step"
+                  disabled={dayCount <= minDayCount}
+                  onClick={() => onDayCountChange(Math.max(minDayCount, dayCount - 1))}
+                  aria-label={t("dayCountDecrease", locale)}
+                  title={t("dayCountDecrease", locale)}
+                >
+                  <Icon name="minus" size={12} />
+                </button>
+                <span className="sidebar-day-value" aria-live="polite">{dayCount}</span>
+                <button
+                  type="button"
+                  className="sidebar-day-step"
+                  disabled={dayCount >= maxDayCount}
+                  onClick={() => onDayCountChange(Math.min(maxDayCount, dayCount + 1))}
+                  aria-label={t("dayCountIncrease", locale)}
+                  title={t("dayCountIncrease", locale)}
+                >
+                  <Icon name="plus" size={12} />
+                </button>
+              </div>
             )}
           </Fragment>
         ))}
@@ -101,13 +172,11 @@ export function Sidebar({
       <button type="button" className="sidebar-utility" onClick={onCompact} aria-label={label("miniWindow")} title={label("miniWindow")}>
         <Icon name="pin" size={15} />{!collapsed && <span>{t("miniWindow", locale)}</span>}
       </button>
-      <button type="button" className="sidebar-utility" onClick={onChat} aria-label={label("aiChatTitle")} title={label("aiChatTitle")}>
-        <Icon name="sparkle" size={15} />{!collapsed && <span>{t("aiChatTitle", locale)}</span>}
-      </button>
       <button type="button" className="sidebar-utility" onClick={onOpenSettings} aria-label={label("settings")} title={label("settings")}>
         <Icon name="settings" size={15} />{!collapsed && <span>{t("settings", locale)}</span>}
         {!collapsed && !touchDevice && <kbd>{formatAccelerator("Control+,")}</kbd>}
       </button>
+      <SidebarUpdate locale={locale} collapsed={collapsed} />
       {!collapsed && !touchDevice && <p className="sidebar-hint"><Icon name="command" size={14} /> {keyboardHint}</p>}
     </aside>
   );

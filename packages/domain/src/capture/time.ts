@@ -107,7 +107,11 @@ function extractDuration(text: CaptureText): { minutes: number; days: number } {
   return { minutes: Math.round(minutes), days };
 }
 
-export function extractTime(text: CaptureText, now: Date): { date: string; start?: string; end?: string; endDate?: string; allDay: boolean } {
+export function extractTime(
+  text: CaptureText,
+  now: Date,
+  historicalDuration = 60,
+): { date: string; start?: string; end?: string; endDate?: string; allDay: boolean } {
   let date = extractDate(text, now);
   const input = remainingText(text);
   const pattern = new RegExp("(?<![\\d:])(?:at\\s+)?(?:((?:" + PERIOD + "))\\s*)?(" + CLOCK + ")(?![\\d:])", "gi");
@@ -141,7 +145,7 @@ export function extractTime(text: CaptureText, now: Date): { date: string; start
     }
   }
   if (start === undefined) return { date, start: undefined, end: undefined, allDay: true, endDate: duration.days > 1 ? addIsoDays(date, duration.days - 1) : undefined };
-  end ??= start + (duration.minutes + duration.days * 1440 || 60);
+  end ??= start + (duration.minutes + duration.days * 1440 || historicalDuration);
   if (end < start) end += 1440;
   const clock = (minutes: number) => pad(Math.floor(minutes / 60) % 24) + ":" + pad(minutes % 60);
   return { date, start: clock(start), end: clock(end), endDate: end >= 1440 ? addIsoDays(date, Math.floor(end / 1440)) : undefined, allDay: false };

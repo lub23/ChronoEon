@@ -70,13 +70,15 @@ function pickImageFiles(multiple: boolean, capture = false): Promise<File[]> {
   });
 }
 
-async function pickPhotoPath(): Promise<string | null> {
+/** One native dialog, honouring the caller's single/multi choice. */
+async function pickPhotoPaths(multiple: boolean): Promise<string[]> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const selected = await open({
-    multiple: false,
+    multiple,
     filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "heic", "heif"] }],
   });
-  return typeof selected === "string" ? selected : null;
+  if (!selected) return [];
+  return Array.isArray(selected) ? selected : [selected];
 }
 
 async function compressPickedPhoto(sourcePath: string, fileName: string): Promise<CompressedPhoto> {
@@ -158,13 +160,7 @@ export async function pickEntryAttachments(
 
   if (isTauri()) {
     // Native path picker → Rust compress pipeline → local attachment path.
-    const paths: string[] = [];
-    while (true) {
-      const path = await pickPhotoPath();
-      if (!path) break;
-      paths.push(path);
-      if (!multiple) break;
-    }
+    const paths = await pickPhotoPaths(multiple);
     for (const path of paths) {
       const name = path.split(/[\\/]/).pop() ?? "photo";
       try {
@@ -193,6 +189,28 @@ export async function pickEntryAttachments(
     }
   }
   return { picked, skipped };
+}
+
+/**
+ * Store one in-memory image — a pasted screenshot or a dropped file — through
+ * the same compression and content-addressed storage as the picker.
+ */
+export async function storeAttachmentFile(file: File): Promise<AttachmentPick | null> {
+  try {
+    if (isTauri()) {
+      const compressed = await compressPickedFile(file);
+      const reference = attachmentReference(compressed.sha256);
+      const displayUrl = await resolveAttachmentUrl(reference) ?? "";
+      return { reference, displayUrl, name: file.name || "photo", persisted: true };
+    }
+    const buffer = await compressDemoFile(file);
+    const displayUrl = URL.createObjectURL(buffer);
+    sessionUrls.set(displayUrl, displayUrl);
+    return { reference: displayUrl, displayUrl, name: file.name || "photo", persisted: false };
+  } catch (error) {
+    console.warn("Could not store the pasted photo", error);
+    return null;
+  }
 }
 
 /**
@@ -227,6 +245,62 @@ export function releaseAttachment(reference: string): void {
   const url = sessionUrls.get(reference);
   if (url && url.startsWith("blob:") && url === reference) URL.revokeObjectURL(url);
   sessionUrls.delete(reference);
+}
+
+/**
+ * Inline data URL for a picked photo, for providers that accept images in the
+ * request body. Local files go through the same validated native read as
+ * display; the browser demo converts its session blob in memory.
+ */
+export async function attachmentDataUrl(reference: string): Promise<string | null> {
+  const url = await resolveAttachmentUrl(reference);
+  if (!url) return null;
+  if (url.startsWith("data:")) return url;
+  if (!url.startsWith("blob:")) return null;
+  try {
+    const blob = await (await fetch(url)).blob();
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.warn("Could not read attachment data", error);
+    return null;
+  }
+}
+
+/** Long edge of the copy that is sent to a model; enough to read a receipt. */
+const MODEL_IMAGE_MAX_EDGE = 1280;
+const MODEL_IMAGE_QUALITY = 0.78;
+
+/**
+ * Downscaled copy of a stored photo for the model payload. The stored original
+ * is never modified, so the entry keeps its full-quality photo.
+ */
+export async function attachmentModelImage(reference: string): Promise<string | null> {
+  const raw = await attachmentDataUrl(reference);
+  if (!raw) return null;
+  try {
+    const bitmap = await createImageBitmap(await (await fetch(raw)).blob());
+    const scale = Math.min(1, MODEL_IMAGE_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) {
+      bitmap.close();
+      return raw;
+    }
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    return canvas.toDataURL("image/jpeg", MODEL_IMAGE_QUALITY);
+  } catch (error) {
+    // Older WebViews can fail to decode; sending the stored copy is still valid.
+    console.warn("Could not downscale the photo for the model", error);
+    return raw;
+  }
 }
 
 export function isDisplayableAttachment(reference: string): boolean {

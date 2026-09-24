@@ -6,6 +6,8 @@ import type { PersistencePort, SqlParam } from "../persistence/PersistencePort";
 
 export type AiConversationProviderKind = "openai-compatible" | "local-openai-compatible";
 export type AiMessageRole = "system" | "user" | "assistant";
+/** Which composer produced the conversation; the history rail follows it. */
+export type AiConversationMode = "capture" | "ask";
 
 export interface AiConversation {
   id: string;
@@ -13,6 +15,7 @@ export interface AiConversation {
   baseUrl?: string;
   model?: string;
   title?: string;
+  mode: AiConversationMode;
   createdAt: string;
   updatedAt: string;
   archivedAt?: string;
@@ -36,6 +39,7 @@ export interface NewAiConversation {
   baseUrl?: string;
   model?: string;
   title?: string;
+  mode?: AiConversationMode;
   parentEntryId?: string;
 }
 
@@ -48,12 +52,28 @@ export interface NewAiMessage {
   proposedEntryId?: string | null;
 }
 
+/**
+ * A parsed capture review waiting for the user's confirmation. It is local UI
+ * state for one conversation — the drafts never sync, so the payload stays an
+ * opaque JSON array owned by the caller.
+ */
+export interface AiCaptureReviewRecord {
+  conversationId: string;
+  messageId: string;
+  source: string;
+  drafts: unknown[];
+  edited: boolean;
+  saved: boolean;
+  updatedAt: string;
+}
+
 interface ConversationRow {
   id: string;
   provider_kind: string;
   base_url: string | null;
   model: string | null;
   title: string | null;
+  mode: string | null;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
@@ -72,7 +92,17 @@ interface MessageRow {
   proposed_entry_id: string | null;
 }
 
-const CONVERSATION_COLUMNS = "id, provider_kind, base_url, model, title, created_at, updated_at, archived_at, parent_entry_id";
+interface CaptureReviewRow {
+  conversation_id: string;
+  message_id: string;
+  source: string;
+  drafts_json: string;
+  edited: number;
+  saved: number;
+  updated_at: string;
+}
+
+const CONVERSATION_COLUMNS = "id, provider_kind, base_url, model, title, mode, created_at, updated_at, archived_at, parent_entry_id";
 const MESSAGE_COLUMNS = "id, conversation_id, role, content, reasoning_content, prompt_tokens, completion_tokens, created_at, proposed_entry_id";
 
 function conversationFromRow(row: ConversationRow): AiConversation {
@@ -82,6 +112,8 @@ function conversationFromRow(row: ConversationRow): AiConversation {
     baseUrl: row.base_url ?? undefined,
     model: row.model ?? undefined,
     title: row.title ?? undefined,
+    // A peer that has not migrated yet publishes no mode; those rows stay Ask.
+    mode: row.mode === "capture" ? "capture" : "ask",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     archivedAt: row.archived_at ?? undefined,
@@ -170,6 +202,46 @@ export class AiConversationStore {
     });
   }
 
+  /** Persist the pending review so closing the dialog cannot lose it. */
+  saveCaptureReview(review: AiCaptureReviewRecord): Promise<void> {
+    return runDatabaseOperation(this.backend, async () => {
+      await this.backend.execute(
+        `INSERT INTO ai_capture_reviews (conversation_id, message_id, source, drafts_json, edited, saved, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(conversation_id) DO UPDATE SET message_id=excluded.message_id, source=excluded.source,
+           drafts_json=excluded.drafts_json, edited=excluded.edited, saved=excluded.saved, updated_at=excluded.updated_at`,
+        [review.conversationId, review.messageId, review.source, JSON.stringify(review.drafts),
+          review.edited ? 1 : 0, review.saved ? 1 : 0, review.updatedAt],
+      );
+    });
+  }
+
+  loadCaptureReview(conversationId: string): Promise<AiCaptureReviewRecord | null> {
+    return runDatabaseOperation(this.backend, async () => {
+      const rows = await this.backend.select<CaptureReviewRow>(
+        "SELECT conversation_id, message_id, source, drafts_json, edited, saved, updated_at FROM ai_capture_reviews WHERE conversation_id = ?",
+        [conversationId],
+      );
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        conversationId: row.conversation_id,
+        messageId: row.message_id,
+        source: row.source,
+        drafts: JSON.parse(row.drafts_json) as unknown[],
+        edited: row.edited === 1,
+        saved: row.saved === 1,
+        updatedAt: row.updated_at,
+      };
+    });
+  }
+
+  deleteCaptureReview(conversationId: string): Promise<void> {
+    return runDatabaseOperation(this.backend, async () => {
+      await this.backend.execute("DELETE FROM ai_capture_reviews WHERE conversation_id = ?", [conversationId]);
+    });
+  }
+
 
   private async createConversationDirect(input: NewAiConversation): Promise<AiConversation> {
     const now = new Date().toISOString();
@@ -179,6 +251,7 @@ export class AiConversationStore {
       base_url: input.baseUrl ?? null,
       model: input.model ?? null,
       title: input.title ?? null,
+      mode: input.mode ?? "ask",
       created_at: now,
       updated_at: now,
       archived_at: null,

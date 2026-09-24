@@ -27,6 +27,8 @@ class LocateArgs { var timeoutMs: Long = 12000 }
 class GeocodeArgs { var latitude: Double = Double.NaN; var longitude: Double = Double.NaN; var language: String = "en" }
 @InvokeArg
 class BackgroundArgs { var action: String = ""; var database: String = ""; var language: String = "en"; var remindersEnabled: Boolean = false; var keys: Array<String> = emptyArray() }
+@InvokeArg
+class InstallArgs { var path: String = "" }
 
 @TauriPlugin(permissions = [
     Permission(alias = "location", strings = [Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION])
@@ -132,6 +134,25 @@ class DevicePlugin(private val activity: Activity) : Plugin(activity) {
                 value.keys().forEach { key -> output.put(key, value.get(key)) }
                 invoke.resolve(output)
             } catch (_: Exception) { invoke.reject("timing-service-unavailable") }
+        }
+    }
+
+    /** A downloaded APK goes to the system installer; the app never installs silently. */
+    @Command
+    fun installApk(invoke: Invoke) = activity.runOnUiThread {
+        val args = invoke.parseArgs(InstallArgs::class.java)
+        val file = java.io.File(args.path)
+        if (!file.isFile) { invoke.reject("update-file-missing"); return@runOnUiThread }
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(activity, activity.packageName + ".fileprovider", file)
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(intent)
+            invoke.resolve(JSObject())
+        } catch (_: Exception) {
+            invoke.reject("update-install-unavailable")
         }
     }
 

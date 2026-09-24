@@ -1,5 +1,6 @@
 import { createEntryId } from "@chronoeon/domain";
 import type {
+  AiCaptureReviewRecord,
   AiConversation,
   AiMessageRecord,
   NewAiConversation,
@@ -21,6 +22,10 @@ export interface AiConversationApi {
   renameConversation(id: string, title: string): Promise<void>;
   unarchiveConversation(id: string): Promise<void>;
   deleteConversation(id: string): Promise<void>;
+  /** Local-only draft state, kept next to the conversation it belongs to. */
+  saveCaptureReview(review: AiCaptureReviewRecord): Promise<void>;
+  loadCaptureReview(conversationId: string): Promise<AiCaptureReviewRecord | null>;
+  deleteCaptureReview(conversationId: string): Promise<void>;
 }
 
 /**
@@ -31,6 +36,7 @@ export interface AiConversationApi {
  */
 export function createMemoryConversationStore(): AiConversationApi {
   const conversations = new Map<string, MemoryConversation>();
+  const reviews = new Map<string, AiCaptureReviewRecord>();
 
   return {
     async createConversation(input: NewAiConversation): Promise<AiConversation> {
@@ -41,6 +47,7 @@ export function createMemoryConversationStore(): AiConversationApi {
         baseUrl: input.baseUrl,
         model: input.model,
         title: input.title,
+        mode: input.mode ?? "ask",
         createdAt: now,
         updatedAt: now,
         messages: [],
@@ -98,6 +105,18 @@ export function createMemoryConversationStore(): AiConversationApi {
     },
     async deleteConversation(id: string): Promise<void> {
       conversations.delete(id);
+      reviews.delete(id);
+    },
+    async saveCaptureReview(review: AiCaptureReviewRecord): Promise<void> {
+      if (!conversations.has(review.conversationId)) throw new Error(`Conversation ${review.conversationId} does not exist`);
+      reviews.set(review.conversationId, structuredClone(review));
+    },
+    async loadCaptureReview(conversationId: string): Promise<AiCaptureReviewRecord | null> {
+      const review = reviews.get(conversationId);
+      return review ? structuredClone(review) : null;
+    },
+    async deleteCaptureReview(conversationId: string): Promise<void> {
+      reviews.delete(conversationId);
     },
   };
 }

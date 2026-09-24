@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { MotionPresence, createMotionPortal as createPortal } from "./MotionPresence";
 import { Icon } from "./Icon";
 
@@ -8,6 +8,8 @@ export interface GlassSelectOption {
   label: string;
   color?: string;
   group?: string;
+  /** Custom marker before the label; falls back to `color`'s dot. */
+  mark?: ReactNode;
 }
 
 interface GlassSelectBaseProps {
@@ -182,7 +184,7 @@ export function GlassSelect(props: GlassSelectProps) {
             {isSelected && <Icon name="check" size={10} />}
           </span>}
           <i className="glass-select-mark">
-            {option.color ? <b style={{ background: option.color }} /> : isSelected ? <b /> : null}
+            {option.mark ?? (option.color ? <b style={{ background: option.color }} /> : isSelected ? <b /> : null)}
           </i>
           <span>{option.label}</span>
         </button>
@@ -206,9 +208,13 @@ export function GlassSelect(props: GlassSelectProps) {
         onKeyDown={onTriggerKeyDown}
       >
         <span className="glass-select-value">
-          {!props.multiple && <i className="glass-select-mark">
-            {selected?.color ? <b style={{ background: selected.color }} /> : null}
-          </i>}
+          {/* No mark, no gutter: only a marked option (the category colour)
+              indents its text. */}
+          {!props.multiple && selected && (selected.mark || selected.color) && (
+            <i className="glass-select-mark">
+              {selected.mark ?? <b style={{ background: selected.color }} />}
+            </i>
+          )}
           {props.multiple ? props.summaryLabel : selected?.label ?? "\u00a0"}
           {props.multiple && <small className="glass-select-count">{props.value.length}/{options.length}</small>}
         </span>

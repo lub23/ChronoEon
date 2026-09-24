@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { addDays, addMonths, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { draftToEntry, entriesForDate, isAppView, resolveEntryColor, type AppView, type DueReminder, type Entry, type EntryDraft, type EntryStatus, type Locale, type ThemeMode } from "./domain/entry";
 import { EMPTY_ENTRY_FILTER, entryMatchesFilter, filterActive, type EntryFilter } from "./domain/entryFilter";
-import { billCategoryOptions, createDefaultSettings, createEntryId, formatEntryTime, normalizeChronoEonSettings, outstandingTaskSections, scheduleCategoryOptions, timerSessionToDraft, type ChronoEonSettings, type TimerSegment, type TimerSession } from "@chronoeon/domain";
+import { billCategoryOptions, createDefaultSettings, createEntryId, formatEntryTime, normalizeChronoEonSettings, outstandingTaskSections, scheduleCategoryOptions, timerSessionToDraft, type AIProviderConfig, type ChronoEonSettings, type TimerSegment, type TimerSession } from "@chronoeon/domain";
 import type { LunarPreference } from "./domain/lunar";
 import { entryToDraft, entryWithDraft, entryWithOccurrenceMove, entryWithOccurrenceStatus, sourceEntryId, type EntryEditContext } from "./domain/entryWorkflow";
 import { entryMatchesSearch } from "./domain/search";
@@ -49,11 +49,10 @@ import { Icon } from "./components/Icon";
 import { IdeasView } from "./components/IdeasView";
 import { StatsView } from "./components/StatsView";
 import { MonthView } from "./components/MonthView";
+import { PhotoWallView } from "./components/PhotoWallView";
 import { EntryContextMenu, type EntryMenuTarget } from "./components/EntryContextMenu";
 import { TimerPill, TimerWidget } from "./components/TimerWidget";
 import { DayView } from "./components/DayView";
-import { QuickNoteDialog } from "./components/QuickNoteDialog";
-import { SmartCaptureDialog } from "./components/SmartCaptureDialog";
 import { TaskSummaryPopover } from "./components/TaskSummaryList";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -72,11 +71,10 @@ import { subscribeImagePreview } from "./components/photoPreviewBus";
 import { MotionPresence } from "./components/MotionPresence";
 import { useVisualViewport } from "./hooks/useVisualViewport";
 import { navigationPageKey, useSwipeNavigation } from "./hooks/useSwipeNavigation";
-import { clearSmartCaptureRecovery, readSmartCaptureRecovery, writeSmartCaptureRecovery, type SmartCaptureRecoveryState } from "./ai/draftRecovery";
 import { createMemoryConversationStore, type AiConversationApi } from "./ai/memoryConversationStore";
 import {
   activeAIProvider,
-  providerIsConfigured,
+  askIsReady,
   warmUpAIProvider,
   fetchAIModels,
   hasLocalAIKey as hasStoredLocalAIKey,
@@ -88,7 +86,10 @@ import {
   clearLocalAIKey as clearStoredLocalAIKey,
   saveRemoteAIKey as storeRemoteAIKey,
   clearRemoteAIKey as clearStoredRemoteAIKey,
+  readLocalAIHeaders,
+  saveLocalAIHeaders as storeLocalAIHeaders,
   writeAIProviderPreferences,
+  type AICustomHeader,
   type AIProviderPreferences,
 } from "./ai/provider";
 
@@ -192,10 +193,8 @@ function App() {
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [editingSourceEntry, setEditingSourceEntry] = useState<Entry | null>(null);
   const [composerSeed, setComposerSeed] = useState<Partial<EntryDraft> | undefined>(undefined);
-  const [smartCaptureRecovery, setSmartCaptureRecovery] = useState<SmartCaptureRecoveryState | null>(() => readSmartCaptureRecovery());
-  const [smartCaptureRaw, setSmartCaptureRaw] = useState<string | null>(() => readSmartCaptureRecovery()?.raw ?? null);
-  const [quickNoteOpen, setQuickNoteOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatInitialMode, setChatInitialMode] = useState<"capture" | "ask">("capture");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection>("general");
   const [reminderNotice, setReminderNotice] = useState<DueReminder[] | null>(null);
@@ -203,6 +202,7 @@ function App() {
   const [aiPreferences, setAIPreferencesState] = useState<AIProviderPreferences>(readAIProviderPreferences);
   const [localKeyStored, setLocalKeyStored] = useState(false);
   const [remoteKeyStored, setRemoteKeyStored] = useState(false);
+  const [localAIHeaders, setLocalAIHeaders] = useState<AICustomHeader[]>([]);
   const [transferBusy, setTransferBusy] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -214,7 +214,9 @@ function App() {
   const [lowEndMode, setLowEndMode] = usePersistentPreference<boolean>("lowEndMode", false);
   const [syncConfig, setSyncConfig] = usePersistentPreference<SyncConfig>("syncConfig", DEFAULT_SYNC_CONFIG);
   const [remindersEnabled, setRemindersEnabled] = usePersistentPreference<boolean>("remindersEnabled", true);
-  const [sidebarCollapsed, setSidebarCollapsed] = usePersistentPreference<boolean>("sidebarCollapsed", false);
+  // A narrow shell opens with the navigation collapsed: the calendar and the
+  // Capture/Ask surface need the width, and the rail is one click away.
+  const [sidebarCollapsed, setSidebarCollapsed] = usePersistentPreference<boolean>("sidebarCollapsed", mediaMatches("(max-width: 1000px)"));
   const [mobileViewport, setMobileViewport] = useState(() => mediaMatches("(max-width: 820px)"));
   const [captureShortcut, setCaptureShortcut] = usePersistentPreference<string>("captureShortcut", DEFAULT_CAPTURE_SHORTCUT);
   const [captureShortcutEnabled, setCaptureShortcutEnabled] = usePersistentPreference<boolean>("captureShortcutEnabled", true);
@@ -321,7 +323,7 @@ function App() {
   }, [aiPreferences]);
 
   const warmCaptureProvider = useCallback(() => {
-    if (providerIsConfigured(aiPreferences)) void warmUpAIProvider(activeAIProvider(aiPreferences));
+    if (askIsReady(aiPreferences)) void warmUpAIProvider(activeAIProvider(aiPreferences.ask));
   }, [aiPreferences]);
   useEffect(() => { warmCaptureProvider(); }, [warmCaptureProvider]);
 
@@ -329,7 +331,14 @@ function App() {
     let disposed = false;
     void hasStoredLocalAIKey().then((stored) => { if (!disposed) setLocalKeyStored(stored); }).catch(() => { if (!disposed) setLocalKeyStored(false); });
     void hasStoredRemoteAIKey().then((stored) => { if (!disposed) setRemoteKeyStored(stored); }).catch(() => { if (!disposed) setRemoteKeyStored(false); });
+    void readLocalAIHeaders().then((headers) => { if (!disposed) setLocalAIHeaders(headers); }).catch(() => { if (!disposed) setLocalAIHeaders([]); });
     return () => { disposed = true; };
+  }, []);
+
+  const saveLocalHeaders = useCallback(async (headers: AICustomHeader[]) => {
+    const saved = await storeLocalAIHeaders(headers);
+    setLocalAIHeaders(saved);
+    return saved;
   }, []);
 
   useEffect(() => {
@@ -591,7 +600,7 @@ function App() {
       // pressing "n" with the composer already open used to close and re-open
       // it (flicker, and the open form's draft was reset), and "t" stacked the
       // timer under whatever was on screen.
-      const modalOpen = composerOpen || settingsOpen || chatOpen || filterOpen || quickNoteOpen || timerOpen || smartCaptureRaw !== null;
+      const modalOpen = composerOpen || settingsOpen || chatOpen || filterOpen || timerOpen;
       if (!typing && !modalOpen && event.key.toLowerCase() === "n") {
         event.preventDefault();
         closeComposer();
@@ -615,7 +624,7 @@ function App() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [chatOpen, closeComposer, composerOpen, openSettings, filterOpen, quickNoteOpen, settingsOpen, showFilter, smartCaptureRaw, timerOpen]);
+  }, [chatOpen, closeComposer, composerOpen, openSettings, filterOpen, settingsOpen, showFilter, timerOpen]);
 
   const openComposer = useCallback((entry: Entry | null = null) => {
     const source = entry?.recurrenceSourceId
@@ -634,14 +643,6 @@ function App() {
     setComposerOpen(true);
   }, []);
 
-  const handleCapture = useCallback((value: string) => {
-    if (!value.trim()) return;
-    const next: SmartCaptureRecoveryState = { raw: value.trim(), mode: "offline", drafts: [], updatedAt: Date.now() };
-    writeSmartCaptureRecovery(next);
-    setSmartCaptureRecovery(next);
-    setSmartCaptureRaw(next.raw);
-  }, []);
-
   const confirmSmartCapture = useCallback(async (drafts: EntryDraft[]): Promise<boolean> => {
     if (!drafts.length) return false;
     if (!writable) {
@@ -654,9 +655,6 @@ function App() {
           const created = draftToEntry(draft, "local", resolveEntryColor(draft.category, draft.kind, settings, draft.calendar));
           await persistCreated(created);
         }
-        clearSmartCaptureRecovery();
-        setSmartCaptureRecovery(null);
-        setSmartCaptureRaw(null);
         notify(`${drafts.length} ${t("smartCaptureCreated", locale)}`);
         return true;
       } catch (error) {
@@ -827,14 +825,19 @@ function App() {
     }, []),
   });
 
-  /** Global capture: raise the window and open the quick-note box. */
-  const triggerGlobalCapture = useCallback(() => {
+  /** Global capture: raise the window and open unified capture. */
+  const openUnifiedDialog = useCallback((mode: "capture" | "ask") => {
     void focusAppWindow();
     setSettingsOpen(false);
     setTimerOpen(false);
-    setQuickNoteOpen(true);
+    setChatInitialMode(mode);
+    setChatOpen(true);
     warmCaptureProvider();
   }, [warmCaptureProvider]);
+
+  const triggerGlobalCapture = useCallback(() => {
+    openUnifiedDialog("capture");
+  }, [openUnifiedDialog]);
 
   useEffect(() => {
     if (!captureShortcutEnabled) {
@@ -1120,7 +1123,11 @@ function App() {
     // views simply render nothing.
     const itemEntries = entryFilter.photosOnly ? [] : searchedEntries;
     const photosOnly = entryFilter.photosOnly;
-    if (view === "agenda") return <AgendaView entries={itemEntries} selectedDate={selectedDate} locale={locale} settings={settings} filter={filter} search={search} lunar={lunar} onSelectDate={setSelectedDate} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onEdit={entry => viewActions.current.openComposer(entry)} onNew={(date) => (date ? viewActions.current.openComposerAt({ date, allDay: true }) : viewActions.current.openComposer())} onEntryMenu={(...args) => viewActions.current.openEntryMenu(...args)} />;
+    // The list shares the day's photo wall and keeps its own paging, so 仅照片
+    // still walks the whole archive instead of stopping at one window.
+    if (view === "agenda") return photosOnly
+      ? <PhotoWallView entries={searchedEntries} selectedDate={selectedDate} days={visibleDays} paged locale={locale} settings={settings} onSelectDate={setSelectedDate} />
+      : <AgendaView entries={itemEntries} selectedDate={selectedDate} locale={locale} settings={settings} filter={filter} search={search} lunar={lunar} onSelectDate={setSelectedDate} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onEdit={entry => viewActions.current.openComposer(entry)} onNew={(date) => (date ? viewActions.current.openComposerAt({ date, allDay: true }) : viewActions.current.openComposer())} onEntryMenu={(...args) => viewActions.current.openEntryMenu(...args)} />;
     if (view === "month") return <MonthView entries={searchedEntries} selectedDate={selectedDate} locale={locale} settings={settings} filter={filter} search={search} weekStartsOn={settings.firstDay} showWeekNumbers={settings.showWeekNumbers} lunar={lunar} showPhotos={dayPhotos || photosOnly} photosOnly={photosOnly} onSelectDate={setSelectedDate} onOpenAgenda={() => viewActions.current.selectView("day")} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onEdit={entry => viewActions.current.openComposer(entry)} onEntryMenu={(...args) => viewActions.current.openEntryMenu(...args)} onNewAt={(date) => viewActions.current.openComposerAt({ date, allDay: true })} onReschedule={(...args) => viewActions.current.handleReschedule(...args)} />;
     if (view === "day" || view === "week") {
       return (
@@ -1219,10 +1226,9 @@ function App() {
     setRemoteKeyStored(false);
   }, []);
 
-  const testAI = useCallback(async () => {
-    const provider = activeAIProvider(aiPreferences);
+  const testAI = useCallback(async (provider: AIProviderConfig) => {
     await fetchAIModels(provider);
-  }, [aiPreferences]);
+  }, []);
 
   const sendTestNotification = useCallback(async () => {
     const delivered = await showSystemNotification({
@@ -1246,11 +1252,13 @@ function App() {
     aiPreferences={aiPreferences}
     localKeyStored={localKeyStored}
     remoteKeyStored={remoteKeyStored}
+    localAIHeaders={localAIHeaders}
     onAIPreferencesChange={changeAIPreferences}
     onSaveLocalKey={saveLocalAIKey}
     onClearLocalKey={clearLocalAIKey}
     onSaveRemoteKey={saveRemoteAIKey}
     onClearRemoteKey={clearRemoteAIKey}
+    onSaveLocalHeaders={saveLocalHeaders}
     onTestAI={testAI}
     onTestNotification={() => { void sendTestNotification(); }}
     onClose={() => setSettingsOpen(false)}
@@ -1295,59 +1303,27 @@ function App() {
     />
   ) : null;
 
-  const quickNoteNode = quickNoteOpen ? (
-    <QuickNoteDialog
-      locale={locale}
-      onParse={(value) => { setQuickNoteOpen(false); handleCapture(value); }}
-      onManualAdd={(value) => {
-        setQuickNoteOpen(false);
-        const [title, ...lines] = value.split("\n");
-        openComposerAt(value ? { title, note: lines.join("\n").trim() || undefined } : {});
-      }}
-      onClose={() => setQuickNoteOpen(false)}
-    />
-  ) : null;
-
-  const updateSmartRecovery = useCallback((next: Omit<SmartCaptureRecoveryState, "updatedAt">) => {
-    writeSmartCaptureRecovery(next);
-    setSmartCaptureRecovery((current) => ({ ...next, updatedAt: current?.updatedAt ?? Date.now() }));
-  }, []);
-
-  const smartCaptureDialog = smartCaptureRaw && !settingsOpen ? <SmartCaptureDialog
-    key={smartCaptureRaw}
-    history={entries}
-    raw={smartCaptureRaw}
-    locale={locale}
-    settings={settings}
-    aiPreferences={aiPreferences}
-    recovery={smartCaptureRecovery}
-    onRecoveryChange={updateSmartRecovery}
-    onClose={() => {
-      clearSmartCaptureRecovery();
-      setSmartCaptureRecovery(null);
-      setSmartCaptureRaw(null);
-    }}
-    onConfigureAI={() => {
-      // Keep the session mounted in storage while Settings is open. The dialog
-      // reappears with the same offline/AI preview when the user returns.
-      setSettingsInitialSection("ai");
-      setSettingsOpen(true);
-    }}
-    onConfirm={confirmSmartCapture}
-  /> : null;
-
   const chatDialog = chatOpen ? <ChatDialog
       refreshVersion={chatSyncVersion}
     locale={locale}
     entries={entries}
     aiPreferences={aiPreferences}
     conversations={conversationStore}
+    settings={settings}
+    availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
+    initialMode={chatInitialMode}
     onOpenEntry={(entryId) => {
       const entry = entries.find((candidate) => candidate.id === entryId);
       if (entry) {
         setChatOpen(false);
         openComposer(entry);
       }
+    }}
+    onConfirmCapture={confirmSmartCapture}
+    onOpenManualCapture={(value) => {
+      setChatOpen(false);
+      const [title, ...lines] = value.split("\n");
+      openComposerAt(value ? { title, note: lines.join("\n").trim() || undefined } : {});
     }}
     onOpenSettings={() => { setSettingsInitialSection("ai"); setSettingsOpen(true); }}
     onClose={() => setChatOpen(false)}
@@ -1371,7 +1347,7 @@ function App() {
   const captureDialog = composerOpen ? <EntryComposer availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
     locale={locale} settings={settings} selectedDate={selectedKey} editing={editingEntry} sourceEntry={editingSourceEntry}
     history={entries} onClose={closeComposer} onSave={handleSave} onDelete={handleDelete} onNotice={notify} onConfirm={confirm}
-    initialDraft={composerSeed} /> : smartCaptureDialog ?? quickNoteNode;
+    initialDraft={composerSeed} /> : null;
 
   // On phone widths the same button is the drawer's close affordance; the
   // collapsed rail remains a desktop-only destination.
@@ -1436,7 +1412,7 @@ function App() {
             onDayCountChange={setMiniDayCount}
             filterControl={filterControl}
             onTimer={() => setTimerOpen(true)}
-            onQuickNote={() => setQuickNoteOpen(true)}
+            onQuickNote={() => openUnifiedDialog("capture")}
             onRestore={toggleCompact}
           >
             <TimerPill locale={locale} timer={timer} onOpen={() => setTimerOpen(true)} />
@@ -1457,15 +1433,20 @@ function App() {
   }
 
   const calendarShell = activeView === "month" || activeView === "day" || activeView === "week";
+  // The sidebar stays clickable above the chat backdrop, so the chat surface
+  // gives up exactly the width the navigation occupies instead of hiding
+  // behind it. The drawer (phone widths) is off-canvas and reserves nothing.
+  const sidebarReserve = mobileViewport ? 0 : sidebarCollapsed && !mobileMenuOpen ? 72 : 246;
   return (
-      <div className={`app-shell${calendarShell ? " is-calendar-shell" : ""}${lowEndMode ? " is-low-end" : ""}`}>
+      <div className={`app-shell${calendarShell ? " is-calendar-shell" : ""}${lowEndMode ? " is-low-end" : ""}${chatOpen ? " is-chat-open" : ""}`}
+        style={{ "--nav-width": `${sidebarReserve}px` } as React.CSSProperties}>
       {!lowEndMode && !mobileViewport && <AmbientParticles />}
       {!isMobilePlatform() && <WindowResizeHandles />}
       <div ref={navigation.backdropRef} className={mobileMenuOpen ? "mobile-sidebar-backdrop is-open" : "mobile-sidebar-backdrop"} onClick={() => setMobileMenuOpen(false)} />
       {/* The drawer must never inherit the collapsed rail's 72px width, or the
           opened menu wraps every label into a vertical sliver. */}
       <div ref={navigation.sidebarRef} data-side={navigation.sidebarSide} aria-hidden={mobileViewport && !mobileMenuOpen ? true : undefined} inert={mobileViewport && !mobileMenuOpen} className={[mobileMenuOpen ? "sidebar-wrap is-open" : "sidebar-wrap", sidebarCollapsed && !mobileViewport && !mobileMenuOpen ? "is-collapsed" : ""].filter(Boolean).join(" ")}>
-        <Sidebar locale={locale} activeView={activeView} collapsed={sidebarCollapsed && !mobileViewport && !mobileMenuOpen} dayCount={activeView === "day" ? safeDayCount : undefined} onViewChange={selectView} onDayCountChange={setDayCount} onCollapsedChange={setSidebarCollapsedState} onNew={() => openComposer()} onCompact={toggleCompact} onChat={() => setChatOpen(true)} onOpenSettings={() => { openSettings(); setMobileMenuOpen(false); }} />
+        <Sidebar locale={locale} activeView={activeView} collapsed={sidebarCollapsed && !mobileViewport && !mobileMenuOpen} dayCount={activeView === "day" ? safeDayCount : undefined} onViewChange={selectView} onDayCountChange={setDayCount} onCollapsedChange={setSidebarCollapsedState} onNew={() => openComposer()} onCompact={toggleCompact} onOpenSettings={() => { openSettings(); setMobileMenuOpen(false); }} />
       </div>
       <main className="main-shell">
         {!lowEndMode && <TreeCanopy />}
@@ -1492,7 +1473,7 @@ function App() {
             : view === "agenda" ? "content-inner content-inner--list"
             : view === "ideas" ? "content-inner content-inner--ideas"
             : "content-inner"}>
-            <div key={view} className="view-stage">
+            <div className="view-stage">
               {view === "agenda" && <>
                 <header className="hero-header view-title-row">
                   <div>
@@ -1552,7 +1533,7 @@ function App() {
           onViewChange={selectView}
           onDayCountChange={setDayCount}
           onTimer={() => setTimerOpen(true)}
-          onQuickNote={() => { setQuickNoteOpen(true); warmCaptureProvider(); }}
+          onQuickNote={() => openUnifiedDialog("capture")}
         >
           <TimerPill locale={locale} timer={timer} onOpen={() => setTimerOpen(true)} />
         </ViewDock>

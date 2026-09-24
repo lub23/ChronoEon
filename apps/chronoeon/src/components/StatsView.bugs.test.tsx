@@ -268,7 +268,11 @@ describe("weekly and selected category review curves", () => {
     expect(host.querySelector(".review-categories")?.nextElementSibling?.classList.contains("review-granularity")).toBe(true);
     expect(host.querySelectorAll(".review-chart-average")).toHaveLength(2);
     expect([...host.querySelectorAll(".review-chart-average-label")].map(node => node.textContent).sort()).toEqual(["￥16", "￥24"]);
-    expect(host.querySelector<SVGPolylineElement>('.review-chart-line[data-series="total"]')?.style.stroke).toBe("#c0392b");
+    // Totals stay dark whatever the theme's category palette says, so the line
+    // carries no per-series colour and leans on its own `is-total` ink.
+    const totalLine = host.querySelector<SVGPolylineElement>('.review-chart-line[data-series="total"]')!;
+    expect(totalLine.getAttribute("class")).toContain("is-total");
+    expect(totalLine.style.stroke).toBe("");
     const food = catalog.bill.categories.find(category => category.id === "food")!;
     expect(host.querySelector<SVGPolylineElement>('.review-chart-line[data-series="category:food"]')?.style.stroke).toBe(food.color);
     act(() => trigger.click());

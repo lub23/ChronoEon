@@ -3,7 +3,8 @@ import { useTouchDevice } from "../hooks/useTouchDevice";
 import { useEffect, useRef, useState } from "react";
 import { titleFor, type CalendarConfig, type ChronoEonSettings } from "@chronoeon/domain";
 import type { DeletedEntrySummary } from "@chronoeon/storage";
-import type { AIProviderPreferences } from "../ai/provider";
+import type { AIProviderConfig } from "@chronoeon/domain";
+import type { AICustomHeader, AIProviderPreferences } from "../ai/provider";
 import type { Locale, ThemeMode } from "../domain/entry";
 import type { LunarPreference } from "../domain/lunar";
 import { DEFAULT_CAPTURE_SHORTCUT, DEFAULT_MINI_SHORTCUT, formatAccelerator, isValidAccelerator } from "../platform/globalShortcut";
@@ -50,12 +51,14 @@ interface SettingsDialogProps {
   aiPreferences: AIProviderPreferences;
   localKeyStored: boolean;
   remoteKeyStored: boolean;
+  localAIHeaders: AICustomHeader[];
   onAIPreferencesChange: (preferences: AIProviderPreferences) => void;
   onSaveLocalKey: (value: string) => Promise<void>;
   onClearLocalKey: () => Promise<void>;
   onSaveRemoteKey: (value: string) => Promise<void>;
   onClearRemoteKey: () => Promise<void>;
-  onTestAI: () => Promise<void>;
+  onSaveLocalHeaders: (headers: AICustomHeader[]) => Promise<AICustomHeader[]>;
+  onTestAI: (provider: AIProviderConfig) => Promise<void>;
   onClose: () => void;
   onLocaleChange: (locale: Locale) => void;
   onThemeChange: (theme: ThemeMode) => void;
@@ -125,11 +128,13 @@ export function SettingsDialog({
   aiPreferences,
   localKeyStored,
   remoteKeyStored,
+  localAIHeaders,
   onAIPreferencesChange,
   onSaveLocalKey,
   onClearLocalKey,
   onSaveRemoteKey,
   onClearRemoteKey,
+  onSaveLocalHeaders,
   onTestAI,
   onClose,
   onLocaleChange,
@@ -499,11 +504,13 @@ export function SettingsDialog({
                 preferences={aiPreferences}
                 localKeyStored={localKeyStored}
                 remoteKeyStored={remoteKeyStored}
+                localHeaders={localAIHeaders}
                 onChange={onAIPreferencesChange}
                 onSaveLocalKey={onSaveLocalKey}
                 onClearLocalKey={onClearLocalKey}
                 onSaveRemoteKey={onSaveRemoteKey}
                 onClearRemoteKey={onClearRemoteKey}
+                onSaveLocalHeaders={onSaveLocalHeaders}
                 onTest={onTestAI}
               />
             )}

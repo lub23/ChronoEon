@@ -6,7 +6,6 @@ import {
   TIMED_REMINDERS,
   categoryOptionsForKind,
   defaultCategoryForKind,
-  resolveReminderTime,
   type ChronoEonSettings,
   type Entry,
   type EntryCategoryOption,
@@ -24,7 +23,7 @@ import {
 import { inferCategory, inferLocation, type CaptureHistoryItem } from "@chronoeon/domain";
 import { entryToDraft, type EntryEditContext, type RecurrenceEditScope } from "../domain/entryWorkflow";
 import type { ConfirmRequest } from "./ConfirmDialog";
-import { catalogLabel, categoryLabel, compositeCategoryLabel, localeTag, paymentMethodLabel, t, type MessageKey } from "../i18n";
+import { catalogLabel, categoryLabel, compositeCategoryLabel, paymentMethodLabel, t, type MessageKey } from "../i18n";
 import { AttachmentField } from "./AttachmentField";
 import { GlassDatePicker, GlassTimePicker } from "./GlassDateTimePicker";
 import { GlassSelect, type GlassSelectOption } from "./GlassSelect";
@@ -34,6 +33,8 @@ import { TaskStatusMenu } from "./TaskSummaryList";
 import { TaskStatusGlyph } from "./ItemGlyph";
 import { registerModalDismiss } from "./modalLayer";
 import { readCurrentPlace } from "../platform/location";
+import { labeledOptions, priorities, recurrenceOptions, reminderLabels, reminderTriggerLabel, weekdayIndexForDate } from "./entryFieldLabels";
+import { RecurrenceWeekdays } from "./RecurrenceWeekdays";
 
 interface EntryComposerProps {
   locale: Locale;
@@ -100,36 +101,6 @@ function initialDraft(selectedDate: string, editing: Entry | null, settings: Chr
 }
 
 const kinds: EntryKind[] = ["task", "event", "idea", "bill"];
-const recurrenceOptions: Array<{ value: Recurrence; key: MessageKey }> = [
-  { value: "none", key: "recurrenceNone" },
-  { value: "daily", key: "recurrenceDaily" },
-  { value: "weekly", key: "recurrenceWeekly" },
-  { value: "monthly", key: "recurrenceMonthly" },
-  { value: "yearly", key: "recurrenceYearly" },
-];
-
-/** Every reminder value the shared domain can resolve, in both time modes. */
-const reminderLabels: Record<Reminder, MessageKey> = {
-  none: "reminderNone",
-  "at-time": "reminderAtTime",
-  "5min": "reminder5min",
-  "15min": "reminder15min",
-  "30min": "reminder30min",
-  "1hour": "reminder1hour",
-  "2hour": "reminder2hour",
-  "12hour": "reminder12hour",
-  "1day": "reminder1day",
-  "1week": "reminder1week",
-  "day-9am": "reminderDay9am",
-  "day-before-9am": "reminderPreviousDay9am",
-  "day-before-5pm": "reminderPreviousDay5pm",
-  "week-before-9am": "reminderPreviousWeek9am",
-};
-
-const priorities: Array<{ value: EntryPriority; key: MessageKey }> = [
-  { value: "low", key: "priorityLow" },
-  { value: "high", key: "priorityHigh" },
-];
 
 const statusKeys: Record<EntryStatus, MessageKey> = {
   open: "statusOpen",
@@ -142,32 +113,10 @@ function statusKeyFor(status: EntryStatus): MessageKey {
   return statusKeys[status];
 }
 
-function labeledOptions<Value extends string>(items: Array<{ value: Value; key: MessageKey }>, locale: Locale): GlassSelectOption[] {
-  return items.map(({ value, key }) => ({ value, label: t(key, locale) }));
-}
-
-function weekdayFor(date: string): number {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  return match ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).getUTCDay() : 1;
-}
-
 function withCurrentOption(options: EntryCategoryOption[], category: string): EntryCategoryOption[] {
   if (!category || options.some((option) => option.value === category)) return options;
   return [{ value: category, label: category, color: "#8b8b83" }, ...options];
 }
-
-/** Detail fields that must stay visible when an existing entry already uses them. */
-function hasDetailFields(entry: Entry | null | undefined): boolean {
-  if (!entry) return false;
-  return Boolean(
-    (entry.kind !== "idea" && Boolean(entry.priority || entry.urgency))
-    || entry.tags?.length
-    || entry.images?.length
-    || entry.note
-    || entry.location
-  );
-}
-
 
 export function EntryComposer({
   locale,
@@ -209,8 +158,6 @@ export function EntryComposer({
   const categoryTouchedRef = useRef(false);
   // A cleared or typed location is explicit, even when the field is empty.
   const locationTouchedRef = useRef(false);
-  // Existing detail fields keep the section open, so an edit never hides data.
-  const [showDetails, setShowDetails] = useState(() => hasDetailFields(occurrence ? editing : source));
   const [statusMenu, setStatusMenu] = useState<{ left: number; top: number } | null>(null);
   // The draft at open time is the discard baseline: Esc (or the close button)
   // with unsaved changes asks before losing them.
@@ -253,7 +200,6 @@ export function EntryComposer({
     setScope(nextScope);
     setDraft(initialDraft(selectedDate, nextScope === "occurrence" ? editing : source, settings, seed));
     pristineRef.current = JSON.stringify(initialDraft(selectedDate, nextScope === "occurrence" ? editing : source, settings, seed));
-    setShowDetails(hasDetailFields(nextScope === "occurrence" ? editing : source));
     // A saved category is already an explicit user choice; never auto-replace it.
     categoryTouchedRef.current = Boolean(source);
     locationTouchedRef.current = Boolean(source?.location || seed?.location);
@@ -291,33 +237,15 @@ export function EntryComposer({
     }
     return [...groups.entries()];
   }, [categoryOptions, locale]);
-  const weekdays = locale === "zh"
-    ? ["日", "一", "二", "三", "四", "五", "六"]
-    : ["S", "M", "T", "W", "T", "F", "S"];
-  const weekdayTitles = locale === "zh"
-    ? ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
-    : ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const occurrenceOnly = scope === "occurrence";
   const recurringSeries = Boolean(source?.recurrence && source.recurrence !== "none");
 
   // Showing when a reminder will actually fire removes the main uncertainty of
   // relative reminders ("15 minutes before *what*?").
-  const reminderPreview = useMemo(() => {
-    if (!draft.reminder || draft.reminder === "none") return "";
-    const trigger = resolveReminderTime({
-      date: draft.date,
-      start: draft.start,
-      allDay: draft.allDay,
-      reminder: draft.reminder,
-    });
-    if (!trigger) return "";
-    return trigger.toLocaleString(localeTag[locale], {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }, [draft.allDay, draft.date, draft.reminder, draft.start, locale]);
+  const reminderPreview = useMemo(
+    () => reminderTriggerLabel(draft, locale),
+    [draft, locale],
+  );
 
   function update<K extends keyof EntryDraft>(key: K, value: EntryDraft[K]) {
     setDraft((current) => {
@@ -421,7 +349,7 @@ export function EntryComposer({
       ...current,
       recurrence,
       recurringDays: recurrence === "weekly"
-        ? (current.recurringDays?.length ? current.recurringDays : [weekdayFor(current.date)])
+        ? (current.recurringDays?.length ? current.recurringDays : [weekdayIndexForDate(current.date)])
         : undefined,
       recurringEnd: recurrence === "none" ? undefined : current.recurringEnd,
     }));
@@ -529,7 +457,9 @@ export function EntryComposer({
               <label className="all-day-toggle all-day-toggle--compact composer-header-toggle">
                 <input type="checkbox" checked={Boolean(draft.allDay)} onChange={(event) => changeAllDay(event.target.checked)} />
                 <i className="fake-checkbox" aria-hidden="true" />
-                <span>{t("allDay", locale)}</span>
+                {/* Same 24h mark as the capture review, so the two forms read alike. */}
+                <span aria-hidden="true">24h</span>
+                <span className="visually-hidden">{t("allDay", locale)}</span>
               </label>
             ) : null}
             </div>
@@ -624,6 +554,7 @@ export function EntryComposer({
                   locale={locale}
                   disabled={occurrenceOnly}
                   clearable={false}
+                  hideIcon
                   onChange={(value) => update("date", value ?? draft.date)}
                 />
                 {!draft.allDay && (
@@ -633,6 +564,7 @@ export function EntryComposer({
                     locale={locale}
                     disabled={occurrenceOnly}
                     clearable={false}
+                    hideIcon
                     onChange={(value, committed) => updateTime("start", value, committed)}
                   />
                 )}
@@ -648,6 +580,7 @@ export function EntryComposer({
                     ariaLabel={t("endDate", locale)}
                     locale={locale}
                     disabled={occurrenceOnly}
+                    hideIcon
                     onChange={(value) => update("endDate", value)}
                   />
                   {!draft.allDay && (
@@ -656,7 +589,8 @@ export function EntryComposer({
                       ariaLabel={t("end", locale)}
                       locale={locale}
                       disabled={occurrenceOnly}
-                    onChange={(value, committed) => updateTime("end", value, committed)}
+                      hideIcon
+                      onChange={(value, committed) => updateTime("end", value, committed)}
                     />
                   )}
                 </div>
@@ -668,9 +602,52 @@ export function EntryComposer({
 
           {!occurrenceOnly && (
             <>
+              {draft.kind === "bill" && <div className="bill-primary-row">
+                <label className="field-label"><span>{t("amount", locale)}</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={amountText}
+                    onChange={(event) => {
+                      const raw = event.target.value;
+                      const parsed = raw.trim() === "" ? undefined : Number(raw);
+                      const value = parsed !== undefined && Number.isFinite(parsed) ? Math.abs(parsed) : undefined;
+                      setAmountText(value == null ? raw : String(value));
+                      amountTextRef.current = value;
+                      update("amount", value);
+                    }}
+                    placeholder="0.00"
+                  />
+                </label>
+                <label className="field-label"><span>{t("currency", locale)}</span>
+                  <GlassSelect
+                    value={draft.currency ?? settings.bill.currency}
+                    ariaLabel={t("currency", locale)}
+                    options={[
+                      ...Object.entries(BUILTIN_CURRENCIES).map(([code, currency]) => ({ value: code, label: locale === "zh" ? currency.name : code })),
+                      ...Object.keys(settings.bill.customCurrencies).filter((code) => !BUILTIN_CURRENCIES[code]).map((code) => ({ value: code, label: locale === "zh" ? code : code })),
+                    ]}
+                    onChange={(value) => update("currency", value)}
+                  />
+                </label>
+                <label className="field-label"><span>{t("payment", locale)}</span>
+                  <GlassSelect
+                    value={draft.payment ?? ""}
+                    ariaLabel={t("payment", locale)}
+                    options={[
+                      { value: "", label: t("paymentNone", locale) },
+                      ...settings.bill.paymentMethods.map((method) => ({ value: method, label: paymentMethodLabel(method, locale) })),
+                    ]}
+                    onChange={(value) => update("payment", value || undefined)}
+                  />
+                </label>
+              </div>}
+
               {draft.kind !== "idea" && (
                 <section className="recurrence-fields">
-                  <div className="field-row">
+                  {/* Repeat, reminder, importance and urgency share one line. */}
+                  <div className="field-row--inline">
                     <label className="field-label"><span>{t("recurrence", locale)}</span>
                       <GlassSelect
                         value={draft.recurrence ?? "none"}
@@ -679,7 +656,8 @@ export function EntryComposer({
                         onChange={(value) => changeRecurrence(value as Recurrence)}
                       />
                     </label>
-                    <label className="field-label"><span>{t("reminder", locale)}</span>
+                    {/* The trigger time rides beside the reminder's own title. */}
+                    <label className="field-label is-wide"><span>{t("reminder", locale)}{reminderPreview && <em className="field-hint field-hint--quiet"><Icon name="bell" size={12} /> {reminderPreview}</em>}</span>
                       <GlassSelect
                         value={draft.reminder ?? "none"}
                         ariaLabel={t("reminder", locale)}
@@ -688,9 +666,9 @@ export function EntryComposer({
                       />
                     </label>
                   </div>
-                  {reminderPreview && <p className="field-hint field-hint--quiet"><Icon name="bell" size={13} /> {t("reminderNext", locale)} · {reminderPreview}</p>}
-                  {draft.recurrence && draft.recurrence !== "none" && (
-                    <div className="field-row recurrence-detail-row">
+                  {/* A narrow repeat-until date beside the weekday strip. */}
+                  {draft.recurrence !== "none" && (
+                    <div className="recurrence-detail-row">
                       <label className="field-label">
                         <span>{t("repeatUntil", locale)}</span>
                         <GlassDatePicker
@@ -698,72 +676,28 @@ export function EntryComposer({
                           min={draft.date}
                           ariaLabel={t("repeatUntil", locale)}
                           locale={locale}
+                          placeholder={t("repeatNone", locale)}
+                          hideIcon
                           onChange={(value) => update("recurringEnd", value)}
                         />
                       </label>
-                      {draft.recurrence === "weekly" && <fieldset className="weekday-field"><legend>{t("repeatOn", locale)}</legend><div className="weekday-picker">
-                        {weekdays.map((day, index) => <label key={index} title={weekdayTitles[index]} className={draft.recurringDays?.includes(index) ? "is-active" : ""}><input type="checkbox" checked={Boolean(draft.recurringDays?.includes(index))} onChange={(event) => toggleWeekday(index, event.target.checked)} /><span>{day}</span></label>)}
-                      </div></fieldset>}
+                      {draft.recurrence === "weekly" && <RecurrenceWeekdays locale={locale} value={draft.recurringDays} onToggle={toggleWeekday} />}
                     </div>
                   )}
                 </section>
               )}
 
-              {draft.kind === "bill" && <>
-                <div className="bill-primary-row">
-                  <label className="field-label"><span>{t("amount", locale)}</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={amountText}
-                      onChange={(event) => {
-                        const raw = event.target.value;
-                        const parsed = raw.trim() === "" ? undefined : Number(raw);
-                        const value = parsed !== undefined && Number.isFinite(parsed) ? Math.abs(parsed) : undefined;
-                        setAmountText(value == null ? raw : String(value));
-                        amountTextRef.current = value;
-                        update("amount", value);
-                      }}
-                      placeholder="0.00"
-                    />
+              {/* A three-line note beside the single-line tags. */}
+              <div className="composer-pair">
+                <label className="field-label"><span>{t("note", locale)}</span><textarea rows={4} value={draft.note ?? ""} onChange={(event) => update("note", event.target.value)} placeholder={t("notePlaceholder", locale)} /></label>
+                <div className="composer-pair-side">
+                  <label className="field-label"><span>{t("tags", locale)}</span>
+                    <TagInput value={draft.tags} available={availableTags} onChange={(tags) => update("tags", tags)} locale={locale} />
                   </label>
-                  <label className="field-label"><span>{t("currency", locale)}</span>
-                    <GlassSelect
-                      value={draft.currency ?? settings.bill.currency}
-                      ariaLabel={t("currency", locale)}
-                      options={[
-                        ...Object.entries(BUILTIN_CURRENCIES).map(([code, currency]) => ({ value: code, label: locale === "zh" ? currency.name : code })),
-                        ...Object.keys(settings.bill.customCurrencies).filter((code) => !BUILTIN_CURRENCIES[code]).map((code) => ({ value: code, label: locale === "zh" ? code : code })),
-                      ]}
-                      onChange={(value) => update("currency", value)}
-                    />
-                  </label>
-                  <label className="field-label"><span>{t("payment", locale)}</span>
-                    <GlassSelect
-                      value={draft.payment ?? ""}
-                      ariaLabel={t("payment", locale)}
-                      options={[
-                        { value: "", label: t("paymentNone", locale) },
-                        ...settings.bill.paymentMethods.map((method) => ({ value: method, label: paymentMethodLabel(method, locale) })),
-                      ]}
-                      onChange={(value) => update("payment", value || undefined)}
-                    />
-                  </label>
-                </div>
-              </>}
-
-              <label className="field-label"><span>{t("note", locale)}</span><textarea rows={4} value={draft.note ?? ""} onChange={(event) => update("note", event.target.value)} placeholder={t("notePlaceholder", locale)} /></label>
-
-              <button type="button" className="details-toggle" onClick={() => setShowDetails(!showDetails)} aria-expanded={showDetails}>
-                <Icon name={showDetails ? "chevron-down" : "chevron-right"} size={14} />
-                {t(showDetails ? "fewerFields" : "moreFields", locale)}
-              </button>
-
-              {showDetails && (
-                <section className="composer-details">
+                  {/* Importance and urgency sit under the tags, where a narrow
+                      phone still fits them. */}
                   {(draft.kind === "task" || draft.kind === "event") && (
-                    <div className="field-row">
+                    <div className="field-stack">
                       <label className="field-label"><span>{t("priority", locale)}</span>
                         <GlassSelect
                           value={draft.priority ?? ""}
@@ -782,21 +716,17 @@ export function EntryComposer({
                       </label>
                     </div>
                   )}
+                </div>
+              </div>
 
-                  <label className="field-label"><span>{t("tags", locale)}</span>
-                    <TagInput value={draft.tags} available={availableTags} onChange={(tags) => update("tags", tags)} locale={locale} />
-                  </label>
-
-                  <AttachmentField
-                    locale={locale}
-                    settings={settings}
-                    entryDate={draft.date}
-                    value={draft.images ?? []}
-                    onChange={(next) => update("images", next.length ? next : undefined)}
-                    onNotice={onNotice}
-                  />
-                </section>
-              )}
+              <AttachmentField
+                locale={locale}
+                settings={settings}
+                entryDate={draft.date}
+                value={draft.images ?? []}
+                onChange={(next) => update("images", next.length ? next : undefined)}
+                onNotice={onNotice}
+              />
             </>
           )}
 

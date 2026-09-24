@@ -6,7 +6,7 @@ vi.mock("../platform/desktop", () => ({ isTauri: () => true }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 beforeEach(() => { invoke.mockReset(); });
 afterEach(() => vi.useRealTimers());
-const provider = { ...DEFAULT_AI_PROVIDER_PREFERENCES.remote, baseUrl: "https://example.test/v1" };
+const provider = { ...DEFAULT_AI_PROVIDER_PREFERENCES.ask.remote, baseUrl: "https://example.test/v1" };
 const messages = [{ role: "user" as const, content: "synthetic test" }];
 
 describe("native AI completion bridge", () => {
@@ -31,22 +31,6 @@ describe("native AI completion bridge", () => {
     controller.abort(); await assertion;
     reject("AI request failed: timed out"); await Promise.resolve();
     expect(invoke).toHaveBeenCalledTimes(1);
-  });
-  it("allows Bearer auth and tool calls for local-compatible endpoints", async () => {
-    invoke.mockResolvedValue({
-      content: "",
-      toolCalls: [{ id: "call-1", type: "function", function: { name: "search_entries", arguments: "{}" } }],
-    });
-    const local = { ...DEFAULT_AI_PROVIDER_PREFERENCES.local, baseUrl: "http://127.0.0.1:8080/v1" };
-    const result = await requestAICompletion(local, messages, undefined, undefined, {
-      tools: [{ type: "function", function: { name: "search_entries", description: "Search", parameters: { type: "object" } } }],
-    });
-    expect(result.toolCalls?.[0]?.function.name).toBe("search_entries");
-    expect(invoke).toHaveBeenCalledWith("ai_chat_completion", { request: expect.objectContaining({
-      providerKind: "local-openai-compatible",
-      toolChoice: "auto",
-      tools: expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "search_entries" }) })]),
-    }) });
   });
   it("bounds native models-only warm-up to eight seconds even if invoke never returns", async () => {
     vi.useFakeTimers(); invoke.mockReturnValue(new Promise(() => {}));

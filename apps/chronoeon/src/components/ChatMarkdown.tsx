@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 
 function inlineRich(text: string): ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\((?:https?:\/\/|mailto:)[^)\s]+\))/g).filter(Boolean);
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\((?:https?:\/\/|mailto:)[^)\s]+\)|\[\[kind:(?:task|event|bill|idea)\]\][^[]+\[\[\/kind\]\])/g).filter(Boolean);
   return parts.map((part, index) => {
+    const kindChip = part.match(/^\[\[kind:(task|event|bill|idea)\]\]([^[]+)\[\[\/kind\]\]$/);
+    if (kindChip) return <i key={index} className={`chat-kind-chip is-${kindChip[1]}`}>{kindChip[2]}</i>;
     if (part.startsWith("**") && part.endsWith("**")) return <strong key={index}>{part.slice(2, -2)}</strong>;
     if (part.startsWith("`") && part.endsWith("`")) return <code key={index}>{part.slice(1, -1)}</code>;
     const link = part.match(/^\[([^\]]+)\]\((https?:\/\/|mailto:)([^)\s]+)\)$/);

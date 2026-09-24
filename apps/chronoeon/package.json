@@ -1,6 +1,6 @@
 {
   "name": "@chronoeon/app",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "private": true,
   "description": "ChronoEon (时元) primary Tauri application for desktop and future mobile shells.",
   "type": "module",

@@ -29,7 +29,7 @@ describe("storage unit", () => {
     );
     const names = tables.map((row) => row.name).sort();
     expect(names).toEqual([
-      "ai_conversations", "ai_messages", "attachments", "entries",
+      "ai_capture_reviews", "ai_conversations", "ai_messages", "attachments", "entries",
       "entry_tags", "schema_meta", "timer_session", "attachment_ingest_queue",
       "sync_batches", "sync_changes", "sync_conflicts", "sync_control", "sync_documents",
       "sync_entities", "sync_links", "sync_meta", "sync_outbox", "sync_settings",
