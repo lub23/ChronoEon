@@ -3,8 +3,9 @@ import { enUS, zhCN } from "date-fns/locale";
 import { resolveEntryColors } from "@chronoeon/domain";
 import { titleFor, type ChronoEonSettings, type Locale } from "../domain/entry";
 import type { DayPhotoGroup } from "../hooks/useDayPhotos";
+import { categoryOptionsForKind } from "@chronoeon/domain";
 import { categoryLabel, t } from "../i18n";
-import { CHIP_META_ICON_SIZE, LocationGlyph } from "./ItemGlyph";
+import { LocationGlyph } from "./ItemGlyph";
 import { openImagePreview } from "./photoPreviewBus";
 
 interface PhotoWallProps {
@@ -49,7 +50,9 @@ export function PhotoWall({ locale, settings, days, groups, onSelectDate }: Phot
               const entry = group.entry;
               const title = titleFor(entry, locale);
               const { accent } = resolveEntryColors(entry, settings);
-              const category = categoryLabel(entry.category, locale) || entry.category;
+              const categoryOption = categoryOptionsForKind(entry.kind, settings, entry.calendar)
+                .find((option) => option.value === entry.category);
+              const category = categoryOption?.label ?? (categoryLabel(entry.category, locale) || entry.category);
               // Front sheet first; at most two sheets peek behind it.
               const sheets = group.urls.slice(0, 3);
               return (
@@ -76,7 +79,7 @@ export function PhotoWall({ locale, settings, days, groups, onSelectDate }: Phot
                     {entry.note && <p className="photo-wall-note">{entry.note}</p>}
                     {entry.location && (
                       <span className="photo-wall-location" title={entry.location}>
-                        <LocationGlyph size={CHIP_META_ICON_SIZE} />
+                        <LocationGlyph size={10} />
                         <span>{entry.location}</span>
                       </span>
                     )}

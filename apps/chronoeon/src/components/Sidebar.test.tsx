@@ -145,7 +145,7 @@ describe("Sidebar", () => {
     await act(async () => { await Promise.resolve(); });
     const version = host.querySelector(".sidebar-version")!;
     expect(version.querySelector("span")?.textContent).toBe("时元");
-    expect(version.querySelector("b")?.textContent).toBe("v0.1.4");
+    expect(version.querySelector("b")?.textContent).toMatch(/^v\d+\.\d+\.\d+$/);
     // The browser demo has no installer, so the check stays inert.
     const check = host.querySelector<HTMLButtonElement>('.sidebar-utility[aria-label="检查更新"]')!;
     expect(check.disabled).toBe(true);

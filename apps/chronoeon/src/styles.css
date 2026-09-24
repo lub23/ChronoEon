@@ -4538,7 +4538,8 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
 .photo-wall-dot.is-bill { background: var(--violet); }
 .photo-wall-dot.is-category { box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink-faint) 38%, transparent); }
 .photo-wall-note { display: -webkit-box; overflow: hidden; margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
-.photo-wall-location { display: flex; min-width: 0; align-items: center; gap: 4px; color: var(--ink-faint); font-size: 10px; }
+.photo-wall-location { display: flex; min-width: 0; align-items: center; gap: 2px; color: var(--ink-faint); font-size: 10px; }
+.photo-wall-location > svg { width: 1em; height: 1em; }
 .photo-wall-location span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 820px) {
   .day-view--photos { padding: 10px 10px 20px; }

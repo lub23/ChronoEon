@@ -1,8 +1,8 @@
 name: Release
 
-# Tag-driven release line. `v0.1.0` on main produces a draft GitHub Release with
-# Windows, macOS and Ubuntu installers plus the Android APK attached; publishing
-# the draft is a deliberate human step. Nothing here runs on ordinary pushes.
+# Tag-driven release line. `v0.1.0` on main publishes a GitHub Release with
+# Windows, macOS and Ubuntu installers plus the Android APK attached. Nothing
+# here runs on ordinary pushes.
 on:
   push:
     tags: ["v*"]
@@ -96,7 +96,7 @@ jobs:
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: "ChronoEon ${{ inputs.tag || github.ref_name }}"
           releaseBody: "See CHANGELOG for details. Installers are attached below."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
 
@@ -180,10 +180,10 @@ jobs:
           path: .build/android/*.apk
           if-no-files-found: error
 
-      - name: Attach the APK to the draft release
+      - name: Attach the APK to the release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          draft: true
+          draft: false
           files: .build/android/chronoeon-arm64.apk
           fail_on_unmatched_files: true

@@ -19,6 +19,14 @@ class ResizeObserverStub {
 
 const PHOTO = "data:image/png;base64,iVBORw0KGgo=";
 const PHOTO_B = "data:image/png;base64,iVBORw0KGgp=";
+const catalogSettings = {
+  ...DEFAULT_CHRONOEON_SETTINGS,
+  calendars: [{
+    ...DEFAULT_CHRONOEON_SETTINGS.calendars[0],
+    categories: [{ id: "catalog-camp", name: "生活", color: "#90d7ec" }],
+    defaultCategoryId: "catalog-camp",
+  }],
+};
 
 function entry(overrides: Partial<Entry>): Entry {
   return {
@@ -56,12 +64,12 @@ describe("photo appreciation", () => {
       root.render(
         <PhotoWall
           locale="zh"
-          settings={DEFAULT_CHRONOEON_SETTINGS}
+          settings={catalogSettings}
           days={["2026-08-10", "2026-08-11"]}
           groups={{
             "2026-08-10": [
-              { id: "a", entry: entry({ id: "a", title: "露营", category: "Life", location: "西湖", note: "带上了新帐篷", images: [PHOTO, PHOTO_B, PHOTO] }), urls: [PHOTO, PHOTO_B] },
-              { id: "b", entry: entry({ id: "b", title: "收据", kind: "bill", category: "Life", images: [PHOTO] }), urls: [PHOTO] },
+              { id: "a", entry: entry({ id: "a", title: "露营", category: "catalog-camp", location: "西湖", note: "带上了新帐篷", images: [PHOTO, PHOTO_B, PHOTO] }), urls: [PHOTO, PHOTO_B] },
+              { id: "b", entry: entry({ id: "b", title: "收据", kind: "bill", category: "Food/正餐", images: [PHOTO] }), urls: [PHOTO] },
             ],
           }}
         />,
@@ -80,6 +88,8 @@ describe("photo appreciation", () => {
     // Kind and category are dots before the title, so no words for them.
     expect(host.querySelectorAll(".photo-wall-item")[0]!.querySelector(".photo-wall-dot.is-event")).toBeTruthy();
     expect(host.querySelectorAll(".photo-wall-item")[0]!.querySelector(".photo-wall-dot.is-category")).toBeTruthy();
+    // User-owned categories show their configured name, not their catalog ID.
+    expect(host.querySelector(".photo-wall-dot.is-category")?.getAttribute("title")).toBe("生活");
     // Note before location, matching the day view's item.
     expect(captions[0]!.indexOf("带上了新帐篷")).toBeLessThan(captions[0]!.indexOf("西湖"));
     expect(captions[1]).toContain("收据");
@@ -105,7 +115,7 @@ describe("photo appreciation", () => {
           entries={items}
           selectedDate={new Date(2026, 7, 10)}
           locale="en"
-          settings={DEFAULT_CHRONOEON_SETTINGS}
+          settings={catalogSettings}
           days={1}
           anchor="selection"
           filter={[]}
@@ -126,5 +136,23 @@ describe("photo appreciation", () => {
     // The photo carries the record it belongs to, not just the image.
     expect(host.querySelector(".photo-wall-caption")?.textContent).toContain("Standup");
     expect(host.querySelector(".photo-wall-location")).toBeNull();
+  });
+
+  it("keeps the photo caption's location glyph the same size as its label", () => {
+    act(() => {
+      root.render(
+        <PhotoWall
+          locale="zh"
+          settings={DEFAULT_CHRONOEON_SETTINGS}
+          days={["2026-08-10"]}
+          groups={{
+            "2026-08-10": [{ id: "a", entry: entry({ id: "a", location: "西湖", images: [PHOTO] }), urls: [PHOTO] }],
+          }}
+        />,
+      );
+    });
+    const glyph = host.querySelector<SVGSVGElement>(".photo-wall-location > svg")!;
+    expect(glyph.getAttribute("width")).toBe("10");
+    expect(glyph.getAttribute("height")).toBe("10");
   });
 });
