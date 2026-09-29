@@ -127,6 +127,28 @@ describe("capture conversation persistence", () => {
     expect(userBubbles).toEqual(["买菜 36 现金"]);
   });
 
+  it("removes a successfully confirmed review from SQLite and does not restore it on reopen", async () => {
+    const store = await openConversations();
+    render(store);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    await sendText("明天 14:00 开会，讨论预算");
+    const conversationId = (await store.listConversations())[0].id;
+    expect((await store.loadCaptureReview(conversationId))?.drafts).toHaveLength(1);
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>(".capture-review-confirm")!.click();
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    expect(host.querySelector(".chat-capture-review")).toBeNull();
+    expect(await store.loadCaptureReview(conversationId)).toBeNull();
+    act(() => root.unmount());
+    root = createRoot(host);
+    render(store);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+    await waitForUserBubble();
+    expect(host.querySelector(".chat-message--user")?.textContent).toContain("明天 14:00 开会，讨论预算");
+    expect(host.querySelector(".chat-capture-review")).toBeNull();
+  });
+
   it("keeps the parsed capture review across a close and reopen", async () => {
     const store = await openConversations();
     render(store);

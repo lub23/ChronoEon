@@ -7,6 +7,7 @@ use std::{io::Cursor, path::Path};
 
 pub const MAX_BYTES: usize = 100_000;
 pub const MAX_EDGE: u32 = 1280;
+const PHOTO_EDGES: &[u32] = &[MAX_EDGE, 1120, 960, 800, 640, 480, 320, 160];
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CompressedAttachment {
@@ -19,6 +20,11 @@ pub struct CompressedAttachment {
 pub struct EncodedPhoto { pub bytes: Vec<u8>, pub width: u32, pub height: u32 }
 
 pub fn compress(bytes: &[u8], file_name: Option<&str>) -> Result<EncodedPhoto, String> {
+    let (image, text_image) = decode(bytes, file_name)?;
+    encode(&image, text_image, MAX_BYTES, PHOTO_EDGES)
+}
+
+fn decode(bytes: &[u8], file_name: Option<&str>) -> Result<(DynamicImage, bool), String> {
     if bytes.len() > 32 * 1024 * 1024 { return Err("PHOTO_INPUT_TOO_LARGE".into()); }
     let format = image::guess_format(bytes).map_err(|_| "PHOTO_UNSUPPORTED_FORMAT")?;
     let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|error| error.to_string())?;
@@ -32,10 +38,10 @@ pub fn compress(bytes: &[u8], file_name: Option<&str>) -> Result<EncodedPhoto, S
     image.apply_orientation(orientation);
     let name = file_name.unwrap_or("").to_lowercase();
     let text_image = format == ImageFormat::Png || name.contains("screenshot") || name.contains("截图") || name.contains("截屏");
-    encode(&image, text_image)
+    Ok((image, text_image))
 }
-fn encode(image: &DynamicImage, text_image: bool) -> Result<EncodedPhoto, String> {
-    for edge in [1280, 1120, 960, 800, 640, 480, 320, 160] {
+fn encode(image: &DynamicImage, text_image: bool, max_bytes: usize, edges: &[u32]) -> Result<EncodedPhoto, String> {
+    for &edge in edges {
         let scaled = if image.width().max(image.height()) > edge { image.resize(edge, edge, FilterType::Lanczos3) } else { image.clone() };
         let (width, height) = scaled.dimensions();
         let rgba = scaled.to_rgba8(); let encoder = webp::Encoder::from_rgba(&rgba, width, height);
@@ -43,12 +49,12 @@ fn encode(image: &DynamicImage, text_image: bool) -> Result<EncodedPhoto, String
         // not waste work or bandwidth on lossless encoding of sensor noise.
         if text_image {
             let encoded = encoder.encode_lossless().to_vec();
-            if encoded.len() <= MAX_BYTES { return Ok(EncodedPhoto { bytes: encoded, width, height }); }
+            if encoded.len() <= max_bytes { return Ok(EncodedPhoto { bytes: encoded, width, height }); }
         }
         let qualities: &[f32] = if text_image { &[90.,85.,80.,75.,70.,65.,60.,55.,50.] } else { &[80.,75.,70.,65.,60.,55.,50.] };
         for quality in qualities {
             let encoded = encoder.encode(*quality).to_vec();
-            if encoded.len() <= MAX_BYTES { return Ok(EncodedPhoto { bytes: encoded, width, height }); }
+            if encoded.len() <= max_bytes { return Ok(EncodedPhoto { bytes: encoded, width, height }); }
         }
     }
     Err("PHOTO_CANNOT_MEET_SIZE_LIMIT".into())
@@ -109,7 +115,7 @@ mod tests {
             let n = (x.wrapping_mul(1664525) ^ y.wrapping_mul(1013904223)).wrapping_mul(1103515245);
             image::Rgb([n as u8, (n >> 8) as u8, (n >> 16) as u8])
         }));
-        let encoded = encode(&image, false).unwrap();
+        let encoded = encode(&image, false, MAX_BYTES, PHOTO_EDGES).unwrap();
         assert!(encoded.bytes.len() <= MAX_BYTES); assert!(encoded.width.max(encoded.height) <= 1280);
         assert_eq!(validate(&encoded.bytes, &hash(&encoded.bytes)).unwrap(), (encoded.width, encoded.height));
         assert!(validate(&encoded.bytes, &"0".repeat(64)).is_err());
@@ -119,7 +125,7 @@ mod tests {
         let image = DynamicImage::ImageRgba8(image::ImageBuffer::from_fn(640, 400, |x,y| {
             if x % 7 < 2 && y % 13 < 8 { image::Rgba([0,0,0,255]) } else { image::Rgba([255,255,255,255]) }
         }));
-        let encoded = encode(&image, true).unwrap();
+        let encoded = encode(&image, true, MAX_BYTES, PHOTO_EDGES).unwrap();
         let decoded = image::load_from_memory(&encoded.bytes).unwrap().to_rgba8();
         assert_eq!(decoded, image.to_rgba8()); assert_eq!((encoded.width,encoded.height),(640,400));
         assert!(encoded.bytes.len() <= MAX_BYTES);
@@ -143,7 +149,7 @@ mod tests {
     }
     #[test]
     fn refuses_metadata_even_when_a_remote_object_has_a_matching_hash() {
-        let mut bytes=encode(&DynamicImage::new_rgb8(12,12),true).unwrap().bytes;
+        let mut bytes=encode(&DynamicImage::new_rgb8(12,12),true,MAX_BYTES,PHOTO_EDGES).unwrap().bytes;
         bytes.extend_from_slice(b"EXIF");bytes.extend_from_slice(&0u32.to_le_bytes());
         let len=(bytes.len()-8)as u32;bytes[4..8].copy_from_slice(&len.to_le_bytes());
         assert!(validate(&bytes,&hash(&bytes)).is_err());

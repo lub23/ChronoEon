@@ -1,6 +1,6 @@
 {
   "name": "chronoeon-workspace",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "private": true,
   "description": "ChronoEon (时元) — a calm, local-first calendar and entries app.",
   "workspaces": [

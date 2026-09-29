@@ -6,6 +6,8 @@ import type { CalendarSchedulePatch } from "@chronoeon/domain";
 import type { Entry, EntryDraft } from "../domain/entry";
 import { DEFAULT_CHRONOEON_SETTINGS } from "../domain/entry";
 import { DayView } from "./DayView";
+import { isChipDragActive } from "./dragGesture";
+import { useSwipeNavigation } from "../hooks/useSwipeNavigation";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -60,13 +62,15 @@ function mockGeometry() {
   return { hourHeight, canvasTop };
 }
 
-function firePointer(type: string, target: EventTarget, x: number, y: number) {
+function firePointer(type: string, target: EventTarget, x: number, y: number, pointerType = "mouse", pointerId = 1) {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperty(event, "clientX", { configurable: true, writable: true, value: x });
   Object.defineProperty(event, "clientY", { configurable: true, writable: true, value: y });
   Object.defineProperty(event, "button", { configurable: true, writable: true, value: 0 });
-  Object.defineProperty(event, "pointerType", { configurable: true, writable: true, value: "mouse" });
+  Object.defineProperty(event, "pointerType", { configurable: true, writable: true, value: pointerType });
+  Object.defineProperty(event, "pointerId", { configurable: true, writable: true, value: pointerId });
   target.dispatchEvent(event);
+  return event;
 }
 
 beforeEach(() => {
@@ -623,6 +627,137 @@ describe("day view: drag to reschedule", () => {
     });
 
     expect(rescheduled).toHaveLength(0);
+  });
+});
+
+describe("day view: touch gesture ownership", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function renderTouch(item = entry({})) {
+    const onReschedule = vi.fn(), onViewChange = vi.fn(), onNewAt = vi.fn();
+    function Harness() {
+      const nav = useSwipeNavigation({ enabled: true, activeView: "day", selectedDate: new Date(2026, 7, 10),
+        onDateChange: () => {}, menuOpen: false, onViewChange, onMenuChange: () => {} });
+      return <div ref={nav.pagerRef} className="test-pager">
+        <DayView entries={[item]} selectedDate={new Date(2026, 7, 10)} locale="en"
+          settings={DEFAULT_CHRONOEON_SETTINGS} days={2} anchor="selection" filter={[]} search=""
+          onSelectDate={() => {}} onToggle={() => {}} onEdit={() => {}} onNew={() => {}}
+          onNewAt={onNewAt} onReschedule={onReschedule} />
+      </div>;
+    }
+    act(() => root.render(<Harness />));
+    mockGeometry();
+    Object.defineProperty(host.querySelector(".test-pager"), "clientWidth", { value: 360 });
+    return { onReschedule, onViewChange, onNewAt };
+  }
+
+  it.each(["start", "end"] as const)("starts a timed %s resize immediately and blocks scroll/navigation", (edge) => {
+    const { onReschedule, onViewChange, onNewAt } = renderTouch();
+    const handle = host.querySelector<HTMLElement>(`.calendar-resize-handle--${edge}`)!;
+    handle.setPointerCapture = vi.fn();
+    const y = 100 + (edge === "start" ? 9 : 10) * 64;
+    act(() => { firePointer("pointerdown", handle, 96, y, "touch"); });
+    expect(isChipDragActive()).toBe(true);
+    expect(handle.setPointerCapture).toHaveBeenCalledWith(1);
+    const touchMove = new Event("touchmove", { bubbles: true, cancelable: true });
+    act(() => { handle.dispatchEvent(touchMove); });
+    expect(touchMove.defaultPrevented).toBe(true);
+    act(() => {
+      firePointer("pointermove", handle, 182, y + (edge === "start" ? -32 : 32), "touch");
+      firePointer("pointerup", handle, 182, y, "touch");
+      vi.advanceTimersByTime(1000);
+    });
+    expect(onReschedule).toHaveBeenCalledTimes(1);
+    expect(onReschedule.mock.calls[0][1]).toMatchObject(edge === "start"
+      ? { date: "2026-08-10", start: "09:45" }
+      : { date: "2026-08-10", endDate: "2026-08-11", end: "10:30" });
+    expect(onViewChange).not.toHaveBeenCalled();
+    expect(onNewAt).not.toHaveBeenCalled();
+    expect(isChipDragActive()).toBe(false);
+    const afterRelease = new Event("touchmove", { bubbles: true, cancelable: true });
+    act(() => host.dispatchEvent(afterRelease));
+    expect(afterRelease.defaultPrevented).toBe(false);
+  });
+
+  it.each(["start", "end"] as const)("starts an all-day %s resize without a hold", (edge) => {
+    const { onReschedule, onViewChange } = renderTouch(entry({ allDay: true, start: undefined, end: undefined }));
+    const handle = host.querySelector(`.calendar-span-handle--${edge}`)!;
+    act(() => {
+      firePointer("pointerdown", handle, 96, 60, "touch");
+      firePointer("pointermove", handle, 182, 60, "touch");
+      firePointer("pointerup", handle, 182, 60, "touch");
+      vi.advanceTimersByTime(1000);
+    });
+    expect(onReschedule).toHaveBeenCalledTimes(1);
+    expect(onViewChange).not.toHaveBeenCalled();
+  });
+
+  it("ignores other pointers and releases a cancelled resize without saving", () => {
+    const { onReschedule } = renderTouch();
+    const handle = host.querySelector(".calendar-resize-handle--end")!;
+    act(() => {
+      firePointer("pointerdown", handle, 96, 740, "touch");
+      firePointer("pointermove", handle, 182, 804, "touch", 2);
+      firePointer("pointerup", handle, 182, 804, "touch", 2);
+    });
+    expect(isChipDragActive()).toBe(true);
+    expect(host.querySelector(".is-drag-ghost")).toBeNull();
+    act(() => {
+      firePointer("pointermove", handle, 96, 804, "touch");
+      firePointer("pointercancel", handle, 96, 804, "touch");
+    });
+    expect(onReschedule).not.toHaveBeenCalled();
+    expect(isChipDragActive()).toBe(false);
+    expect(host.querySelector(".is-drag-ghost")).toBeNull();
+    const touchMove = new Event("touchmove", { bubbles: true, cancelable: true });
+    act(() => host.dispatchEvent(touchMove));
+    expect(touchMove.defaultPrevented).toBe(false);
+  });
+
+  it("keeps the body hold gate but permits a quick vertical swipe to scroll", () => {
+    const { onReschedule } = renderTouch();
+    const chip = host.querySelector(".item-chip--timed")!;
+    act(() => { firePointer("pointerdown", chip, 96, 700, "touch"); vi.advanceTimersByTime(299); });
+    expect(isChipDragActive()).toBe(false);
+    act(() => {
+      firePointer("pointermove", chip, 96, 730, "touch");
+      vi.advanceTimersByTime(400);
+    });
+    const touchMove = new Event("touchmove", { bubbles: true, cancelable: true });
+    act(() => { chip.dispatchEvent(touchMove); firePointer("pointerup", chip, 96, 730, "touch"); });
+    expect(touchMove.defaultPrevented).toBe(false);
+    expect(isChipDragActive()).toBe(false);
+    expect(onReschedule).not.toHaveBeenCalled();
+  });
+
+  it("activates a held body drag and removes its pending touch listeners", () => {
+    const { onReschedule } = renderTouch();
+    const chip = host.querySelector(".item-chip--timed")!;
+    act(() => { firePointer("pointerdown", chip, 96, 700, "touch"); vi.advanceTimersByTime(300); });
+    expect(isChipDragActive()).toBe(true);
+    act(() => {
+      firePointer("pointermove", chip, 96, 764, "touch");
+      firePointer("pointerup", chip, 96, 764, "touch");
+    });
+    expect(onReschedule).toHaveBeenCalledTimes(1);
+    expect(isChipDragActive()).toBe(false);
+    const touchMove = new Event("touchmove", { bubbles: true, cancelable: true });
+    act(() => host.dispatchEvent(touchMove));
+    expect(touchMove.defaultPrevented).toBe(false);
+  });
+
+  it("cancels pending holds on pointercancel and on unmount", () => {
+    renderTouch();
+    const chip = host.querySelector(".item-chip--timed")!;
+    act(() => {
+      firePointer("pointerdown", chip, 96, 700, "touch");
+      firePointer("pointercancel", chip, 96, 700, "touch");
+      vi.advanceTimersByTime(400);
+    });
+    expect(isChipDragActive()).toBe(false);
+    act(() => { firePointer("pointerdown", chip, 96, 700, "touch"); root.render(null); vi.advanceTimersByTime(400); });
+    expect(isChipDragActive()).toBe(false);
   });
 });
 

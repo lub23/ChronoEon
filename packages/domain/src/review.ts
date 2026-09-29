@@ -224,7 +224,11 @@ export function reviewCategoryOptions(
 }
 
 function categoryAliases(options: EntryCategoryOption[]): Map<string, string> {
-  return new Map(options.flatMap(option => [[option.value.toLocaleLowerCase(), option.value], [option.label.toLocaleLowerCase(), option.value]]));
+  // Display names may repeat or equal another category's ID. IDs always win.
+  return new Map([
+    ...options.map(option => [option.label.toLocaleLowerCase(), option.value] as const),
+    ...options.map(option => [option.value.toLocaleLowerCase(), option.value] as const),
+  ]);
 }
 
 /** Aggregate every curve in one date projection; switching selected series does

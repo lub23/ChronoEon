@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createDefaultSettings } from "../settings";
 import { useExampleCatalogs } from "../testFixtures";
 import { parseCapture, type CaptureHistoryItem, type CaptureOptions } from "./index";
+import { inferCategory } from "./category";
 
 // Wednesday 2026-09-09 09:00 local.
 const now = new Date(2026, 8, 9, 9, 0, 0);
@@ -54,16 +55,16 @@ describe("parseCapture · schedule", () => {
 
 describe("parseCapture · bills", () => {
   it.each([
-    ["午饭花了35块", { kind: "bill", amount: -35, currency: "CNY", category: "Expense/Daily", title: "午饭" }],
-    ["午餐 ¥36.50", { kind: "bill", amount: -36.5, category: "Expense/Daily", title: "午餐" }],
-    ["薪资到账 12000", { kind: "bill", amount: 12000, category: "Income/Salary", title: "薪资" }],
-    ["薪资 ￥8000", { kind: "bill", amount: 8000, category: "Income/Salary" }],
-    ["打车去机场 58元", { kind: "bill", amount: -58, category: "Expense/Daily", location: "机场", title: "打车" }],
-    ["星巴克咖啡 $4.5", { kind: "bill", amount: -4.5, currency: "USD", category: "Expense/Daily" }],
-    ["买了三十块钱的水果", { kind: "bill", amount: -30, category: "Expense/Daily", title: "水果" }],
-    ["奖金收到 320", { kind: "bill", amount: 320, category: "Income/Bonus", title: "奖金" }],
-    ["昨天电费 180", { kind: "bill", date: "2026-09-08", amount: -180, category: "Expense/Daily", title: "电费" }],
-    ["房租 3500 支付宝", { kind: "bill", amount: -3500, category: "Expense/Daily", payment: "Alipay" }],
+    ["午饭花了35块", { kind: "bill", amount: -35, currency: "CNY", category: "expense/Daily", title: "午饭" }],
+    ["午餐 ¥36.50", { kind: "bill", amount: -36.5, category: "expense/Daily", title: "午餐" }],
+    ["薪资到账 12000", { kind: "bill", amount: 12000, category: "income/Salary", title: "薪资" }],
+    ["薪资 ￥8000", { kind: "bill", amount: 8000, category: "income/Salary" }],
+    ["打车去机场 58元", { kind: "bill", amount: -58, category: "expense/Daily", location: "机场", title: "打车" }],
+    ["星巴克咖啡 $4.5", { kind: "bill", amount: -4.5, currency: "USD", category: "expense/Daily" }],
+    ["买了三十块钱的水果", { kind: "bill", amount: -30, category: "expense/Daily", title: "水果" }],
+    ["奖金收到 320", { kind: "bill", amount: 320, category: "income/Bonus", title: "奖金" }],
+    ["昨天电费 180", { kind: "bill", date: "2026-09-08", amount: -180, category: "expense/Daily", title: "电费" }],
+    ["房租 3500 支付宝", { kind: "bill", amount: -3500, category: "expense/Daily", payment: "Alipay" }],
   ] as const)("%s", (input, expected) => {
     expect(draft(input)).toMatchObject(expected);
   });
@@ -78,14 +79,25 @@ describe("parseCapture · learned categories", () => {
     { kind: "event", title: "背单词", category: "alpha", date: "2026-09-01" },
     { kind: "event", title: "周会", category: "beta", date: "2026-09-02" },
     { kind: "event", title: "陪妈妈散步", category: "alpha", location: "滨江公园", date: "2026-09-03" },
-    { kind: "bill", title: "猫粮", category: "Expense/Daily", date: "2026-09-03" },
+    { kind: "bill", title: "猫粮", category: "expense/Daily", date: "2026-09-03" },
   ];
+
+  it("learns from stored names but emits stable IDs without changing history or merging same-name catalogs", () => {
+    const custom = createDefaultSettings();
+    custom.bill.categories.push({ id: "ledger-dining", name: "Dining", color: "#aaa", direction: "expense", sub: ["Meal"] });
+    custom.bill.categories.push({ id: "ledger-expense", name: "Expense", color: "#bbb", direction: "expense", sub: ["Daily"] });
+    const named = Object.freeze([{ kind: "bill" as const, title: "Lunch", category: "Dining/Meal", date: "2026-09-08" }]);
+    expect(inferCategory("Lunch", "Lunch 20", "bill", custom, named, now, -20).value).toBe("ledger-dining/Meal");
+    expect(named[0].category).toBe("Dining/Meal");
+    const identified = [{ kind: "bill" as const, title: "Books", category: "ledger-expense/Daily", date: "2026-09-08" }];
+    expect(inferCategory("Books", "Books 20", "bill", custom, identified, now, -20).value).toBe("ledger-expense/Daily");
+  });
 
   it("prefers the category the user gave a near-identical title before", () => {
     const result = parseCapture("背单词半小时", { ...base, history });
     expect(result.draft).toMatchObject({ category: "alpha", start: "09:00", end: "09:30", title: "背单词" });
     expect(result.confidence.category).toBeGreaterThanOrEqual(0.9);
-    expect(draft("买猫粮 120", { history })).toMatchObject({ kind: "bill", category: "Expense/Daily" });
+    expect(draft("买猫粮 120", { history })).toMatchObject({ kind: "bill", category: "expense/Daily" });
   });
 
   it("learns a short habit title embedded in a longer phrase", () => {
@@ -154,7 +166,7 @@ describe("parseCapture · dates, durations and conservative extraction", () => {
     ["现在想一个问题", { location: undefined, title: "现在想一个问题" }],
     ["重要会议", { kind: "event", title: "重要会议" }],
     ["Lunch €12.50", { kind: "bill", amount: -12.5, currency: "EUR", title: "Lunch" }],
-    ["薪资两万三千元", { kind: "bill", amount: 23000, category: "Income/Salary", title: "薪资" }],
+    ["薪资两万三千元", { kind: "bill", amount: 23000, category: "income/Salary", title: "薪资" }],
   ] as const)("%s", (input, expected) => expect(draft(input)).toMatchObject(expected));
 
   it("rounds duration-only events up to the next quarter-hour, including midnight", () => {
@@ -166,7 +178,7 @@ describe("parseCapture · dates, durations and conservative extraction", () => {
   it("only learns from valid categories of the same kind and direction", () => {
     const history: CaptureHistoryItem[] = [
       { kind: "event", title: "散步", category: "deleted", date: "2026-09-08" },
-      { kind: "bill", title: "散步", category: "Income/Salary", date: "2026-09-08" },
+      { kind: "bill", title: "散步", category: "income/Salary", date: "2026-09-08" },
     ];
     expect(draft("散步", { history }).category).toBe("alpha");
     expect(draft("散步 20元", { history }).category).not.toContain("Income");

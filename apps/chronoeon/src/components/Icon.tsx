@@ -1,6 +1,7 @@
 import type { SVGProps } from "react";
 
 export type IconName =
+  | "device" | "shirt" | "home" | "bike" | "box"
   | "agenda" | "month" | "week" | "day" | "idea" | "insights" | "plus" | "minus" | "search" | "folder"
   | "sun" | "moon" | "languages" | "chevron-left" | "chevron-right" | "calendar"
   | "check" | "clock" | "wallet" | "sparkle" | "more" | "pin" | "expand"
@@ -12,6 +13,11 @@ export type IconName =
   | "bell" | "keyboard" | "chart" | "coins" | "chevron-down" | "chevron-up" | "camera";
 
 const paths: Record<IconName, React.ReactNode> = {
+  device: <><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M10 18h4"/></>,
+  shirt: <path d="m8 3-6 4 3 5 3-2v11h8V10l3 2 3-5-6-4a4 4 0 0 1-8 0Z"/>,
+  home: <><path d="m3 10 9-7 9 7M5 9v12h14V9M9 21v-8h6v8"/></>,
+  bike: <><circle cx="5" cy="17" r="4"/><circle cx="19" cy="17" r="4"/><path d="m5 17 5-10 5 10H5M9 7h4M15 3h3l2 14M10 7h8"/></>,
+  box: <><path d="m12 3 9 5v9l-9 5-9-5V8Zm0 10v9M3 8l9 5 9-5M7.5 5.5l9 5"/></>,
   agenda: <><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></>,
   month: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M9 10v11M15 10v11M3 15.5h18"/></>,
   week: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/><rect x="5.5" y="13" width="13" height="4.5" rx="1.2" fill="currentColor" stroke="none" opacity=".82"/></>,

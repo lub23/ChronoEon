@@ -617,6 +617,11 @@ async fn compress_photo(
     }).await.map_err(|error| error.to_string())?
 }
 
+fn decode_photo_data(data_base64: &str) -> Result<Vec<u8>, String> {
+    if data_base64.len() > 44 * 1024 * 1024 { return Err("PHOTO_INPUT_TOO_LARGE".into()); }
+    BASE64.decode(data_base64.as_bytes()).map_err(|_| "PHOTO_INVALID_DATA".into())
+}
+
 #[tauri::command]
 async fn compress_photo_data(
     app: tauri::AppHandle,
@@ -625,8 +630,7 @@ async fn compress_photo_data(
 ) -> Result<CompressedAttachment, String> {
     let root = local_attachments_root(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        if data_base64.len() > 44 * 1024 * 1024 { return Err("PHOTO_INPUT_TOO_LARGE".into()); }
-        let bytes = BASE64.decode(data_base64.as_bytes()).map_err(|_| "PHOTO_INVALID_DATA")?;
+        let bytes = decode_photo_data(&data_base64)?;
         attachments::store(&root, attachments::compress(&bytes, file_name_hint.as_deref())?)
     }).await.map_err(|error| error.to_string())?
 }
@@ -1038,7 +1042,14 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{ai_content_is_valid, normalize_ai_base_url, normalize_ai_custom_headers, safe_relative_path, sha256_revision, AiCustomHeader};
+    use super::{ai_content_is_valid, decode_photo_data, normalize_ai_base_url, normalize_ai_custom_headers, safe_relative_path, sha256_revision, AiCustomHeader};
+
+    #[test]
+    fn decode_photo_data_accepts_base64_and_rejects_invalid_or_oversized_input() {
+        assert_eq!(decode_photo_data("AA==").unwrap(), vec![0]);
+        assert_eq!(decode_photo_data("not base64").unwrap_err(), "PHOTO_INVALID_DATA");
+        assert_eq!(decode_photo_data(&"A".repeat(44 * 1024 * 1024 + 1)).unwrap_err(), "PHOTO_INPUT_TOO_LARGE");
+    }
 
     #[test]
     fn accepts_text_and_bounded_inline_images() {

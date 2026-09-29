@@ -20,7 +20,7 @@ import {
   parseClockMinutes,
   formatClockMinutes,
 } from "../domain/entry";
-import { inferCategory, inferLocation, type CaptureHistoryItem } from "@chronoeon/domain";
+import { inferCategory, inferLocationCandidates, type CaptureHistoryItem } from "@chronoeon/domain";
 import { entryToDraft, type EntryEditContext, type RecurrenceEditScope } from "../domain/entryWorkflow";
 import type { ConfirmRequest } from "./ConfirmDialog";
 import { catalogLabel, categoryLabel, compositeCategoryLabel, paymentMethodLabel, t, type MessageKey } from "../i18n";
@@ -34,6 +34,8 @@ import { TaskStatusGlyph } from "./ItemGlyph";
 import { registerModalDismiss } from "./modalLayer";
 import { readCurrentPlace } from "../platform/location";
 import { labeledOptions, priorities, recurrenceOptions, reminderLabels, reminderTriggerLabel, weekdayIndexForDate } from "./entryFieldLabels";
+import { BillItemLinks } from "./BillItemLinks";
+import type { Item } from "@chronoeon/domain";
 import { RecurrenceWeekdays } from "./RecurrenceWeekdays";
 
 interface EntryComposerProps {
@@ -52,6 +54,9 @@ interface EntryComposerProps {
   initialDraft?: Partial<EntryDraft>;
   /** Local entries are the only category-learning corpus; never sent anywhere. */
   history?: readonly CaptureHistoryItem[];
+  items?: Item[];
+  onEditItem?: (item: Item) => void;
+  onLinkItem?: (entry: Entry, item?: Item, category?: Item["category"]) => void;
 }
 
 function normalizeScheduleTimes(draft: EntryDraft, timeScale: ChronoEonSettings["timeScale"]): EntryDraft {
@@ -94,13 +99,18 @@ function initialDraft(selectedDate: string, editing: Entry | null, settings: Chr
     currency: settings.bill.currency,
     payment: settings.bill.paymentMethods[0],
     recurrence: "none",
-    reminder: "none",
+    reminder: defaultReminder(seed?.kind ?? "event", seed?.allDay),
     ...seed,
   };
   return normalizeScheduleTimes(draft, settings.timeScale);
 }
 
 const kinds: EntryKind[] = ["task", "event", "idea", "bill"];
+
+function defaultReminder(kind: EntryKind, allDay?: boolean): Reminder {
+  if (kind !== "task") return "none";
+  return allDay ? "day-before-5pm" : "30min";
+}
 
 const statusKeys: Record<EntryStatus, MessageKey> = {
   open: "statusOpen",
@@ -132,6 +142,9 @@ export function EntryComposer({
   onConfirm,
   initialDraft: seed,
   history = [],
+  items = [],
+  onEditItem,
+  onLinkItem,
 }: EntryComposerProps) {
   const occurrence = Boolean(editing?.recurrenceSourceId && editing.occurrenceDate);
   const source = sourceEntry ?? editing;
@@ -159,6 +172,12 @@ export function EntryComposer({
   // A cleared or typed location is explicit, even when the field is empty.
   const locationTouchedRef = useRef(false);
   const [statusMenu, setStatusMenu] = useState<{ left: number; top: number } | null>(null);
+  const locationSuggestions = useMemo(
+    () => settings.locationAutofill && draft.title.trim() && !locationTouchedRef.current
+      ? inferLocationCandidates(draft.title.trim(), history, draft.date)
+      : [],
+    [draft.date, draft.title, history, settings.locationAutofill],
+  );
   // The draft at open time is the discard baseline: Esc (or the close button)
   // with unsaved changes asks before losing them.
   const pristineRef = useRef<string>(JSON.stringify(initialDraft(selectedDate, occurrence ? editing : source, settings, seed)));
@@ -221,9 +240,9 @@ export function EntryComposer({
   // calendar distance and stop as soon as the user owns the location field.
   useEffect(() => {
     if (!settings.locationAutofill || locationTouchedRef.current || draft.location) return;
-    const location = inferLocation(draft.title, history, draft.date);
+    const location = locationSuggestions[0]?.value;
     if (location) update("location", location);
-  }, [draft.title, draft.date, draft.location, history, settings]);
+  }, [draft.location, locationSuggestions, settings.locationAutofill]);
 
   const categoryOptions = useMemo(
     () => withCurrentOption(categoryOptionsForKind(draft.kind, settings, draft.calendar), draft.category),
@@ -232,11 +251,12 @@ export function EntryComposer({
   const billGroups = useMemo(() => {
     const groups = new Map<string, EntryCategoryOption[]>();
     for (const option of categoryOptions) {
-      const group = option.group ? catalogLabel(option.group, locale, option.group) : t("category", locale);
+      const primary = option.value.split("/")[0];
+      const group = option.group ? catalogLabel(primary, locale, option.group, settings) + (primary.startsWith("ledger-") ? ` · ${locale === "zh" ? "自定义" : "Custom"}` : "") : t("category", locale);
       groups.set(group, [...(groups.get(group) ?? []), option]);
     }
     return [...groups.entries()];
-  }, [categoryOptions, locale]);
+  }, [categoryOptions, locale, settings]);
   const occurrenceOnly = scope === "occurrence";
   const recurringSeries = Boolean(source?.recurrence && source.recurrence !== "none");
 
@@ -299,9 +319,10 @@ export function EntryComposer({
       // A reminder value only resolves in its own time mode; carrying the old
       // value across the toggle would store a reminder that never fires, so
       // reset it to "none" instead.
-      const reminder = (allDay ? ALL_DAY_REMINDERS : TIMED_REMINDERS).includes(current.reminder ?? "none")
-        ? current.reminder
-        : "none";
+      const oldReminder = current.reminder ?? "none";
+      const reminder = (allDay ? ALL_DAY_REMINDERS : TIMED_REMINDERS).includes(oldReminder)
+        ? oldReminder
+        : defaultReminder(current.kind, allDay);
       let next: EntryDraft = { ...current, allDay, reminder };
       if (!allDay && !next.start) {
         const now = new Date();
@@ -337,7 +358,7 @@ export function EntryComposer({
         recurrence: kind === "idea" ? "none" : current.recurrence,
         recurringDays: kind === "idea" ? undefined : current.recurringDays,
         recurringEnd: kind === "idea" ? undefined : current.recurringEnd,
-        reminder: kind === "idea" ? "none" : current.reminder,
+        reminder: kind === "idea" ? "none" : current.reminder ?? defaultReminder(kind, current.allDay),
         priority: kind === "idea" ? undefined : current.priority,
         urgency: kind === "idea" ? undefined : current.urgency,
       };
@@ -428,11 +449,11 @@ export function EntryComposer({
                 options={draft.kind === "bill"
                   ? billGroups.flatMap(([group, options]) => options.map((option) => ({
                     value: option.value,
-                    label: option.group ? compositeCategoryLabel(option.value, locale) : categoryLabel(option.value, locale, option.label),
+                    label: option.group ? compositeCategoryLabel(option.value, locale, settings) : categoryLabel(option.value, locale, option.label, settings),
                     color: option.color,
                     group,
                   })))
-                  : categoryOptions.map((option) => ({ value: option.value, label: categoryLabel(option.value, locale, option.label), color: option.color, group: option.group }))}
+                  : categoryOptions.map((option) => ({ value: option.value, label: categoryLabel(option.value, locale, option.label, settings), color: option.color, group: option.group }))}
                 onChange={(value) => { categoryTouchedRef.current = true; update("category", value); }}
               />
             </div>
@@ -531,6 +552,15 @@ export function EntryComposer({
               </label>
             )}
           </div>
+
+          {locationSuggestions.length > 1 && draft.kind !== "idea" && (
+            <div className="field-suggestions" role="group" aria-label={t("location", locale)}>
+              {locationSuggestions.map(suggestion => (
+                <button key={suggestion.value} type="button" className={draft.location === suggestion.value ? "is-active" : ""}
+                  onClick={() => { locationTouchedRef.current = true; update("location", suggestion.value); }}>{suggestion.value}</button>
+              ))}
+            </div>
+          )}
 
           {statusMenu && draft.kind === "task" && (
             <TaskStatusMenu
@@ -719,6 +749,7 @@ export function EntryComposer({
                 </div>
               </div>
 
+              {editing?.kind === "bill" && draft.kind === "bill" && onEditItem && onLinkItem && <BillItemLinks entry={editing} items={items} locale={locale} settings={settings} onEdit={onEditItem} onLink={onLinkItem} />}
               <AttachmentField
                 locale={locale}
                 settings={settings}

@@ -8,6 +8,7 @@ import {
 } from "./calendar";
 import type { Entry, EntryStatus, Locale } from "./entry";
 import {
+  billCategoryForValue,
   billDirectionForCategory,
   DEFAULT_CHRONOEON_SETTINGS,
   resolveEntryColor,
@@ -175,9 +176,7 @@ export interface BillStats {
 function billCategoryOf(entry: Entry, settings: ChronoEonSettings) {
   const raw = entry.category || "uncategorized";
   const [primary, sub] = raw.split("/");
-  const known = settings.bill.categories.find((candidate) =>
-    candidate.id.toLocaleLowerCase() === primary.toLocaleLowerCase()
-    || candidate.name.toLocaleLowerCase() === primary.toLocaleLowerCase());
+  const known = billCategoryForValue(raw, settings);
   return {
     id: known?.id ?? primary,
     name: known?.name ?? primary,

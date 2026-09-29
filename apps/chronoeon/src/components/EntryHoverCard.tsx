@@ -39,7 +39,7 @@ export function EntryHoverCard({ entry, locale, settings }: EntryHoverCardProps)
 
       <dl className="entry-hover-facts">
         <div><dt>{t(entry.allDay ? "allDay" : "start", locale)}</dt><dd>{when}</dd></div>
-        <div><dt>{t("category", locale)}</dt><dd>{entry.category.includes("/") ? compositeCategoryLabel(entry.category, locale) : categoryLabel(entry.category, locale)}</dd></div>
+        <div><dt>{t("category", locale)}</dt><dd>{entry.category.includes("/") ? compositeCategoryLabel(entry.category, locale, settings) : categoryLabel(entry.category, locale, undefined, settings)}</dd></div>
         {calendar && <div><dt>{t("calendarLabel", locale)}</dt><dd>{calendarDisplayName(calendar.name, locale)}</dd></div>}
         {entry.kind === "task" && entry.status && (
           <div><dt>{t("statusLabel", locale)}</dt><dd>{t(entry.status === "done" ? "statusDone" : entry.status === "cancelled" ? "statusCancelled" : entry.status === "in-progress" ? "statusInProgress" : "statusOpen", locale)}</dd></div>

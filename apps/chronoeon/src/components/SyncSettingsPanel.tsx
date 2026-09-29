@@ -8,6 +8,7 @@ import type { useSyncService } from "../sync/useSyncService";
 import { formatBytes, syncConfigured, type SyncConfig, type SyncMode } from "../sync/types";
 import { localeTag, t, type MessageKey } from "../i18n";
 import { Icon } from "./Icon";
+import { LedgerImportPanel } from "./LedgerImportPanel";
 
 interface Props { locale: Locale; config: SyncConfig; onChange: (config: SyncConfig) => void; service: ReturnType<typeof useSyncService>; entries: Entry[] }
 const errors: Record<string, MessageKey> = {
@@ -164,6 +165,7 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
         </ul>
       </section>
     )}
+    <LedgerImportPanel locale={locale} service={service} />
     <p className="settings-footnote">{t("syncDataNote", locale)}</p>
     {config.mode === "webdav" && <p className="settings-footnote">{t("syncWebdavRetention", locale)}</p>}
     {service.conflicts.length > 0 && <section className="sync-conflict-list" aria-label={t("syncConflicts", locale)}>

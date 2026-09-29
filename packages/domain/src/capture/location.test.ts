@@ -1,8 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { inferLocation, type CaptureHistoryItem } from "./index";
+import { inferLocation, inferLocationCandidates, type CaptureHistoryItem } from "./index";
 
 const item = (title: string, location: string, date: string): CaptureHistoryItem => ({
   kind: "event", title, category: "work", location, date,
+});
+
+describe("inferLocationCandidates", () => {
+  it("returns distinct candidates ranked by match and recency", () => {
+    const history = [
+      item("健身训练", "南馆", "2026-09-01"),
+      item("健身", "东馆", "2026-09-03"),
+      item("健身", "东馆", "2026-09-04"),
+    ];
+    expect(inferLocationCandidates("健身训练一小时", history, "2026-09-04").map(candidate => candidate.value))
+      .toEqual(["东馆", "南馆"]);
+  });
 });
 
 describe("inferLocation", () => {

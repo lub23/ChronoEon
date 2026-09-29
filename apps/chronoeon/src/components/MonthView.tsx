@@ -176,7 +176,7 @@ export function MonthView({
     dayKeys,
     (date) => entriesForDate(entries, date)
       .filter((entry) => kindAllowed(filter, entry.kind))
-      .filter((entry) => entryMatchesSearch(entry, search, locale)),
+      .filter((entry) => entryMatchesSearch(entry, search, locale, settings)),
     capacity,
     (date) => entriesForDate(entries, date),
     settings,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { calendarDisplayName, catalogLabel, compositeCategoryLabel, t } from "./i18n";
+import { calendarDisplayName, catalogLabel, categoryLabel, compositeCategoryLabel, t } from "./i18n";
+import { createDefaultSettings } from "@chronoeon/domain";
 
 describe("standalone localization", () => {
   it("uses the requested bilingual ChronoEon motto", () => {
@@ -21,6 +22,27 @@ describe("standalone localization", () => {
     expect(compositeCategoryLabel("收入/工资", "en")).toBe("工资");
     expect(compositeCategoryLabel("收入/工资", "zh")).toBe("工资");
     expect(catalogLabel("Team budget", "zh")).toBe("Team budget");
+  });
+
+  it("resolves stable bill IDs without translating same-name imported catalogs", () => {
+    const settings = createDefaultSettings();
+    settings.bill.categories.push({ id: "ledger-income", name: "Income", color: "#aaa", direction: "expense", sub: ["Salary"] });
+    settings.bill.categories.push({ id: "ledger-other", name: "其他收入", color: "#bbb", direction: "income", sub: [] });
+    expect(categoryLabel("income", "zh", undefined, settings)).toBe("收入");
+    expect(catalogLabel("income", "en", undefined, settings)).toBe("Income");
+    expect(categoryLabel("ledger-income", "zh", undefined, settings)).toBe("Income");
+    expect(compositeCategoryLabel("income/Salary", "zh", settings)).toBe("工资");
+    expect(compositeCategoryLabel("ledger-income/Salary", "zh", settings)).toBe("Salary");
+    for (const locale of ["en", "zh"] as const) {
+      expect(categoryLabel("ledger-other", locale, undefined, settings)).toBe("其他收入");
+      expect(compositeCategoryLabel("ledger-other", locale, settings)).toBe("其他收入");
+    }
+    const chinese = createDefaultSettings("zh");
+    expect(categoryLabel("income", "en", undefined, chinese)).toBe("Income");
+    expect(compositeCategoryLabel("income/工资", "en", chinese)).toBe("Salary");
+    chinese.bill.categories[0].name = "家用收入";
+    expect(catalogLabel("income", "en", undefined, chinese)).toBe("家用收入");
+    expect(compositeCategoryLabel("income/额外收入", "en", chinese)).toBe("额外收入");
   });
 
   it("keeps the two composers' labels short and balanced", () => {

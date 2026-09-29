@@ -100,7 +100,7 @@ export function buildTimelineDays(options: TimelineOptions): TimelineDay[] {
     const scoped = startDateOnly ? projected.filter((entry) => entry.date === key) : projected;
     const visible = scoped
       .filter((entry) => kindAllowed(filter, entry.kind))
-      .filter((entry) => entryMatchesSearch(entry, search, locale))
+      .filter((entry) => entryMatchesSearch(entry, search, locale, settings))
       .sort(compareTimelineEntries);
     const expense = dayExpenseTotal(projected, settings);
     const selected = key === selectedKey;

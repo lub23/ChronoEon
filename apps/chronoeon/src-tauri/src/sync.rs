@@ -187,6 +187,20 @@ fn directory_bytes(path: &Path) -> u64 {
     }).sum()
 }
 
+/// The transport set is bounded WebP only; an accidentally copied original,
+/// screenshot export or cache artifact must not inflate reported sync usage.
+fn transportable_attachment_bytes(path: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(path) else { return 0; };
+    entries.flatten().filter_map(|entry| {
+        let name = entry.file_name();
+        let name = name.to_str()?;
+        let hash = name.strip_suffix(".webp")?;
+        if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) { return None; }
+        let metadata = entry.metadata().ok()?;
+        metadata.is_file().then(|| metadata.len()).filter(|bytes| *bytes <= attachments::MAX_BYTES as u64)
+    }).sum()
+}
+
 #[tauri::command]
 pub async fn sync_storage_usage(app: tauri::AppHandle, config: TransportConfig) -> Result<StorageUsage, String> {
     let root = cache_root(&app, &config)?;
@@ -196,7 +210,7 @@ pub async fn sync_storage_usage(app: tauri::AppHandle, config: TransportConfig) 
             .filter_map(|name| fs::metadata(local.join(name)).ok()).map(|metadata| metadata.len()).sum();
         StorageUsage {
             sync_cache_bytes: directory_bytes(&root),
-            attachment_bytes: directory_bytes(&local.join("attachments")),
+            attachment_bytes: transportable_attachment_bytes(&local.join("attachments")),
             database_bytes,
         }
     }).await.map_err(|error| error.to_string())
@@ -225,6 +239,20 @@ mod tests {
 ").unwrap();
         assert_eq!(directory_bytes(&root), 1200 + 21);
         assert_eq!(directory_bytes(&root.join("missing")), 0);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn usage_counts_only_bounded_canonical_webp_photos() {
+        let root = std::env::temp_dir().join(format!("chronoeon-usage-photos-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let hash = attachments::hash(b"photo");
+        fs::write(root.join(format!("{hash}.webp")), [0u8; 512]).unwrap();
+        fs::write(root.join("original.jpg"), [0u8; 4096]).unwrap();
+        fs::write(root.join(format!("{}.jpg", "a".repeat(64))), [0u8; 4096]).unwrap();
+        fs::write(root.join("oversized.webp"), [0u8; attachments::MAX_BYTES + 1]).unwrap();
+        assert_eq!(transportable_attachment_bytes(&root), 512);
         fs::remove_dir_all(&root).unwrap();
     }
     #[test]

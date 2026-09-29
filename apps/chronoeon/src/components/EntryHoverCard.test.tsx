@@ -64,6 +64,18 @@ describe("entry hover details card", () => {
     expect(card!.textContent).toContain("高"); // priorityHigh zh label
   });
 
+  it("renders imported primary-only bill IDs as human names on rows and hover cards", () => {
+    const settings = structuredClone(DEFAULT_CHRONOEON_SETTINGS);
+    settings.bill.categories.push({ id: "ledger-income", name: "其他收入", color: "#aaa", direction: "income", sub: [] });
+    act(() => root.render(<EntryRow entry={{ ...entry, kind: "bill", category: "ledger-income", amount: 50 }} locale="zh" settings={settings} onToggle={() => undefined} onEdit={() => undefined} />));
+    expect(host.querySelector(".entry-meta")?.textContent).toContain("其他收入");
+    const row = host.querySelector("article")!;
+    act(() => row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    act(() => vi.advanceTimersByTime(400));
+    expect(host.querySelector(".entry-hover-card")?.textContent).toContain("其他收入");
+    expect(host.textContent).not.toContain("ledger-income");
+  });
+
   it("a quick pointer sweep never flashes the card", () => {
     const row = renderRow();
     act(() => row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));

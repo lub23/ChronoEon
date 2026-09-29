@@ -177,7 +177,7 @@ function captureSummary(draft: EntryDraft, locale: Locale, settings: ChronoEonSe
   const time = draft.allDay ? "" : [draft.start, draft.end].filter(Boolean).join("-");
   const categoryOption = categoryOptionsForKind(draft.kind, settings, draft.calendar)
     .find((option) => option.value === draft.category);
-  const category = categoryOption?.label ?? categoryLabel(draft.category, locale);
+  const category = categoryLabel(draft.category, locale, categoryOption?.label, settings);
   const details = [
     category,
     `**${draft.title || t("untitled", locale)}**`,
@@ -427,7 +427,7 @@ export function ChatDialog({
     reviewLoadedRef.current = activeId;
     let current = true;
     void conversations.loadCaptureReview(activeId).then((stored) => {
-      if (!current || !stored) return;
+      if (!current || !stored || stored.saved) return;
       setPendingCapture({
         id: stored.messageId,
         conversationId: stored.conversationId,
@@ -722,7 +722,9 @@ export function ChatDialog({
     try {
       const saved = await onConfirmCapture(review.drafts.map((item) => item.draft));
       if (saved) {
-        setPendingCapture((current) => current?.id === review.id ? { ...current, saved: true, countdown: 0 } : current);
+        setPendingCapture((current) => current?.id === review.id ? null : current);
+        void conversations?.deleteCaptureReview(review.conversationId)
+          .catch((error: unknown) => console.warn("Could not drop the capture review", error));
       } else {
         setError(t("entrySaveFailed", locale));
       }
@@ -732,12 +734,11 @@ export function ChatDialog({
       captureSavingRef.current = false;
       setCaptureSaving(false);
     }
-  }, [locale, onConfirmCapture]);
+  }, [conversations, locale, onConfirmCapture]);
 
   const pendingInvalid = Boolean(pendingCapture?.drafts.some((item) =>
     validateAIStructuredDraft(item.draft).some((issue) => issue.severity === "error")));
-  // A review is shown only in the conversation that produced it: switching to
-  // another record keeps it (it comes back), and it is dismissed by hand.
+  // A review belongs to its conversation until it is saved or dismissed.
   const activeReview = pendingCapture && pendingCapture.conversationId === activeId ? pendingCapture : null;
   const pendingCaptureRef = useRef<CaptureReview | null>(null);
   pendingCaptureRef.current = pendingCapture;
@@ -775,7 +776,7 @@ export function ChatDialog({
     } : current);
   };
 
-  /** Dismissing is the only way the card goes away for good. */
+  /** Discard an unsaved review without touching conversation history. */
   function dismissCaptureReview(review: CaptureReview) {
     setPendingCapture((current) => (current?.id === review.id ? null : current));
     void conversations?.deleteCaptureReview(review.conversationId)

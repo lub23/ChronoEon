@@ -67,7 +67,7 @@ describe("shared domain", () => {
 
   it("uses the configured bill hierarchy and colors", () => {
     const settings = useExampleCatalogs(createDefaultSettings());
-    const daily = categoryOptionsForKind("bill", settings).find((option) => option.value === "Expense/Daily");
+    const daily = categoryOptionsForKind("bill", settings).find((option) => option.value === "expense/Daily");
     expect(daily).toMatchObject({ group: "Expense", color: "#c0392b" });
     expect(resolveEntryColor("Expense/Daily", "bill", settings)).toBe("#c0392b");
     expect(DEFAULT_CHRONOEON_SETTINGS.bill.paymentMethods).toContain("WeChat");

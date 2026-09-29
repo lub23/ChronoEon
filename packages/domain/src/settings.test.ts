@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { billCategoryOptions, createDefaultSettings, normalizeChronoEonSettings, scheduleCategoryOptions } from "./settings";
+import { billCategoryForValue, billCategoryOptions, billDirectionForCategory, categoryOptionsForKind, createDefaultSettings, defaultCategoryForKind, normalizeChronoEonSettings, resolveEntryColor, scheduleCategoryOptions } from "./settings";
+import { aggregateBillStats } from "./stats";
+import { reviewBuckets } from "./review";
+import type { Entry } from "./entry";
 
 describe("category catalogs", () => {
   it("ships a default schedule catalog and neutral example bill catalog", () => {
@@ -79,16 +82,55 @@ describe("filter catalog options", () => {
     ]);
   });
 
+  it("keeps identical built-in and imported names independently selectable without changing catalogs", () => {
+    const settings = createDefaultSettings();
+    const builtin = structuredClone(settings.bill.categories);
+    settings.bill.categories.push({ id: "ledger-income", name: "Income", color: "#123456", direction: "expense", sub: ["Salary"] });
+    settings.bill.categories.push({ id: "ledger-expense", name: "Expense", color: "#654321", direction: "expense", sub: [] });
+    const options = billCategoryOptions(settings, ["ledger-income/Old sub", "Income/Old sub"]);
+    expect(options.map((option) => option.value)).toEqual([
+      "income/Salary", "income/Bonus", "expense/Daily", "expense/Medical", "ledger-income/Salary", "ledger-expense", "ledger-income/Old sub", "Income/Old sub",
+    ]);
+    expect(options.find((option) => option.value === "ledger-expense")).toMatchObject({ label: "Expense", group: "Expense" });
+    expect(options.find((option) => option.value === "ledger-income/Old sub")).toMatchObject({ label: "Old sub", group: "Income", color: "#123456" });
+    expect(categoryOptionsForKind("bill", settings)).toEqual(billCategoryOptions(settings));
+    expect(defaultCategoryForKind("bill", settings)).toBe("income/Salary");
+    settings.bill.defaultCategoryId = "ledger-expense";
+    expect(defaultCategoryForKind("bill", settings)).toBe("ledger-expense");
+    expect(settings.bill.categories.slice(0, 2)).toEqual(builtin);
+  });
+
+  it("prioritizes IDs over same-name aliases for direction, color and separate aggregates", () => {
+    const settings = createDefaultSettings();
+    settings.bill.categories.unshift({ id: "ledger-income", name: "Income", color: "#123456", direction: "expense", sub: ["Salary"] });
+    expect(billCategoryForValue("income/Salary", settings)?.id).toBe("income");
+    expect(billDirectionForCategory("income/Salary", settings)).toBe("income");
+    expect(billDirectionForCategory("ledger-income/Salary", settings)).toBe("expense");
+    expect(resolveEntryColor("income/Salary", "bill", settings)).toBe("#2f8f5b");
+    expect(resolveEntryColor("ledger-income/Salary", "bill", settings)).toBe("#123456");
+    const bills: Entry[] = ["income/Salary", "ledger-income/Salary"].map((category, index) => ({
+      id: String(index), kind: "bill", category, amount: (index + 1) * 100, title: "Bill", date: "2026-09-01", color: "#aaa", createdAt: "2026-09-01T00:00:00Z",
+    }));
+    const stats = aggregateBillStats(bills, { start: "2026-09-01", end: "2026-09-30" }, settings);
+    expect(stats).toMatchObject({ income: 100, expense: 200, balance: -100 });
+    expect(stats.categories.map(({ id, name, total }) => ({ id, name, total }))).toEqual([
+      { id: "income", name: "Income", total: 100 }, { id: "ledger-income", name: "Income", total: -200 },
+    ]);
+    settings.bill.categories.push(settings.bill.categories.shift()!);
+    const buckets = reviewBuckets(bills, { start: "2026-09-01", end: "2026-09-01" }, "day", settings);
+    expect(buckets[0].billCategories).toEqual({ income: 100, "ledger-income": -200 });
+  });
+
   it("groups ledger options by primary category and keeps stored-only rows", () => {
     const settings = createDefaultSettings();
     settings.bill.categories = [
       { id: "expense", name: "Expense", color: "#c0392b", direction: "expense", sub: ["Daily", "Medical"] },
       { id: "income", name: "Income", color: "#2f8f5b", direction: "income", sub: ["Salary"] },
     ];
-    expect(billCategoryOptions(settings, ["Expense/Medical", "legacy/old"])).toEqual([
-      { value: "Expense/Daily", label: "Daily", color: "#c0392b", group: "Expense" },
-      { value: "Expense/Medical", label: "Medical", color: "#c0392b", group: "Expense" },
-      { value: "Income/Salary", label: "Salary", color: "#2f8f5b", group: "Income" },
+    expect(billCategoryOptions(settings, ["expense/Medical", "legacy/old"])).toEqual([
+      { value: "expense/Daily", label: "Daily", color: "#c0392b", group: "Expense" },
+      { value: "expense/Medical", label: "Medical", color: "#c0392b", group: "Expense" },
+      { value: "income/Salary", label: "Salary", color: "#2f8f5b", group: "Income" },
       { value: "legacy/old", label: "old", color: undefined, group: "legacy" },
     ]);
   });

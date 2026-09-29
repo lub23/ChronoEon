@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Entry } from "../domain/entry";
 import { DEFAULT_CHRONOEON_SETTINGS } from "../domain/entry";
 import { MonthView } from "./MonthView";
+import * as lunar from "../domain/lunar";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -306,6 +307,46 @@ describe("month view: the +N badge opens the day in place", () => {
   });
 });
 
+
+describe("month view: isolated slideshow", () => {
+  it("updates only the photo layers without rerendering dates, chips or the grid", async () => {
+    vi.useFakeTimers();
+    const lunarRender = vi.spyOn(lunar, "getLunarInfo");
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver(records => mutations.push(...records));
+    try {
+      Object.defineProperty(document, "hidden", { configurable: true, value: false });
+      const photo = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
+      await act(async () => root.render(<MonthView
+        entries={[entry({ images: [photo, photo.replace("%3Csvg", "%3Csvg width='2'")] })]}
+        selectedDate={new Date(2026, 7, 10)} locale="zh" lunar="always"
+        settings={{ ...DEFAULT_CHRONOEON_SETTINGS, photoDisplayMode: "slideshow" }} filter={[]} search=""
+        onSelectDate={() => {}} onOpenAgenda={() => {}} onToggle={() => {}} onEdit={() => {}} onReschedule={() => {}} />));
+      act(() => vi.advanceTimersByTime(100));
+      const grid = host.querySelector(".month-grid")!;
+      const chip = host.querySelector(".item-chip--month")!;
+      const callsBeforeSlide = lunarRender.mock.calls.length;
+      expect(callsBeforeSlide).toBeGreaterThanOrEqual(42);
+      observer.observe(grid, { attributes: true, childList: true, characterData: true, subtree: true });
+      act(() => vi.advanceTimersByTime(9000));
+      const incoming = host.querySelector<HTMLImageElement>(".day-photo-frame.is-incoming")!;
+      expect(incoming).toBeTruthy();
+      incoming.decode = vi.fn(async () => {});
+      await act(async () => incoming.dispatchEvent(new Event("load")));
+      act(() => vi.advanceTimersByTime(40));
+      act(() => vi.advanceTimersByTime(1250));
+      await act(async () => {});
+      expect(host.querySelector(".day-photo-frame.is-current")).toBe(incoming);
+      expect(host.querySelector(".month-grid")).toBe(grid);
+      expect(host.querySelector(".item-chip--month")).toBe(chip);
+      expect(lunarRender).toHaveBeenCalledTimes(callsBeforeSlide);
+      expect(mutations.length).toBeGreaterThan(0);
+      expect(mutations.every(record => record.target instanceof Element && record.target.closest(".day-photo-bg"))).toBe(true);
+    } finally {
+      observer.disconnect(); lunarRender.mockRestore(); vi.useRealTimers();
+    }
+  });
+});
 
 describe("mobile lunar visibility", () => {
   afterEach(() => vi.unstubAllGlobals());

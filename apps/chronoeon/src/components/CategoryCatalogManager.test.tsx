@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CategoryCatalogManager, type EditableCategory } from "./CategoryCatalogManager";
 
 let host: HTMLDivElement;
@@ -72,6 +72,21 @@ describe("CategoryCatalogManager", () => {
     act(() => { setInputValue(input, "Bonus"); });
     expect(next?.[0].sub).toEqual(["Bonus"]);
     expect(next?.[0].color).toBe("#fab27b");
+  });
+
+  it("reassigns to the other same-name category rather than selecting its own ID", async () => {
+    const onReassignDelete = vi.fn(async () => undefined);
+    const onDelete = vi.fn();
+    act(() => root.render(<CategoryCatalogManager locale="en" label="Bill groups" mode="bill"
+      categories={[{ id: "income", name: "Income", color: "#aaa", sub: ["Salary"] }, { id: "ledger-income", name: "Income", color: "#bbb", sub: ["Salary"] }]}
+      entryCounts={{ income: 1 }}
+      reassignOptions={[{ value: "income/Salary", label: "Salary" }, { value: "ledger-income/Salary", label: "Salary" }]}
+      onChange={() => undefined} onDelete={onDelete} onReassignDelete={onReassignDelete} />));
+    act(() => host.querySelectorAll<HTMLButtonElement>(".category-edit-button")[0].click());
+    act(() => document.querySelector<HTMLButtonElement>(".category-editor footer .danger-button")!.click());
+    await act(async () => document.querySelector<HTMLButtonElement>(".category-editor footer .danger-button")!.click());
+    expect(onReassignDelete).toHaveBeenCalledWith("income", "ledger-income/Salary");
+    expect(onDelete).toHaveBeenCalledWith("income");
   });
 
   it("removes the requested group", () => {

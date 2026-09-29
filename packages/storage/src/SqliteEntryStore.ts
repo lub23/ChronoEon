@@ -1,6 +1,7 @@
 import { nextTimestamp } from "./persistence/timestamp";
 import { runDatabaseOperation, notifyLocalChange } from "./persistence/coordinator";
-import { createEntryId, isStableEntryId, type Entry, type EntryKind } from "@chronoeon/domain";
+import { createEntryId, isStableEntryId, prepareLedgerReplacement, type ChronoEonSettings, type LedgerImportPayload, type LedgerImportSummary, type Entry, type EntryKind } from "@chronoeon/domain";
+import { SETTINGS_ID, stableJson } from "./sync/protocol";
 import type { EntryQuery, EntryRepositoryEvent, EntryStore } from "@chronoeon/ports";
 import { StorageError } from "./errors";
 import type { PersistencePort, SqlParam, SqlValue } from "./persistence/PersistencePort";
@@ -550,6 +551,107 @@ export class SqliteEntryStore implements EntryStore {
         );
       });
       notifyLocalChange(this.backend);
+    });
+  }
+
+  /** Make a consistent SQLite backup through the live connection, including WAL.
+   * The caller supplies a fresh absolute filename and pauses sync for the larger
+   * maintenance workflow. VACUUM INTO must run outside a transaction.
+   */
+  async backup(path: string): Promise<void> {
+    if (!/^(?:[a-zA-Z]:[\\/]|\/)/.test(path) || path.includes("\0")) throw new Error("LEDGER_BACKUP_PATH_INVALID");
+    await this.runOp(async () => {
+      await this.backend.execute("VACUUM main INTO ?", [path]);
+      await this.backend.execute("ATTACH DATABASE ? AS chronoeon_backup_verify", [path]);
+      try {
+        const integrity = await this.backend.select<{ integrity_check: string }>("PRAGMA chronoeon_backup_verify.integrity_check");
+        const foreignKeys = await this.backend.select("PRAGMA chronoeon_backup_verify.foreign_key_check");
+        if (integrity.length !== 1 || integrity[0].integrity_check !== "ok" || foreignKeys.length) {
+          throw new Error("LEDGER_BACKUP_INVALID");
+        }
+      } finally {
+        await this.backend.execute("DETACH DATABASE chronoeon_backup_verify");
+      }
+    });
+  }
+
+  /** Replace bills and append their user catalogs in one journaled transaction.
+   * No nested public store calls: all stores share a non-reentrant operation
+   * queue. Unrelated entries, items, sync history and device identity stay put.
+   * Surviving IDs are upserted (not deleted), preserving their attachment/chat
+   * links; removed IDs retain the normal Recycle Bin recovery payload.
+   */
+  async replaceBills(settings: ChronoEonSettings, payload: LedgerImportPayload): Promise<LedgerImportSummary & { replacedCount: number }> {
+    const expectedCategories = stableJson(settings.bill.categories);
+    const expectedCalendar = settings.defaultCalendarID;
+    const importedAt = new Date().toISOString();
+    const prepared = prepareLedgerReplacement(settings, payload, importedAt);
+    const importedIds = new Set(prepared.entries.map((entry) => entry.id));
+    return this.runOp(async () => {
+      const replacedCount = await this.backend.transaction(async () => {
+        const control = await this.backend.select<{ applying: number }>("SELECT applying FROM sync_control WHERE id=1");
+        if (control[0]?.applying !== 0) throw new Error("LEDGER_SYNC_APPLY_ACTIVE");
+        const settingsRows = await this.backend.select<{ payload_json: string }>("SELECT payload_json FROM sync_settings WHERE id=?", [SETTINGS_ID]);
+        if (!settingsRows[0]) throw new Error("LEDGER_SETTINGS_MISSING");
+        const persisted = JSON.parse(settingsRows[0].payload_json) as Record<string, unknown>;
+        if (stableJson(persisted["/settings/bill/categories"]) !== expectedCategories
+          || persisted["/settings/defaultCalendarID"] !== expectedCalendar) throw new Error("LEDGER_SETTINGS_CHANGED");
+
+        for (const chunk of chunksOf([...importedIds], 400)) {
+          const collisions = await this.backend.select(`SELECT id FROM entries WHERE modality <> 'bill' AND id IN (${chunk.map(() => "?").join(",")})`, chunk);
+          if (collisions.length) throw new Error("LEDGER_ID_CONFLICT");
+        }
+        const previous = await this.backend.select<EntryColumns>(`SELECT ${ENTRY_COLUMNS.join(", ")} FROM entries WHERE modality='bill' ORDER BY id`);
+        const previousById = new Map(previous.map((row) => [row.id, row]));
+        const removed = previous.filter((row) => !importedIds.has(row.id));
+        for (const chunk of chunksOf(removed, 250)) {
+          const ids = chunk.map((row) => row.id);
+          const entries = await this.hydrate(chunk);
+          const attachments = await this.backend.select<DeletedAttachmentRow>(
+            `SELECT a.id, a.entry_id, a.sha256, a.kind, a.width, a.height, a.bytes, a.mime, a.caption,
+                    a.sort, a.file_missing, a.created_at, q.source_path
+               FROM attachments a LEFT JOIN attachment_ingest_queue q ON q.attachment_id=a.id
+              WHERE a.entry_id IN (${ids.map(() => "?").join(",")}) ORDER BY a.sort, a.id`, ids,
+          );
+          const archived = entries.flatMap((entry) => [entry.id, JSON.stringify({ entry, attachments: attachments.filter((attachment) => attachment.entry_id === entry.id) } satisfies DeletedEntryPayload), importedAt]);
+          await this.backend.execute(
+            `INSERT INTO deleted_entries(id,payload_json,deleted_at) VALUES ${entries.map(() => "(?,?,?)").join(",")}
+             ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,deleted_at=excluded.deleted_at`, archived,
+          );
+          await this.backend.execute(`DELETE FROM entries WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+        }
+        const assignments = ENTRY_COLUMNS.filter((column) => column !== "id").map((column) => `${column}=excluded.${column}`).join(",");
+        for (const chunk of chunksOf(prepared.entries, 250)) {
+          const values = chunk.flatMap((entry) => {
+            const old = previousById.get(entry.id);
+            return Object.values(entryToRow({ ...entry, createdAt: old?.created_at ?? entry.createdAt }, old ? nextTimestamp(old.updated_at) : null));
+          });
+          await this.backend.execute(
+            `INSERT INTO entries (${ENTRY_COLUMNS.join(",")}) VALUES ${chunk.map(() => `(${ENTRY_COLUMNS.map(() => "?").join(",")})`).join(",")}
+             ON CONFLICT(id) DO UPDATE SET ${assignments}`, values,
+          );
+          const ids = chunk.map((entry) => entry.id);
+          await this.backend.execute(`DELETE FROM entry_tags WHERE entry_id IN (${ids.map(() => "?").join(",")})`, ids);
+          await this.backend.execute(`DELETE FROM deleted_entries WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+        }
+        for (const chunk of chunksOf(prepared.entries.flatMap((entry) => (entry.tags ?? []).map((tag, position) => [entry.id, tag, position])), 400)) {
+          await this.backend.execute(`INSERT INTO entry_tags(entry_id,tag,position) VALUES ${chunk.map(() => "(?,?,?)").join(",")}`, chunk.flat());
+        }
+        persisted["/settings/bill/categories"] = prepared.categories;
+        await this.backend.execute("UPDATE sync_settings SET payload_json=? WHERE id=?", [stableJson(persisted), SETTINGS_ID]);
+
+        const written = await this.backend.select<{ id: string; amount: number; category: string; date: string }>("SELECT id,amount,category,date FROM entries WHERE modality='bill'");
+        const expected = new Map(prepared.entries.map((entry) => [entry.id, entry]));
+        if (written.length !== prepared.summary.count || written.some((row) => {
+          const entry = expected.get(row.id);
+          return !entry || row.amount !== entry.amount || row.category !== entry.category || row.date !== entry.date;
+        })) throw new Error("LEDGER_RECONCILIATION_FAILED");
+        if ((await this.backend.select("PRAGMA foreign_key_check")).length) throw new Error("LEDGER_FOREIGN_KEY_FAILED");
+        return previous.length;
+      });
+      notifyLocalChange(this.backend);
+      this.notifyRebuilt();
+      return { ...prepared.summary, replacedCount };
     });
   }
 

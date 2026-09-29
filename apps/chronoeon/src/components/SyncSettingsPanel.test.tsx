@@ -12,6 +12,7 @@ function service(patch: Partial<Service> = {}): Service {
   return {
     available: true, busy: false, result: null, conflicts: [], missingAttachments: [], usage: null, refreshUsage: vi.fn(async () => {}),
     status: { pending: 0, conflicts: 0, failures: 0, nextAttempt: 0, lastSuccess: "2026-09-09T08:00:00.000Z", lastError: null, missingAttachments: 0, lastSnapshotAt: "2026-09-09T08:00:00.000Z", nextSnapshotAt: "2026-09-16T08:00:00.000Z" },
+    replaceLedger: vi.fn(async () => { throw new Error("Not used in panel tests"); }),
     run: vi.fn(async () => success), rebuildSnapshot: vi.fn(async () => success), resolve: vi.fn(async () => {}), removeMissingAttachment: vi.fn(async () => {}), clearMissingAttachments: vi.fn(async () => {}), ...patch,
   };
 }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createEntryId, type Entry } from "@chronoeon/domain";
+import { createEntryId, DEFAULT_CHRONOEON_SETTINGS, draftToItem, type Entry } from "@chronoeon/domain";
+import { SqliteItemStore } from "../SqliteItemStore";
 import { AiConversationStore } from "../ai/aiConversationStore";
 import { SyncStore } from "../sync/SyncStore";
 import { SyncEngine, contentHash, type Publication, type RemoteIndex, type SyncBackend } from "../sync/SyncEngine";
@@ -38,8 +39,131 @@ function entry(overrides: Partial<Entry> = {}): Entry {
 async function device(remote: MemoryBackend, name: string, now?: () => Date) {
   const { backend, store } = await openMemoryStore(); const sync = new SyncStore(backend);
   const engine = new SyncEngine(sync, remote, { deviceName: name, now });
-  return { backend, store, sync, engine, chat: new AiConversationStore(backend) };
+  return { backend, store, sync, engine, chat: new AiConversationStore(backend), items: new SqliteItemStore(backend) };
 }
+
+describe("item snapshot and operation sync", () => {
+  const settings = DEFAULT_CHRONOEON_SETTINGS;
+  function item() {
+    return draftToItem({ name: "Camera", category: "electronics", acquisition: "purchase", acquiredOn: "2026-09-01", acquiredAt: "09:00", cost: 1200, currency: "CNY" });
+  }
+
+  it("restores item history from snapshots, merges independent edits, and preserves deleted bill references", async () => {
+    const remote = new MemoryBackend(); const a = await device(remote, "A"); const b = await device(remote, "B");
+    const purchase = await a.store.create(entry({ kind: "bill", category: "expense", amount: 1200, currency: "CNY" }));
+    const sale = await a.store.create(entry({ kind: "bill", category: "income", amount: 600, currency: "CNY" }));
+    const first = await a.items.save({ ...item(), purchaseEntryId: purchase.id }, settings);
+    await a.engine.run(); await b.engine.run();
+    expect(await b.items.list()).toEqual([first]);
+    await a.items.save({ ...first, name: "Renamed camera" }, settings);
+    await b.items.save({ ...first, disposal: "sold", disposedOn: "2026-09-20", saleAmount: 600, saleEntryId: sale.id }, settings);
+    await a.engine.run(); await b.engine.run(); await a.engine.run();
+    expect(await a.items.list()).toEqual(await b.items.list());
+    expect((await a.items.list())[0]).toMatchObject({ name: "Renamed camera", cost: 1200, currency: "CNY", disposal: "sold", saleAmount: 600, purchaseEntryId: purchase.id, saleEntryId: sale.id });
+    expect((await a.sync.conflicts()).filter((conflict) => conflict.entity === "asset")).toEqual([]);
+    await a.store.delete(purchase.id); await a.store.delete(sale.id);
+    await a.engine.run(); await b.engine.run();
+    expect(await b.items.list()).toEqual(await a.items.list());
+    expect((await b.items.list())[0].purchaseEntryId).toBe(purchase.id);
+    const c = await device(remote, "C");
+    const dataset = await a.sync.bindDataset();
+    const snapshot = await a.sync.snapshot(dataset);
+    await c.sync.applyDocuments([{ path: "snapshot/item-restore.jsonl.zst", content: snapshot, hash: await contentHash(snapshot) }], dataset);
+    expect(await c.items.list()).toEqual(await a.items.list());
+    expect(await c.store.list()).toEqual([]);
+    expect((await c.sync.status()).pending).toBe(0);
+  });
+
+  it("publishes item-only images and retains all unresolved image versions through snapshots", async () => {
+    let now = new Date("2026-09-07T12:00:00Z");
+    const remote = new MemoryBackend(); const a = await device(remote, "A", () => now); const b = await device(remote, "B", () => now);
+    const original = "a".repeat(64); const left = "b".repeat(64); const right = "c".repeat(64);
+    const first = await a.items.save({ ...item(), acquisition: "gift", cost: 0, image: `attachments/${original}.webp` }, settings);
+    await a.engine.run(); await b.engine.run();
+    expect(remote.index!.attachments).toEqual([original]);
+    expect(await b.backend.select("SELECT * FROM attachments")).toEqual([]);
+    expect((await b.items.list())[0].image).toBe(first.image);
+    await a.items.save({ ...first, image: `attachments/${left}.webp` }, settings);
+    await b.items.save({ ...first, image: `attachments/${right}.webp`, disposal: "lost", disposedOn: "2026-09-06" }, settings);
+    await a.engine.run(); await b.engine.run(); await a.engine.run();
+    expect(await a.sync.attachmentHashes()).toEqual([left, right]);
+    const conflict = (await a.sync.conflicts()).find((item) => item.entity === "asset" && item.field === "image")!;
+    expect(conflict.versions.map((version) => version.value).sort()).toEqual([`attachments/${left}.webp`, `attachments/${right}.webp`]);
+    now = new Date("2026-09-23T12:00:00Z"); await a.engine.run();
+    expect(remote.index!.attachments).toEqual([left, right]);
+    const c = await device(remote, "C", () => now); await c.engine.run();
+    expect(await c.items.list()).toEqual(await a.items.list());
+    expect(await c.sync.attachmentHashes()).toEqual([left, right]);
+    await c.sync.resolve("asset", first.id, "image", `attachments/${left}.webp`);
+    await c.engine.run(); await a.engine.run();
+    expect(await a.sync.attachmentHashes()).toEqual([left]);
+  });
+
+  it("does not reject concurrent offline bindings with a database uniqueness constraint", async () => {
+    const remote = new MemoryBackend(); const a = await device(remote, "A"); const b = await device(remote, "B");
+    const purchase = await a.store.create(entry({ kind: "bill", category: "expense", amount: 1200 }));
+    await a.engine.run(); await b.engine.run();
+    await a.items.save({ ...item(), purchaseEntryId: purchase.id }, settings);
+    await b.items.save({ ...item(), purchaseEntryId: purchase.id }, settings);
+    await a.engine.run(); await b.engine.run(); await a.engine.run();
+    expect(await a.items.list()).toEqual(await b.items.list());
+    expect(await a.items.list()).toHaveLength(2);
+    await expect(a.items.save({ ...item(), purchaseEntryId: purchase.id }, settings)).rejects.toMatchObject({ code: "ItemBillAlreadyLinked" });
+  });
+
+  it("captures item deletion for sync and no longer retains its image", async () => {
+    const remote = new MemoryBackend(); const a = await device(remote, "A"); const b = await device(remote, "B");
+    const first = await a.items.save({ ...item(), image: `attachments/${"d".repeat(64)}.webp` }, settings);
+    await a.engine.run(); await b.engine.run();
+    await a.backend.execute("DELETE FROM items WHERE id=?", [first.id]);
+    await a.engine.run(); await b.engine.run();
+    expect(await b.items.list()).toEqual([]);
+    expect(await b.sync.attachmentHashes()).toEqual([]);
+  });
+});
+
+describe("verified pull-only maintenance", () => {
+  it("applies remote changes without publishing, acknowledging or compacting local pending work", async () => {
+    const remote = new MemoryBackend();
+    const a = await device(remote, "A");
+    const item = await a.store.create(entry());
+    await a.engine.run();
+    const b = await device(remote, "B");
+    const local = await b.store.create(entry({ title: "Unsynced local" }));
+    const commits = remote.commits;
+    const result = await b.engine.run({ pullOnly: true });
+    expect(result).toMatchObject({ ok: true, sent: 0, snapshotCreated: false });
+    expect(await b.store.get(item.id)).not.toBeNull();
+    expect(await b.store.get(local.id)).not.toBeNull();
+    expect(remote.commits).toBe(commits);
+    expect((await b.sync.status()).pending).toBeGreaterThan(0);
+    expect((await b.sync.status()).lastSuccess).toBeNull();
+    await a.backend.close(); await b.backend.close();
+  });
+  it("fails closed on an empty or corrupt remote", async () => {
+    const remote = new MemoryBackend(); const a = await device(remote, "A");
+    await expect(a.engine.run({ pullOnly: true })).rejects.toThrow("SYNC_REMOTE_EMPTY");
+    expect(remote.commits).toBe(0);
+    await a.store.create(entry()); await a.engine.run();
+    const b = await device(remote, "B");
+    const path = remote.index!.snapshot!.path;
+    remote.objects.get(path)!.content += "corrupt";
+    await expect(b.engine.run({ pullOnly: true })).rejects.toThrow("SYNC_CHECKSUM_FAILED");
+    expect(await b.store.list()).toEqual([]);
+    await a.backend.close(); await b.backend.close();
+  });
+  it("does not coalesce a pull-only request with an in-flight publishing run", async () => {
+    const remote = new MemoryBackend(); const a = await device(remote, "A");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fetch = remote.fetch.bind(remote);
+    vi.spyOn(remote, "fetch").mockImplementation(async (known) => { await gate; return fetch(known); });
+    const publishing = a.engine.run();
+    await expect(a.engine.run({ pullOnly: true })).rejects.toThrow("SYNC_BUSY");
+    release(); await publishing;
+    await a.backend.close();
+  });
+});
 
 describe("logical operation-log sync", () => {
   it("bootstraps a new device from a logical snapshot and later JSONL batches without copying SQLite", async () => {

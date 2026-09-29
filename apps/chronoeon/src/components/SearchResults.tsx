@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { resolveEntryColors, type ChronoEonSettings } from "@chronoeon/domain";
 import { titleFor, type Entry, type Locale } from "../domain/entry";
 import { entrySearchMatches, searchExcerpt } from "../domain/search";
-import { localeTag, t } from "../i18n";
+import { categoryLabel, localeTag, t } from "../i18n";
 import { EntryGlyph } from "./ItemGlyph";
 import { Icon } from "./Icon";
 
@@ -24,9 +24,9 @@ export function SearchResults({ entries, search, locale, settings, onOpen }: {
 }) {
   const [active, setActive] = useState(0);
   const matches = useMemo(() => entries.flatMap(entry => {
-    const hits = entrySearchMatches(entry, search, locale);
+    const hits = entrySearchMatches(entry, search, locale, settings);
     return hits.length ? [{ entry, hits }] : [];
-  }).sort((a, b) => (b.entry.date + (b.entry.start ?? "")).localeCompare(a.entry.date + (a.entry.start ?? ""))), [entries, search, locale]);
+  }).sort((a, b) => (b.entry.date + (b.entry.start ?? "")).localeCompare(a.entry.date + (a.entry.start ?? ""))), [entries, search, locale, settings]);
   const results = matches.slice(0, 24);
   useEffect(() => setActive(0), [search]);
   if (!search.trim()) return null;
@@ -48,7 +48,7 @@ export function SearchResults({ entries, search, locale, settings, onOpen }: {
         const needle = search.trim().startsWith("#") ? "" : search.trim();
         const titleMatch = hits.some(hit => hit.field === "Title" && hit.text === title);
         return <button key={entry.id} className="filter-result" type="button" onFocus={() => setActive(index)} onClick={() => onOpen(entry)}>
-          <span className="filter-result-color" style={{ backgroundColor: colors.fill }} aria-label={entry.category} />
+          <span className="filter-result-color" style={{ backgroundColor: colors.fill }} aria-label={categoryLabel(entry.category, locale, undefined, settings)} />
           <span className="filter-result-content">
             <strong className={titleMatch ? "is-match" : undefined}><Highlight text={titleMatch ? searchExcerpt(title, needle, locale, 64) : title} needle={needle} locale={locale} /></strong>
             <span className="filter-result-meta"><EntryGlyph kind={entry.kind} status={entry.status} size={12} />{t(entry.kind, locale)}<span>·</span><time>{entry.date}{entry.start ? " " + entry.start : ""}</time></span>

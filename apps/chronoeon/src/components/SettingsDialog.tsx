@@ -1,7 +1,7 @@
 import type { useSyncService } from "../sync/useSyncService";
 import { useTouchDevice } from "../hooks/useTouchDevice";
 import { useEffect, useRef, useState } from "react";
-import { titleFor, type CalendarConfig, type ChronoEonSettings } from "@chronoeon/domain";
+import { billCategoryForValue, titleFor, type CalendarConfig, type ChronoEonSettings } from "@chronoeon/domain";
 import type { DeletedEntrySummary } from "@chronoeon/storage";
 import type { AIProviderConfig } from "@chronoeon/domain";
 import type { AICustomHeader, AIProviderPreferences } from "../ai/provider";
@@ -223,21 +223,20 @@ export function SettingsDialog({
   };
   const billCategoryCounts = Object.fromEntries(settings.bill.categories.map((category) => [
     category.id,
-    entries.filter((entry) => entry.kind === "bill" && entry.category.split("/")[0] === category.name).length,
+    entries.filter((entry) => entry.kind === "bill" && billCategoryForValue(entry.category, settings)?.id === category.id).length,
   ]));
   const billReassignOptions = settings.bill.categories.map((category) => {
     const sub = category.sub.includes(settings.bill.defaultSubCategoryId)
       ? settings.bill.defaultSubCategoryId
       : category.sub[0];
     return {
-      value: sub ? `${category.name}/${sub}` : category.name,
-      label: compositeCategoryLabel(sub ? `${category.name}/${sub}` : category.name, locale),
+      value: sub ? `${category.id}/${sub}` : category.id,
+      label: compositeCategoryLabel(sub ? `${category.id}/${sub}` : category.id, locale, settings),
       color: category.color,
     };
   });
   const reassignBillCategory = async (id: string, target: string) => {
-    const source = settings.bill.categories.find((category) => category.id === id)?.name;
-    if (source) await onReassignCategories(source, target);
+    await onReassignCategories(id, target);
   };
   const deleteBillCategory = (id: string) => {
     patch((current) => {

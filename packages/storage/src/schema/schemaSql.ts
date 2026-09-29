@@ -24,3 +24,9 @@ export const SCHEMA_V9_SQL: string = v9Sql;
 
 import v10Sql from "./v10.sql?raw";
 export const SCHEMA_V10_SQL: string = v10Sql;
+
+import v11Sql from "./v11.sql?raw";
+export const SCHEMA_V11_SQL: string = v11Sql;
+
+import v12Sql from "./v12.sql?raw";
+export const SCHEMA_V12_SQL: string = v12Sql;

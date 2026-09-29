@@ -14,9 +14,20 @@ const history: CaptureHistoryItem[] = [
 ];
 
 describe("capture field decision index", () => {
-  it("splits multiple notes while keeping decimal amounts together", () => {
+  it("splits multiple notes while keeping commas and decimal amounts together", () => {
     expect(splitCaptureItems("九点半到十一点半工作。买菜 20.5 元；看半小时书，写 1,200 元报告"))
-      .toEqual(["九点半到十一点半工作", "买菜 20.5 元", "看半小时书", "写 1,200 元报告"]);
+      .toEqual(["九点半到十一点半工作", "买菜 20.5 元", "看半小时书，写 1,200 元报告"]);
+  });
+
+  it("splits Chinese/English periods and semicolons and every newline form", () => {
+    expect(splitCaptureItems(" ;第一条。第二条;third.第四条；\r\nfifth\nsixth\rseventh。 \n"))
+      .toEqual(["第一条", "第二条", "third", "第四条", "fifth", "sixth", "seventh"]);
+    expect(splitCaptureItems(" 。.;；\r\n ")).toEqual([]);
+  });
+
+  it("keeps comma clauses and grouped decimal amounts in the same item", () => {
+    expect(splitCaptureItems("咖啡，蛋糕 -20.50 元, cash; lunch -1,200.25 元. 回家"))
+      .toEqual(["咖啡，蛋糕 -20.50 元, cash", "lunch -1,200.25 元", "回家"]);
   });
 
   it("prefers the dominant historical kind and category for a title term", () => {

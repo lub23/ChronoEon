@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Entry } from "@chronoeon/domain";
-import { entryMatchesSearch } from "./search";
+import { createDefaultSettings, type Entry } from "@chronoeon/domain";
+import { entryMatchesSearch, entrySearchMatches } from "./search";
 
 function entry(overrides: Partial<Entry>): Entry {
   return {
@@ -33,6 +33,17 @@ describe("entry search", () => {
     expect(entryMatchesSearch(tagged, "#deep", "en")).toBe(true);
     // The title contains "focus" but no such tag exists, so the tag query fails.
     expect(entryMatchesSearch(tagged, "#focus", "en")).toBe(false);
+  });
+
+  it("searches catalog names and bilingual child labels rather than showing stored IDs", () => {
+    const settings = createDefaultSettings();
+    settings.bill.categories.push({ id: "ledger-income", name: "其他收入", color: "#aaa", direction: "income", sub: ["转卖"] });
+    const imported = entry({ kind: "bill", category: "ledger-income/转卖" });
+    expect(entryMatchesSearch(imported, "其他收入", "zh", settings)).toBe(true);
+    expect(entryMatchesSearch(imported, "转卖", "zh", settings)).toBe(true);
+    expect(entrySearchMatches(imported, "其他", "zh", settings)).toEqual([{ field: "Category", text: "其他收入", needle: "其他" }]);
+    expect(entryMatchesSearch(entry({ kind: "bill", category: "ledger-income" }), "其他收入", "en", settings)).toBe(true);
+    expect(entryMatchesSearch(entry({ kind: "bill", category: "income/Salary" }), "工资", "zh", settings)).toBe(true);
   });
 
   it("matches the localized title and category of a Chinese entry", () => {

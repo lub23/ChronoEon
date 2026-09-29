@@ -1,4 +1,4 @@
-import type { Locale } from "./domain/entry";
+import { createDefaultSettings, type ChronoEonSettings, type Locale } from "./domain/entry";
 
 const messages = {
   productName: { en: "ChronoEon", zh: "时元" },
@@ -9,6 +9,60 @@ const messages = {
   month: { en: "Month", zh: "月历" },
   ideas: { en: "Ideas", zh: "灵感" },
   insights: { en: "Insights", zh: "统计" },
+  items: { en: "Assets", zh: "物品" },
+  itemsCurrent: { en: "In use", zh: "现存物品" },
+  itemsHistory: { en: "History", zh: "历史物品" },
+  itemsEmpty: { en: "Keep a small record of the things you own.", zh: "为陪伴你的物品留一份清单。" },
+  itemsHistoryEmpty: { en: "No past assets yet.", zh: "暂无历史物品。" },
+  itemAdd: { en: "Add asset", zh: "新增物品" },
+  itemEdit: { en: "Edit asset", zh: "编辑物品" },
+  itemNotes: { en: "Notes", zh: "备注" },
+  itemName: { en: "Asset name", zh: "物品名称" },
+  itemCategory: { en: "Asset category", zh: "物品类别" },
+  itemElectronics: { en: "Electronics", zh: "电子产品" },
+  itemClothing: { en: "Clothing", zh: "衣物" },
+  itemHome: { en: "Home", zh: "家居用品" },
+  itemTransport: { en: "Transport", zh: "交通工具" },
+  itemHobby: { en: "Hobbies", zh: "兴趣爱好" },
+  itemOther: { en: "Other", zh: "其他物品" },
+  itemAcquisition: { en: "Acquired by", zh: "获得方式" },
+  itemPurchase: { en: "Purchase", zh: "购入" },
+  itemGift: { en: "Gift", zh: "获赠" },
+  itemWindfall: { en: "Windfall", zh: "意外所得" },
+  itemAcquiredOn: { en: "Acquired on", zh: "购入 / 获得日期" },
+  itemAcquiredAt: { en: "Acquired time", zh: "获得时间" },
+  itemCost: { en: "Acquisition cost", zh: "购入成本" },
+  itemDaysOwned: { en: "Days owned", zh: "持有天数" },
+  itemDailyCost: { en: "Cost / day", zh: "平均每天成本" },
+  itemCostHint: { en: "Cost ÷ calendar days owned (including the first day). History stops at disposal; sale proceeds do not change acquisition cost.", zh: "购入成本 ÷ 持有自然日（含获得当天）。历史物品计算至处置日；出售收入不改变购入成本。" },
+  itemArchive: { en: "Move to history", zh: "移入历史物品" },
+  itemDisposal: { en: "Disposal", zh: "处置方式" },
+  itemSold: { en: "Sold second-hand", zh: "二手出售" },
+  itemLost: { en: "Lost", zh: "丢失" },
+  itemDiscarded: { en: "Discarded", zh: "丢弃" },
+  itemDisposedOn: { en: "Disposed on", zh: "处置日期" },
+  itemSaleAmount: { en: "Sale proceeds", zh: "出售所得" },
+  itemPurchaseBill: { en: "Purchase bill (optional)", zh: "绑定购入账目（可选）" },
+  itemSaleBill: { en: "Sale bill (optional)", zh: "绑定出售账目（可选）" },
+  itemNoBill: { en: "No linked bill", zh: "不绑定账目" },
+  itemBillMissing: { en: "Linked bill is unavailable", zh: "原绑定账目已不存在" },
+  itemBillSearch: { en: "Search bills by title or date", zh: "按标题或日期查找账目" },
+  itemBillLinkHint: { en: "Linking copies the bill date, amount and currency. Assets keep their own cost record and do not create extra bills.", zh: "绑定时带入账目日期、金额及币种。物品独立保存成本记录，不会额外产生账单。" },
+  itemLinked: { en: "Linked assets", zh: "关联物品" },
+  itemLinkExisting: { en: "Link an existing asset", zh: "绑定已有物品" },
+  itemUnlink: { en: "Unlink bill", zh: "解除账目绑定" },
+  itemCover: { en: "Cover image", zh: "展示图片" },
+  itemCoverHint: { en: "Compressed WebP photo · the category icon is used without a photo.", zh: "压缩 WebP 照片 · 无照片时使用类别图标。" },
+  itemCoverPick: { en: "Choose image", zh: "上传图片" },
+  itemCoverRemove: { en: "Use default icon", zh: "恢复默认图标" },
+  itemSaved: { en: "Asset saved.", zh: "物品已保存。" },
+  itemSaveFailed: { en: "Could not save this asset. Check its dates, amounts and bill links, then retry.", zh: "物品保存失败，请检查日期、金额和账目绑定后重试。" },
+  itemSort: { en: "Sort assets", zh: "物品排序" },
+  itemSortNewest: { en: "Newest first", zh: "获得日期 · 最新优先" },
+  itemSortOldest: { en: "Oldest first", zh: "获得日期 · 最早优先" },
+  itemSortCost: { en: "Cost, high to low", zh: "购入成本 · 从高到低" },
+  itemSortDaily: { en: "Daily cost, high to low", zh: "每天成本 · 从高到低" },
+  itemSortName: { en: "Name", zh: "名称" },
   review: { en: "Review", zh: "回顾" },
   reviewTitle: { en: "Period review", zh: "阶段回顾" },
   reviewDetail: { en: "What got finished, when the load fell, what it cost, and what is still owed.", zh: "完成了什么、忙碌落在哪几天、花了多少，以及还欠着什么。" },
@@ -25,6 +79,9 @@ const messages = {
   reviewIncomeShort: { en: "Inc", zh: "总收入" },
   reviewIncomeTotalAverage: { en: "Total income average", zh: "总收入平均值" },
   reviewCategories: { en: "Categories", zh: "分类" },
+  detailTime: { en: "Time", zh: "时间" },
+  detailTitle: { en: "Title", zh: "标题" },
+  detailAmount: { en: "Amount", zh: "金额" },
   reviewSelectSeries: { en: "Select categories to show their trends", zh: "请选择要显示趋势的分类" },
   reviewCashFlow: { en: "Cash-flow trend", zh: "收支趋势" },
   reviewScheduleLoad: { en: "Schedule load · tasks and events", zh: "日程分布 · 任务与事件" },
@@ -49,6 +106,20 @@ const messages = {
   recycleBinEmpty: { en: "No recoverable deletes.", zh: "没有可恢复的删除记录。" },
   recycleBinClear: { en: "Clear recycle bin", zh: "清空回收站" },
   recycleBinCleared: { en: "Recycle bin cleared.", zh: "回收站已清空。" },
+  ledgerImport: { en: "Replace ledger from workbook export", zh: "从表格导出文件重建账单" },
+  ledgerImportHelp: { en: "Choose the JSON produced by convert-ledger.py. Pull remote data, verify a local backup, replace bills and custom categories, then publish a snapshot. Schedules, notes and built-in categories stay unchanged.", zh: "选择 convert-ledger.py 生成的 JSON。先拉取远端、校验本地备份，再替换账单并导入自定义分类，最后发布快照。日程、笔记和系统默认分类不变。" },
+  ledgerChoose: { en: "Choose ledger export", zh: "选择账单导出文件" },
+  ledgerReplace: { en: "Replace bills and publish snapshot", zh: "替换账单并发布快照" },
+  ledgerConfirm: { en: "Replace all current bills?", zh: "替换当前所有账单？" },
+  ledgerConfirmDetail: { en: "A verified local backup is created after pulling remote data, before any bill is replaced. Only continue with a complete ledger export.", zh: "拉取远端后会先生成并校验本地备份，再替换账单。请确认选中的是本次需要导入的完整账单。" },
+  ledgerWorking: { en: "Pulling remote data → backing up → replacing bills → publishing snapshot. Keep the app open.", zh: "正在拉取远端 → 备份 → 替换账单 → 发布快照。请保持应用开启。" },
+  ledgerComplete: { en: "Ledger verified and snapshot published.", zh: "账单已核对，同步快照已发布。" },
+  ledgerInvalid: { en: "Invalid ledger export. No bills were changed.", zh: "账单导出文件无效，未修改任何账单。" },
+  ledgerFailedBefore: { en: "Import stopped before replacing bills. No ledger replacement was committed.", zh: "导入已在替换账单前停止，未提交账单替换。" },
+  ledgerFailedAfter: { en: "Bills were imported locally, but snapshot publication was not verified. The backup is preserved; check synchronization before importing again.", zh: "账单已在本地导入，但尚未确认快照发布成功。备份已保留；请先检查同步状态，不要重复导入。" },
+  ledgerBackup: { en: "Local backup", zh: "本地备份" },
+  ledgerBillCount: { en: "Bills", zh: "账单条数" },
+  ledgerCategoryCount: { en: "Custom categories", zh: "自定义分类" },
   settingsSync: { en: "Sync", zh: "同步" },
   syncNow: { en: "Sync now", zh: "立即同步" },
   syncPending: { en: "Pending local changes", zh: "待同步本地变更" },
@@ -192,7 +263,7 @@ const messages = {
   miniDay: { en: "Today timeline", zh: "今日时间线" },
   miniTimer: { en: "Timer", zh: "计时" },
   miniCapture: { en: "Quick capture", zh: "速记" },
-  miniFilter: { en: "Filter items", zh: "筛选条目" },
+  miniFilter: { en: "Filter Items", zh: "筛选条目" },
   windowControls: { en: "Window controls", zh: "窗口控制" },
   minimize: { en: "Minimize", zh: "最小化" },
   maximize: { en: "Maximize", zh: "最大化" },
@@ -292,7 +363,7 @@ const messages = {
   locationUnavailable: { en: "Could not resolve a place name. Check location/network access or enter the place manually.", zh: "未能获取地名，请检查定位权限和网络，或手动填写地点。" },
   quickNote: { en: "Note", zh: "随心记" },
   quickNotePlaceholder: { en: "Write it down, then parse", zh: "随手写下，然后解析" },
-  captureMultiItemHint: { en: "Separate items with . , ;", zh: "多条内容可用 . , ; 分隔" },
+  captureMultiItemHint: { en: "Separate Items with . , ;", zh: "多条内容可用 . , ; 分隔" },
   quickNoteManualAdd: { en: "Manual add", zh: "手动添加" },
   quickNoteParse: { en: "Parse", zh: "解析" },
   quickNoteEmpty: { en: "Write something first", zh: "请先写点什么" },
@@ -801,12 +872,12 @@ const messages = {
   aiToolMoreItems: { en: "+{count} more", zh: "还有 {count} 条" },
   aiToolCallsUnsupported: { en: "This model does not support tool calls. Choose a tool-calling model to use the advisor agent.", zh: "当前模型不支持 tool calls。请选择支持工具调用的模型来使用智能体。" },
 
-  // Smart capture autofill from similar past items
+  // Smart capture autofill from similar past Items
   smartCaptureAutoTag: { en: "auto", zh: "自动" },
-  smartCaptureAutofilled: { en: "Filled from similar past items — please check.", zh: "参考此前类似条目自动填入，请检查。" },
-  smartCaptureAutofilledCategory: { en: "Category was filled from similar past items — please check it.", zh: "分类参考此前类似条目自动填入，请检查。" },
-  smartCaptureAutofilledLocation: { en: "Location was filled from similar past items — please check it.", zh: "地点参考此前类似条目自动填入，请检查。" },
-  smartCaptureAutofilledBoth: { en: "Category and location were filled from similar past items — please check them.", zh: "分类和地点参考此前类似条目自动填入，请检查。" },
+  smartCaptureAutofilled: { en: "Filled from similar past Items — please check.", zh: "参考此前类似条目自动填入，请检查。" },
+  smartCaptureAutofilledCategory: { en: "Category was filled from similar past Items — please check it.", zh: "分类参考此前类似条目自动填入，请检查。" },
+  smartCaptureAutofilledLocation: { en: "Location was filled from similar past Items — please check it.", zh: "地点参考此前类似条目自动填入，请检查。" },
+  smartCaptureAutofilledBoth: { en: "Category and location were filled from similar past Items — please check them.", zh: "分类和地点参考此前类似条目自动填入，请检查。" },
 
   // Ask: method-driven analysis presets
   askMethodsTitle: { en: "Analysis lenses", zh: "分析视角" },
@@ -825,10 +896,10 @@ const messages = {
   askPresetTriagePrompt: { en: "Triage everything open, overdue or due soon with the Eisenhower matrix (important/urgent): four quadrants, the evidence for each placement (due date, consequence, deferability), and one concrete next action for every important-not-urgent item.", zh: "用艾森豪威尔矩阵（重要/紧急）整理我所有未完成、逾期和即将到期的事项：分成四个象限，说明每件事归类的依据（截止日期、影响范围、可推迟性），并为“重要不紧急”的事项各写一个具体的下一步行动。" },
   askPresetBalanceTitle: { en: "50/30/20 split", zh: "50/30/20 结构" },
   askPresetBalanceHint: { en: "Needs, wants and savings against the 50/30/20 target", zh: "需要/想要/储蓄三类占比与目标差距" },
-  askPresetBalancePrompt: { en: "Analyze my last 30 days of bills with the 50/30/20 rule (50% needs, 30% wants, 20% savings and debt repayment): the amount and share of each bucket, the gap to target, the categories that overshoot most, and three concrete adjustments. Show the line items behind each bucket.", zh: "按 50/30/20 法则（50% 需要、30% 想要、20% 储蓄与还债）分析我最近 30 天的账单：给出三类各自的金额与占比、与目标的差距、超标最明显的分类，最后给 3 条可执行的调整。请列出每类的计算明细。" },
+  askPresetBalancePrompt: { en: "Analyze my last 30 days of bills with the 50/30/20 rule (50% needs, 30% wants, 20% savings and debt repayment): the amount and share of each bucket, the gap to target, the categories that overshoot most, and three concrete adjustments. Show the line Items behind each bucket.", zh: "按 50/30/20 法则（50% 需要、30% 想要、20% 储蓄与还债）分析我最近 30 天的账单：给出三类各自的金额与占比、与目标的差距、超标最明显的分类，最后给 3 条可执行的调整。请列出每类的计算明细。" },
   askPresetRecurringTitle: { en: "Fixed costs & subscriptions", zh: "固定支出与订阅" },
   askPresetRecurringHint: { en: "Fixed vs variable, suspected subscriptions, annualised cost", zh: "固定与浮动支出、疑似订阅、年化成本" },
-  askPresetRecurringPrompt: { en: "Review my recent bills: separate fixed from variable spending, then find amount-stable items that repeat monthly or yearly (suspected subscriptions), list each one's monthly average and annualised cost, and flag what could be cancelled or downgraded.", zh: "分析我最近的账单：先区分固定支出与浮动支出，再找出金额稳定、按月或按年重复出现的疑似订阅，列出每项的月均成本与年化成本，并标出可以取消或降级的部分。" },
+  askPresetRecurringPrompt: { en: "Review my recent bills: separate fixed from variable spending, then find amount-stable Items that repeat monthly or yearly (suspected subscriptions), list each one's monthly average and annualised cost, and flag what could be cancelled or downgraded.", zh: "分析我最近的账单：先区分固定支出与浮动支出，再找出金额稳定、按月或按年重复出现的疑似订阅，列出每项的月均成本与年化成本，并标出可以取消或降级的部分。" },
   askPresetSpendingDriftTitle: { en: "Spending drift", zh: "支出异常" },
   askPresetSpendingDriftHint: { en: "What moved away from my usual level, and in what way", zh: "哪些支出偏离日常水平，是频次还是单次金额" },
   askPresetSpendingDriftPrompt: { en: "Compare categories, payment methods and frequency to find spending in the last 30 days that clearly drifted from my usual level: the size of the drift in amount and percent, whether frequency or ticket size changed, and which of these are one-offs versus new habits.", zh: "对比分类、支付方式与频次，找出最近 30 天里明显偏离我日常水平的支出：说明偏离幅度（金额与百分比）、是频次变高还是单次金额变大，并区分哪些是一次性的、哪些已经形成习惯。" },
@@ -850,7 +921,7 @@ const messages = {
   chatRemovePhoto: { en: "Remove photo", zh: "移除图片" },
   chatPhotoAttached: { en: "Attached photos: {count}", zh: "附带图片：{count} 张" },
   chatPhotoFailed: { en: "Could not read the photo", zh: "图片无法读取" },
-  chatPhotoParseHint: { en: "Photos are sent to the model with this message and saved to the parsed items.", zh: "图片会随本条消息发送给模型，并保存到解析出的条目里。" },
+  chatPhotoParseHint: { en: "Photos are sent to the model with this message and saved to the parsed Items.", zh: "图片会随本条消息发送给模型，并保存到解析出的条目里。" },
   captureDismiss: { en: "Dismiss this parse", zh: "忽略这次解析" },
 } as const;
 
@@ -862,7 +933,25 @@ export function t(key: MessageKey, locale: Locale): string {
 
 export const localeTag: Record<Locale, string> = { en: "en-US", zh: "zh-CN" };
 
-export function categoryLabel(category: string, locale: Locale, fallback?: string): string {
+const defaultBillCatalogs = {
+  en: createDefaultSettings("en").bill.categories,
+  zh: createDefaultSettings("zh").bill.categories,
+};
+
+function builtinBillLabel(id: string, name: string, locale: Locale, sub = false): string {
+  const target = defaultBillCatalogs[locale].find((category) => category.id === id);
+  if (!target) return name;
+  for (const source of Object.values(defaultBillCatalogs)) {
+    const original = source.find((category) => category.id === id)!;
+    if (!sub && original.name === name) return target.name;
+    const index = sub ? original.sub.indexOf(name) : -1;
+    if (index >= 0) return target.sub[index];
+  }
+  return name;
+}
+
+export function categoryLabel(category: string, locale: Locale, fallback?: string, settings?: ChronoEonSettings): string {
+  if (category.includes("/")) return compositeCategoryLabel(category, locale, settings);
   const keys: Record<string, MessageKey> = {
     general: "categoryGeneral",
     life: "categoryLife",
@@ -874,18 +963,23 @@ export function categoryLabel(category: string, locale: Locale, fallback?: strin
     uncategorized: "categoryUncategorized"
   };
   const key = keys[category];
-  return key ? t(key, locale) : (fallback ?? category) || t("categoryUncategorized", locale);
+  return key ? t(key, locale) : catalogLabel(category, locale, fallback, settings) || t("categoryUncategorized", locale);
 }
 
-/** Catalog names are user-owned data; the stored spelling is authoritative. */
-export function catalogLabel(value: string, _locale: Locale, fallback = value): string {
-  return fallback || value.trim();
+/** IDs resolve through the catalog; only unchanged shipped names are translated. */
+export function catalogLabel(value: string, locale: Locale, fallback = value, settings?: ChronoEonSettings): string {
+  if (value.includes("/")) return compositeCategoryLabel(value, locale, settings);
+  const bill = settings?.bill.categories.find((category) => category.id === value);
+  const schedule = settings?.calendars.flatMap((calendar) => calendar.categories).find((category) => category.id === value);
+  const name = bill?.name ?? schedule?.name ?? (fallback !== value ? fallback : defaultBillCatalogs.en.find((category) => category.id === value)?.name ?? fallback);
+  return builtinBillLabel(value, name || value.trim(), locale);
 }
 
-export function compositeCategoryLabel(category: string, locale: Locale): string {
-  const [primary, secondary] = category.split("/");
-  if (!secondary) return categoryLabel(primary, locale, catalogLabel(primary, locale));
-  return catalogLabel(secondary, locale);
+export function compositeCategoryLabel(category: string, locale: Locale, settings?: ChronoEonSettings): string {
+  const [primary, ...parts] = category.split("/");
+  const secondary = parts.join("/");
+  if (!secondary) return categoryLabel(primary, locale, undefined, settings);
+  return builtinBillLabel(primary, secondary, locale, true);
 }
 
 /** Preserve user renames while giving the shipped "Default" calendar a localized label. */

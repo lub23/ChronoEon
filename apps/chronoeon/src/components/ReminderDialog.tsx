@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { format, parseISO } from "date-fns";
-import type { DueReminder, Entry, Locale } from "@chronoeon/domain";
+import type { ChronoEonSettings, DueReminder, Entry, Locale } from "@chronoeon/domain";
 import { formatEntryTime } from "@chronoeon/domain";
 import { categoryLabel, compositeCategoryLabel, t } from "../i18n";
 import { useModalDismiss } from "./modalLayer";
@@ -9,11 +9,12 @@ import { Icon } from "./Icon";
 interface ReminderDialogProps {
   reminders: DueReminder[];
   locale: Locale;
+  settings?: ChronoEonSettings;
   onClose: () => void;
   onOpen: (entry: Entry) => void;
 }
 
-export function ReminderDialog({ reminders, locale, onClose, onOpen }: ReminderDialogProps) {
+export function ReminderDialog({ reminders, locale, settings, onClose, onOpen }: ReminderDialogProps) {
   useModalDismiss((event) => {
     event.preventDefault();
     onClose();
@@ -39,8 +40,8 @@ export function ReminderDialog({ reminders, locale, onClose, onOpen }: ReminderD
             const date = parseISO(entry.occurrenceDate ?? entry.date);
             const when = entry.allDay ? t("allDay", locale) : formatEntryTime(entry, locale);
             const category = entry.kind === "bill"
-              ? compositeCategoryLabel(entry.category, locale)
-              : categoryLabel(entry.category, locale, entry.category);
+              ? compositeCategoryLabel(entry.category, locale, settings)
+              : categoryLabel(entry.category, locale, entry.category, settings);
             const details = [entry.location, entry.note?.replace(/\s+/g, " ").trim().slice(0, 120)].filter(Boolean);
             return (
               <li key={reminder.key}>

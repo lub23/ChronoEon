@@ -1,4 +1,5 @@
 export { SqliteEntryStore } from "./SqliteEntryStore";
+export { SqliteItemStore } from "./SqliteItemStore";
 export type { AttachmentRowInput, DeletedEntrySummary, SeedBatch, SeedMeta } from "./SqliteEntryStore";
 export { StorageError, isStorageError } from "./errors";
 export type { StorageErrorCode } from "./errors";

@@ -286,7 +286,10 @@ export function DayView({
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(() => () => gestureCleanupRef.current?.(), []);
+  useEffect(() => () => {
+    pendingTouchRef.current?.cancel();
+    gestureCleanupRef.current?.();
+  }, []);
   useEffect(() => () => selectionCleanupRef.current?.(), []);
 
   // Day always honours the chosen 1–6 columns and Week is exactly seven. On a
@@ -339,7 +342,7 @@ export function DayView({
 
   const visibleFor = useMemo(() => (key: string) => entriesForDate(entries, key)
     .filter((entry) => kindAllowed(filter, entry.kind))
-    .filter((entry) => entryMatchesSearch(entry, search, locale)), [entries, filter, locale, search]);
+    .filter((entry) => entryMatchesSearch(entry, search, locale, settings)), [entries, filter, locale, search, settings]);
 
   const belongsInLane = (entry: Entry) => entry.allDay || !entry.start || classifyCrossDayEntry(entry) === "cross-day-long";
   const expenseByDate = useMemo(() => Object.fromEntries(
@@ -442,54 +445,55 @@ export function DayView({
     inLane = false,
     sourceSegmentDate?: string,
   ) {
-    if (event.button !== 0 && event.pointerType !== "touch") return;
+    if ((event.button !== 0 && event.pointerType !== "touch") || event.isPrimary === false || gestureCleanupRef.current) return;
     event.preventDefault();
     event.stopPropagation();
     const originX = event.clientX;
     const originY = event.clientY;
-    // Touch users must long-press before a drag starts; this stops
-    // an immediate pointer move from stealing scroll. A mouse press enters the
-    // gesture immediately.
-    if (event.pointerType === "touch") {
-      if (pendingTouchRef.current) {
-        pendingTouchRef.current.cancel();
-        pendingTouchRef.current = null;
-      }
+    const pointerId = event.pointerId;
+    const target = event.currentTarget;
+    pendingTouchRef.current?.cancel();
+    // A resize handle is an explicit drag target and takes ownership immediately.
+    // Only touching the block body waits for a hold, leaving a quick swipe native.
+    if (event.pointerType === "touch" && edge === "move") {
       const cancelPending = () => {
         window.clearTimeout(timer);
         window.removeEventListener("pointermove", onPendingMove, true);
-        window.removeEventListener("pointerup", onPendingUp, { capture: true } as EventListenerOptions);
-        window.removeEventListener("touchmove", onPendingTouchMove, { capture: true, passive: false } as EventListenerOptions);
+        window.removeEventListener("pointerup", onPendingEnd, true);
+        window.removeEventListener("pointercancel", onPendingEnd, true);
+        window.removeEventListener("touchmove", onPendingTouchMove, true);
+        if (pendingTouchRef.current?.timer === timer) pendingTouchRef.current = null;
       };
       const onPendingMove = (moveEvent: PointerEvent) => {
-        if (Math.abs(moveEvent.clientX - originX) > 8 || Math.abs(moveEvent.clientY - originY) > 8) {
-          cancelPending();
-          pendingTouchRef.current = null;
-        }
+        if (moveEvent.pointerId !== pointerId) return;
+        if (Math.abs(moveEvent.clientX - originX) > 8 || Math.abs(moveEvent.clientY - originY) > 8) cancelPending();
       };
       const onPendingTouchMove = (moveEvent: TouchEvent) => {
-        if (moveEvent.cancelable) moveEvent.preventDefault();
         if (Math.abs((moveEvent.touches[0]?.clientX ?? originX) - originX) > 8
-          || Math.abs((moveEvent.touches[0]?.clientY ?? originY) - originY) > 8) {
-          cancelPending();
-          pendingTouchRef.current = null;
-        }
+          || Math.abs((moveEvent.touches[0]?.clientY ?? originY) - originY) > 8) cancelPending();
       };
-      const onPendingUp = () => cancelPending();
-      const fire = () => {
-        pendingTouchRef.current = null;
+      const onPendingEnd = (endEvent: PointerEvent) => {
+        if (endEvent.pointerId === pointerId) cancelPending();
+      };
+      const timer = window.setTimeout(() => {
+        cancelPending();
         enterGesture();
-      };
-      const timer = window.setTimeout(fire, 300);
+      }, 300);
       pendingTouchRef.current = { startX: originX, startY: originY, timer, cancel: cancelPending };
       window.addEventListener("pointermove", onPendingMove, true);
-      window.addEventListener("pointerup", onPendingUp, { capture: true } as EventListenerOptions);
-      window.addEventListener("touchmove", onPendingTouchMove, { capture: true, passive: false } as EventListenerOptions);
+      window.addEventListener("pointerup", onPendingEnd, true);
+      window.addEventListener("pointercancel", onPendingEnd, true);
+      window.addEventListener("touchmove", onPendingTouchMove, { capture: true, passive: true });
       return;
     }
     enterGesture();
 
     function enterGesture() {
+      selectionCleanupRef.current?.();
+      setTimeSelection(null);
+      try { target.setPointerCapture?.(pointerId); } catch {
+        // A WebView can lose the contact before the hold timer fires.
+      }
       const columns = [...(calendarRef.current?.querySelectorAll<HTMLElement>(".calendar-day-column[data-date]") ?? [])];
       const allDayCells = [...(calendarRef.current?.querySelectorAll<HTMLElement>(".calendar-all-day-cell[data-date]") ?? [])];
       const dateAtX = (items: HTMLElement[], clientX: number): string | null => {
@@ -520,6 +524,9 @@ export function DayView({
       markChipDragActive();
 
       const update = (moveEvent: PointerEvent) => {
+        if (moveEvent.pointerId !== pointerId) return;
+        if (moveEvent.cancelable) moveEvent.preventDefault();
+        moveEvent.stopPropagation();
         const allDayGrid = calendarRef.current?.querySelector<HTMLElement>(".calendar-all-day-grid");
         const allDayRect = allDayGrid?.getBoundingClientRect();
         const inAllDayTarget = Boolean(allDayRect
@@ -599,17 +606,20 @@ export function DayView({
       // lets preventDefault take effect.
       const touchMoveGuard = (touchEvent: TouchEvent) => {
         if (touchEvent.cancelable) touchEvent.preventDefault();
+        touchEvent.stopPropagation();
       };
       function cleanup() {
         window.removeEventListener("pointermove", update);
         window.removeEventListener("pointerup", finish);
         window.removeEventListener("pointercancel", cancel);
-        window.removeEventListener("touchmove", touchMoveGuard, { capture: true, passive: false } as EventListenerOptions);
+        window.removeEventListener("touchmove", touchMoveGuard, true);
+        if (target.hasPointerCapture?.(pointerId)) target.releasePointerCapture(pointerId);
+        clearChipDrag();
         if (gestureCleanupRef.current === cleanup) gestureCleanupRef.current = null;
       }
-      function finish() {
+      function finish(upEvent: PointerEvent) {
+        if (upEvent.pointerId !== pointerId) return;
         cleanup();
-        clearChipDrag();
         setDragVisual(null);
         setDragAnnounce("");
         if (latest.moved) {
@@ -617,18 +627,17 @@ export function DayView({
           void onReschedule(entry, latest.patch);
         }
       }
-      function cancel() {
+      function cancel(cancelEvent: PointerEvent) {
+        if (cancelEvent.pointerId !== pointerId) return;
         cleanup();
-        clearChipDrag();
         setDragVisual(null);
         setDragAnnounce("");
       }
-      gestureCleanupRef.current?.();
       gestureCleanupRef.current = cleanup;
-      window.addEventListener("pointermove", update);
-      window.addEventListener("pointerup", finish, { once: true });
-      window.addEventListener("pointercancel", cancel, { once: true });
-      window.addEventListener("touchmove", touchMoveGuard, { capture: true, passive: false } as EventListenerOptions);
+      window.addEventListener("pointermove", update, { passive: false });
+      window.addEventListener("pointerup", finish);
+      window.addEventListener("pointercancel", cancel);
+      window.addEventListener("touchmove", touchMoveGuard, { capture: true, passive: false });
     }
   }
 
@@ -943,8 +952,8 @@ export function DayView({
                   onStatusToggle={(entry) => onToggle(entry.id, entry)}
                   onMenu={onEntryMenu}
                 >
-                  {item.entry.kind !== "bill" && !item.continuesBefore && <span className="calendar-span-handle calendar-span-handle--start" onPointerDown={(event) => beginGesture(event, item.entry, "resize-start", itemKey, true)} />}
-                  {item.entry.kind !== "bill" && !item.continuesAfter && <span className="calendar-span-handle calendar-span-handle--end" onPointerDown={(event) => beginGesture(event, item.entry, "resize-end", itemKey, true)} />}
+                  {item.entry.kind !== "bill" && !item.continuesBefore && <span className="calendar-span-handle calendar-span-handle--start" data-swipe-ignore onPointerDown={(event) => beginGesture(event, item.entry, "resize-start", itemKey, true)} />}
+                  {item.entry.kind !== "bill" && !item.continuesAfter && <span className="calendar-span-handle calendar-span-handle--end" data-swipe-ignore onPointerDown={(event) => beginGesture(event, item.entry, "resize-end", itemKey, true)} />}
                 </ItemChip>
               );
             })}
@@ -1091,8 +1100,8 @@ export function DayView({
                       onStatusToggle={(entry) => onToggle(entry.id, entry)}
                       onMenu={onEntryMenu}
                     >
-                      {placement.entry.kind !== "bill" && !placement.continuesBefore && <span className="calendar-resize-handle calendar-resize-handle--start" onPointerDown={(event) => beginGesture(event, placement.entry, "resize-start", itemKey, false, placement.date)} />}
-                      {placement.entry.kind !== "bill" && !placement.continuesAfter && <span className="calendar-resize-handle calendar-resize-handle--end" onPointerDown={(event) => beginGesture(event, placement.entry, "resize-end", itemKey, false, placement.date)} />}
+                      {placement.entry.kind !== "bill" && !placement.continuesBefore && <span className="calendar-resize-handle calendar-resize-handle--start" data-swipe-ignore onPointerDown={(event) => beginGesture(event, placement.entry, "resize-start", itemKey, false, placement.date)} />}
+                      {placement.entry.kind !== "bill" && !placement.continuesAfter && <span className="calendar-resize-handle calendar-resize-handle--end" data-swipe-ignore onPointerDown={(event) => beginGesture(event, placement.entry, "resize-end", itemKey, false, placement.date)} />}
                    </ItemChip>
                  );
                })}

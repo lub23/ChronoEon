@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { createEntryId } from "@chronoeon/domain";
+import { createEntryId, createDefaultSettings, draftToItem } from "@chronoeon/domain";
 import { MemorySqliteBackend } from "@chronoeon/storage/test";
 import { createSqliteStoreSession } from "./sqliteSession";
 
@@ -26,6 +26,10 @@ describe("sqlite boot", () => {
       createdAt: new Date().toISOString(),
     });
     expect((await session!.store.get(created.id))?.title).toBe("SQLite wired");
+    const item = await session!.items.save(draftToItem({ name: "Gift", category: "other", acquisition: "gift", acquiredOn: "2026-08-10", acquiredAt: "09:00", cost: 0, currency: "CNY" }), createDefaultSettings("en"));
+    expect(await session!.items.list()).toEqual([item]);
+    const snapshot = await session!.sync.snapshot(createEntryId());
+    expect(snapshot).toContain('"entity":"asset"');
     await session!.dispose();
   });
 

@@ -52,7 +52,7 @@ export function PhotoWall({ locale, settings, days, groups, onSelectDate }: Phot
               const { accent } = resolveEntryColors(entry, settings);
               const categoryOption = categoryOptionsForKind(entry.kind, settings, entry.calendar)
                 .find((option) => option.value === entry.category);
-              const category = categoryOption?.label ?? (categoryLabel(entry.category, locale) || entry.category);
+              const category = categoryLabel(entry.category, locale, categoryOption?.label, settings);
               // Front sheet first; at most two sheets peek behind it.
               const sheets = group.urls.slice(0, 3);
               return (

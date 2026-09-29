@@ -29,11 +29,53 @@ describe("local photo crossfade", () => {
     expect(incoming.classList.contains("is-ready")).toBe(true);
     expect(host.querySelector(".is-current")).toBe(initial);
     act(() => vi.advanceTimersByTime(1250));
-    expect(host.querySelector(".is-current")).toBe(initial);
-    expect(host.querySelector(".is-current")?.getAttribute("src")).toBe("/two.jpg");
-    expect(incoming.classList.contains("is-standby")).toBe(true);
+    expect(host.querySelector(".is-current")).toBe(incoming);
+    expect(incoming.getAttribute("src")).toBe("/two.jpg");
+    expect(initial.isConnected).toBe(false);
+    expect(host.querySelector(".is-standby")?.getAttribute("src")).toBe("/three.jpg");
     expect(host.querySelectorAll("img")).toHaveLength(2); expect(renderParent).toHaveBeenCalledTimes(1);
   });
+  it("cancels an incoming photo when slideshow mode changes to one photo", async () => {
+    act(() => root.render(<DayPhotoBackground images={["/one.jpg", "/two.jpg", "/three.jpg"]} intervalMs={1000} />));
+    const current = host.querySelector<HTMLImageElement>(".is-current")!;
+    act(() => vi.advanceTimersByTime(1250));
+    const incoming = host.querySelector<HTMLImageElement>(".is-incoming")!;
+    let decoded!: () => void;
+    incoming.decode = vi.fn(() => new Promise<void>(resolve => { decoded = resolve; }));
+    await act(async () => incoming.dispatchEvent(new Event("load")));
+    act(() => root.render(<DayPhotoBackground images={[current.getAttribute("src")!]} intervalMs={1000} />));
+    await act(async () => decoded());
+    act(() => vi.advanceTimersByTime(5000));
+    expect(host.querySelectorAll("img")).toHaveLength(1);
+    expect(host.querySelector(".is-current")).toBe(current);
+    expect(incoming.isConnected).toBe(false);
+  });
+
+  it("keeps the current photo when the next photo fails to decode", async () => {
+    act(() => root.render(<DayPhotoBackground images={["/one.jpg", "/two.jpg"]} intervalMs={1000} />));
+    const current = host.querySelector(".is-current")!;
+    act(() => vi.advanceTimersByTime(1250));
+    const incoming = host.querySelector<HTMLImageElement>(".is-incoming")!;
+    incoming.decode = vi.fn(async () => { throw new Error("decode failed"); });
+    await act(async () => incoming.dispatchEvent(new Event("load")));
+    expect(host.querySelector(".is-current")).toBe(current);
+    expect(host.querySelector(".is-incoming")).toBeNull();
+    expect(current.getAttribute("src")).toBe("/one.jpg");
+  });
+
+  it("promotes the decoded node without animation for reduced motion", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+    try {
+      act(() => root.render(<DayPhotoBackground images={["/one.jpg", "/two.jpg"]} intervalMs={1000} />));
+      act(() => vi.advanceTimersByTime(1250));
+      const incoming = host.querySelector<HTMLImageElement>(".is-incoming")!;
+      incoming.decode = vi.fn(async () => {});
+      await act(async () => incoming.dispatchEvent(new Event("load")));
+      expect(host.querySelector(".is-current")).toBe(incoming);
+      expect(host.querySelector(".is-incoming")).toBeNull();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it("does not rotate a single photo or start a fade while the document is hidden", () => {
     act(() => root.render(<DayPhotoBackground images={["/one.jpg"]} intervalMs={1000} />));
     act(() => vi.advanceTimersByTime(5000)); expect(host.querySelectorAll("img")).toHaveLength(1);

@@ -4,6 +4,10 @@ export type StorageErrorCode =
   | "ImportSourceUnavailable"
   | "ImportSourceMismatch"
   | "EntryNotFound"
+  | "InvalidItem"
+  | "ItemBillNotFound"
+  | "ItemBillDirectionMismatch"
+  | "ItemBillAlreadyLinked"
   | "RevisionMismatch"
   | "CorruptionDetected";
 

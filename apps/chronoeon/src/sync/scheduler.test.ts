@@ -11,6 +11,38 @@ function fixture(online = true) {
   return {scheduler,engine,store,report,change:()=>changed(),setStatus:(next:Partial<SyncLocalStatus>)=>{status={...status,...next};},setOnline:(next:boolean)=>{online=next;}};
 }
 afterEach(()=>vi.useRealTimers());
+describe("exclusive maintenance", () => {
+  it("drains the active run and blocks polls, edit timers and manual triggers until complete", async () => {
+    vi.useFakeTimers(); const f = fixture();
+    let finish!: (result: EngineResult) => void;
+    f.engine.run.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    f.scheduler.start(); await vi.advanceTimersByTimeAsync(0);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const work = vi.fn(async () => { await gate; return "complete"; });
+    const operation = f.scheduler.runExclusive(work);
+    expect(work).not.toHaveBeenCalled();
+    finish(success); await vi.advanceTimersByTimeAsync(0);
+    expect(work).toHaveBeenCalledOnce();
+    f.change(); await f.scheduler.trigger({ rebuildSnapshot: true });
+    await vi.advanceTimersByTimeAsync(REMOTE_POLL_MS * 2);
+    expect(f.engine.run).toHaveBeenCalledTimes(1);
+    await expect(f.scheduler.runExclusive(async () => {})).rejects.toThrow("SYNC_MAINTENANCE_BUSY");
+    release(); await expect(operation).resolves.toBe("complete");
+    await f.scheduler.trigger(); expect(f.engine.run).toHaveBeenCalledTimes(2);
+    f.scheduler.dispose();
+  });
+  it("does not start destructive work offline and resumes scheduling after an error", async () => {
+    vi.useFakeTimers(); const f = fixture(false); const work = vi.fn(async () => {});
+    await expect(f.scheduler.runExclusive(work)).rejects.toThrow("SYNC_OFFLINE");
+    expect(work).not.toHaveBeenCalled();
+    f.setOnline(true);
+    await expect(f.scheduler.runExclusive(async () => { throw new Error("backup failed"); })).rejects.toThrow("backup failed");
+    await f.scheduler.trigger(); expect(f.engine.run).toHaveBeenCalledOnce();
+    f.scheduler.dispose();
+  });
+});
+
 describe("automatic sync scheduling",()=>{
   it("syncs on startup, then waits 60 quiet seconds after the last edit",async()=>{
     vi.useFakeTimers(); const f=fixture(); f.scheduler.start(); await vi.advanceTimersByTimeAsync(0);

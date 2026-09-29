@@ -152,6 +152,27 @@ describe("EntryComposer defaults", () => {
     await act(async () => { [...document.querySelectorAll<HTMLButtonElement>(".time-dial-actions button")].find((button) => button.textContent === "完成")!.click(); });
     expect([...host.querySelectorAll<HTMLButtonElement>(".glass-time-trigger")].map((trigger) => trigger.textContent)).toEqual(["09:00", "23:30"]);
   });
+
+  it.each([
+    [{ kind: "task", allDay: false }, "提前 30min"],
+    [{ kind: "task", allDay: true }, "前一天 17:00"],
+  ] as const)("defaults new task reminders by time mode", async (seed, label) => {
+    act(() => {
+      root.render(
+        <EntryComposer
+          locale="zh"
+          selectedDate="2026-09-09"
+          editing={null}
+          settings={createDefaultSettings()}
+          initialDraft={seed}
+          onClose={vi.fn()}
+          onSave={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+    });
+    expect(host.querySelector<HTMLButtonElement>('button[aria-label="提醒"]')?.textContent).toContain(label);
+  });
 });
 
 function setInputValue(input: HTMLInputElement, value: string) {

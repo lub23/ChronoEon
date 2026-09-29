@@ -84,7 +84,7 @@ export function TimerWidget({ locale, settings, timer, open, compact = false, on
 
         {timer.active
           ? <TimerRunning locale={locale} settings={settings} timer={timer} onConfirm={onConfirm} onFinished={onClose} onPin={onPin} onNotice={onNotice} />
-          : <TimerStartForm disabled={!timer.ready} locale={locale} settings={settings} category={category} onCategoryChange={changeCategory} onTitleChange={setTitle} onStart={timer.start} onNotice={onNotice} />}
+          : <TimerStartForm disabled={!timer.ready} locale={locale} settings={settings} category={category} onCategoryChange={changeCategory} onTitleChange={setTitle} onStart={timer.start} onNotice={onNotice} history={history} />}
       </section>
     </div>
   );

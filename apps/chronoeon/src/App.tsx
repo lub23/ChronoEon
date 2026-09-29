@@ -47,7 +47,11 @@ import { AmbientParticles } from "./components/AmbientParticles";
 import { EntryComposer } from "./components/EntryComposer";
 import { Icon } from "./components/Icon";
 import { IdeasView } from "./components/IdeasView";
-import { StatsView } from "./components/StatsView";
+import { ItemEditor } from "./components/ItemEditor";
+import { useSqliteItems } from "./hooks/useSqliteItems";
+import { billCategoryForValue, billDirectionForCategory, draftToItem, validateItemDraft, type Item, type ItemDraft } from "@chronoeon/domain";
+import type { SqliteItemStore } from "@chronoeon/storage";
+import { StatsView, type InsightsTab } from "./components/StatsView";
 import { MonthView } from "./components/MonthView";
 import { PhotoWallView } from "./components/PhotoWallView";
 import { EntryContextMenu, type EntryMenuTarget } from "./components/EntryContextMenu";
@@ -122,6 +126,11 @@ function App() {
   settingsRef.current = settings;
   const demoStore = useChronoEonStore(settings, !isTauri());
   const [sqliteStore, setSqliteStore] = useState<SqliteEntryStore | null>(null);
+  const [itemStore, setItemStore] = useState<SqliteItemStore | null>(null);
+  const sqliteItems = useSqliteItems(itemStore);
+  const [demoItems, setDemoItems] = useState<Item[]>([]);
+  const items = isTauri() ? sqliteItems.items : demoItems;
+  const [itemEditor, setItemEditor] = useState<{ item?: Item; seed?: Partial<ItemDraft> } | null>(null);
   const [syncJournal, setSyncJournal] = useState<SyncStore | null>(null);
   const [chatSyncVersion, setChatSyncVersion] = useState(0);
   const [timerStore, setTimerStore] = useState<TimerStore | null>(null);
@@ -163,6 +172,7 @@ function App() {
     [locale, settings],
   );
   const [activeViewPreference, setActiveView] = usePersistentPreference<AppView>("view", "agenda");
+  const [insightsTab, setInsightsTab] = usePersistentPreference<InsightsTab>("stats-tab", "bills");
   const activeView = isAppView(activeViewPreference) ? activeViewPreference : "agenda";
   const [calendarViewPreference, setCalendarView] = usePersistentPreference<AppView>("calendarView", "day");
   const calendarView = calendarViewPreference === "week" ? "week" : "day";
@@ -185,8 +195,8 @@ function App() {
     filterTriggerRef.current?.focus({ preventScroll: true });
   }, []);
   const searchedEntries = useMemo(
-    () => filteredEntries.filter((entry) => entryMatchesSearch(entry, search, locale)),
-    [filteredEntries, locale, search],
+    () => filteredEntries.filter((entry) => entryMatchesSearch(entry, search, locale, settings)),
+    [filteredEntries, locale, search, settings],
   );
   const [miniDayCountPref, setMiniDayCount] = usePersistentPreference<number>("miniDayCount", 1);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -204,6 +214,7 @@ function App() {
   const [remoteKeyStored, setRemoteKeyStored] = useState(false);
   const [localAIHeaders, setLocalAIHeaders] = useState<AICustomHeader[]>([]);
   const [transferBusy, setTransferBusy] = useState(false);
+  const ledgerBusyRef = useRef(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [deletedEntries, setDeletedEntries] = useState<DeletedEntrySummary[]>([]);
@@ -399,6 +410,7 @@ function App() {
     const session = await createSqliteStoreSession({});
     if (!session) throw new Error("SQLite storage is unavailable");
     setSqliteStore(session.store);
+    setItemStore(session.items);
     setSyncJournal(session.sync);
     setTimerStore(session.timers);
     setConversationStore(session.conversations);
@@ -470,7 +482,8 @@ function App() {
     if (imported.preferences.miniShortcut) setMiniShortcut(imported.preferences.miniShortcut);
     if (imported.preferences.miniShortcutEnabled !== undefined) setMiniShortcutEnabled(imported.preferences.miniShortcutEnabled);
     },
-    onApplied: async () => { await sqliteEntries.reload(); await refreshDeletedEntries(); setChatSyncVersion((value) => value + 1); },
+    onApplied: async () => { await sqliteEntries.reload(); await sqliteItems.reload(); await refreshDeletedEntries(); setChatSyncVersion((value) => value + 1); },
+    onMaintenance: async active => { ledgerBusyRef.current = active; if (active) await writeQueue.current; },
     onConflicts: (count) => notify(`${t("syncConflictNotice", locale)} (${count})`, "warning"),
   });
 
@@ -482,6 +495,7 @@ function App() {
    * rest of the queue.
    */
   const withSaving = useCallback(async <T,>(work: () => Promise<T>): Promise<T | undefined> => {
+    if (ledgerBusyRef.current) throw new Error("SYNC_MAINTENANCE_BUSY");
     writeDepth.current += 1;
     setSaving(true);
     const run = writeQueue.current.then(work);
@@ -519,7 +533,7 @@ function App() {
   const reassignCategories = useCallback(async (sourceCategory: string, targetCategory: string) => {
     if (!sourceCategory || !targetCategory || sourceCategory === targetCategory) return;
     const matches = entriesRef.current.filter((entry) => {
-      if (entry.kind === "bill") return entry.category.split("/")[0] === sourceCategory;
+      if (entry.kind === "bill") return billCategoryForValue(entry.category, settings)?.id === sourceCategory;
       return entry.category === sourceCategory;
     });
     for (const entry of matches) {
@@ -776,7 +790,7 @@ function App() {
 
   const desktopTimerWindow = isTauri() && !isMobilePlatform();
   const onTimerEvent = useCallback((event: TimerLifecycleEvent, session: TimerSession, elapsedMs: number) => {
-    const label = session.category ? categoryLabel(session.category, locale, session.category) : "";
+    const label = session.category ? categoryLabel(session.category, locale, session.category, settings) : "";
     void notifyTimer(event, session, elapsedMs, locale, label).catch((error) => console.warn("Timer notification failed", error));
     if (!desktopTimerWindow) return;
     // The pinned window follows the recording: it appears with the first
@@ -816,6 +830,7 @@ function App() {
   const reminders = useReminders({
     entries,
     locale,
+    settings,
     enabled: remindersEnabled,
     ready: !isTauri() || sqliteStore !== null,
     onError: reportWriteFailure,
@@ -1156,11 +1171,11 @@ function App() {
       );
     }
     if (view === "ideas") return <IdeasView entries={itemEntries} locale={locale} settings={settings} search={search} today={todayKey} onEdit={entry => viewActions.current.openComposer(entry)} onConvert={(id, date) => { void viewActions.current.convertIdea(id, date); }} onNew={() => viewActions.current.openComposerAt({ kind: "idea", date: todayKey, start: format(new Date(), "HH:mm") })} />;
-    return <StatsView entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={search} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} />;
+    return <StatsView tab={insightsTab} onTabChange={setInsightsTab} items={items} allEntries={entries} onAddItem={() => setItemEditor({})} onEditItem={item => setItemEditor({ item })} onOpenBill={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={search} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} />;
   }
     return new Map(visiblePages.map(page => [page.key, renderView(compact ? safeMiniDayCount : safeDayCount, page.view, page.date)]));
   }, [visiblePages, compact, safeMiniDayCount, safeDayCount, entryFilter.photosOnly,
-    searchedEntries, selectedDate, locale, settings, filter, search, lunar, dayPhotos, todayKey]);
+    searchedEntries, entries, items, selectedDate, locale, settings, filter, search, lunar, dayPhotos, todayKey]);
 
   const preferences: AppPreferences = { lunar, dayPhotos, accentTheme, remindersEnabled, captureShortcut, captureShortcutEnabled, miniShortcut, miniShortcutEnabled, lowEndMode };
 
@@ -1283,6 +1298,7 @@ function App() {
     <ReminderDialog
       reminders={reminderNotice}
       locale={locale}
+      settings={settings}
       onClose={() => setReminderNotice(null)}
       onOpen={(entry) => {
         setReminderNotice(null);
@@ -1344,7 +1360,41 @@ function App() {
     search={search} onSearch={setSearch} onKindChange={setFilter} onChange={setEntryFilter} onClose={closeFilter}
     onOpenEntry={entry => { setSelectedDate(parseISO(entry.date)); openComposer(entry); }} /> : null;
 
-  const captureDialog = composerOpen ? <EntryComposer availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
+  function openItemFromBill(entry: Entry, item?: Item, category?: Item["category"]) {
+    if (category) {
+      void (async () => {
+        const item = draftToItem({ name: entry.title, category, acquisition: "purchase", acquiredOn: entry.date, acquiredAt: entry.start ?? "12:00", cost: Math.abs(entry.amount ?? 0), currency: entry.currency ?? settings.bill.currency, purchaseEntryId: entry.id });
+        if (isTauri()) {
+          const session = await createSqliteStoreSession();
+          if (!session) return;
+          await session.items.save(item, settingsRef.current);
+          await sqliteItems.reload();
+        } else setDemoItems(current => [...current, item]);
+        notify(t("itemSaved", locale));
+      })();
+      return;
+    }
+    const income = billDirectionForCategory(entry.category, settings) === "income";
+    const seed: Partial<ItemDraft> = income
+      ? { disposal: "sold", disposedOn: entry.date, saleEntryId: entry.id, saleAmount: Math.abs(entry.amount ?? 0) }
+      : { name: item?.name ?? entry.title, category: category ?? "other", acquisition: "purchase", acquiredOn: entry.date, acquiredAt: entry.start ?? "12:00", cost: Math.abs(entry.amount ?? 0), currency: entry.currency ?? settings.bill.currency, purchaseEntryId: entry.id };
+    setItemEditor({ item, seed });
+  }
+  const itemDialog = itemEditor ? <ItemEditor key={itemEditor.item?.id ?? "new"} item={itemEditor.item} seed={itemEditor.seed} items={items} entries={entries} locale={locale} settings={settings} today={todayKey} onClose={() => setItemEditor(null)} onSave={async draft => {
+    validateItemDraft(draft);
+    const item = itemEditor.item ? { ...itemEditor.item, ...draft } : draftToItem(draft);
+    if (isTauri()) {
+      const session = await createSqliteStoreSession();
+      if (!session) throw new Error("SQLite storage is unavailable");
+      await session.items.save(item, settingsRef.current);
+      await sqliteItems.reload();
+    } else {
+      setDemoItems(current => [...current.filter(existing => existing.id !== item.id), { ...item, updatedAt: new Date().toISOString() }]);
+    }
+    notify(t("itemSaved", locale));
+  }} /> : null;
+
+  const captureDialog = composerOpen ? <EntryComposer items={items} onEditItem={item => setItemEditor({ item })} onLinkItem={openItemFromBill} availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
     locale={locale} settings={settings} selectedDate={selectedKey} editing={editingEntry} sourceEntry={editingSourceEntry}
     history={entries} onClose={closeComposer} onSave={handleSave} onDelete={handleDelete} onNotice={notify} onConfirm={confirm}
     initialDraft={composerSeed} /> : null;
@@ -1419,6 +1469,7 @@ function App() {
           </ViewDock>
         </main>
         <MotionPresence>{captureDialog}</MotionPresence>
+      <MotionPresence>{itemDialog}</MotionPresence>
         <MotionPresence>{chatDialog}</MotionPresence>
         <MotionPresence>{filterPanel}</MotionPresence>
         <MotionPresence>{settingsDialog}</MotionPresence>
@@ -1530,8 +1581,10 @@ function App() {
           calendarView={calendarView}
           timerActive={timer.active}
           dayCount={safeDayCount}
+          insightsTab={insightsTab}
           onViewChange={selectView}
           onDayCountChange={setDayCount}
+          onInsightsTabChange={setInsightsTab}
           onTimer={() => setTimerOpen(true)}
           onQuickNote={() => openUnifiedDialog("capture")}
         >
@@ -1539,6 +1592,7 @@ function App() {
         </ViewDock>
       </main>
       <MotionPresence>{captureDialog}</MotionPresence>
+      <MotionPresence>{itemDialog}</MotionPresence>
       <MotionPresence>{chatDialog}</MotionPresence>
       <MotionPresence>{filterPanel}</MotionPresence>
       <MotionPresence>{settingsDialog}</MotionPresence>

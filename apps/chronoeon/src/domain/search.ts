@@ -1,11 +1,11 @@
 import { categoryLabel, localeTag, paymentMethodLabel } from "../i18n";
-import { titleFor, type Entry, type Locale } from "./entry";
+import { titleFor, type ChronoEonSettings, type Entry, type Locale } from "./entry";
 
 export type SearchField = "Title" | "Location" | "Note" | "Category" | "Tag" | "Payment";
 export interface SearchMatch { field: SearchField; text: string; needle: string }
 
 /** Search the same visible text everywhere, and retain its source for previews. */
-export function entrySearchMatches(entry: Entry, search: string, locale: Locale): SearchMatch[] {
+export function entrySearchMatches(entry: Entry, search: string, locale: Locale, settings?: ChronoEonSettings): SearchMatch[] {
   const needle = search.trim().toLocaleLowerCase(localeTag[locale]);
   if (!needle) return [];
   const tagOnly = needle.startsWith("#");
@@ -13,7 +13,8 @@ export function entrySearchMatches(entry: Entry, search: string, locale: Locale)
   const fields: Array<[SearchField, string | undefined]> = tagOnly ? [] : [
     ["Title", titleFor(entry, locale)], ["Title", entry.title], ["Title", entry.titleZh],
     ["Location", entry.location], ["Note", entry.note],
-    ["Category", categoryLabel(entry.category, locale)], ["Category", entry.category],
+    ["Category", categoryLabel(entry.category, locale, undefined, settings)],
+    ["Category", categoryLabel(entry.category.split("/")[0], locale, undefined, settings)],
     ["Payment", entry.payment ? paymentMethodLabel(entry.payment, locale) : undefined],
   ];
   fields.push(...(entry.tags ?? []).map((tag): [SearchField, string] => ["Tag", tag.replace(/^#/, "")]));
@@ -27,8 +28,8 @@ export function entrySearchMatches(entry: Entry, search: string, locale: Locale)
   });
 }
 
-export function entryMatchesSearch(entry: Entry, search: string, locale: Locale): boolean {
-  return !search.trim() || entrySearchMatches(entry, search, locale).length > 0;
+export function entryMatchesSearch(entry: Entry, search: string, locale: Locale, settings?: ChronoEonSettings): boolean {
+  return !search.trim() || entrySearchMatches(entry, search, locale, settings).length > 0;
 }
 
 /** Bound long notes around the first hit, never truncate away the keyword. */

@@ -77,7 +77,7 @@ export function EntryRow({ entry, locale, settings, compact = false, onToggle, o
           <span className="entry-meta">
             <span>{detail}</span>
             <span className="meta-separator">·</span>
-            <span>{entry.category.includes("/") ? compositeCategoryLabel(entry.category, locale) : categoryLabel(entry.category, locale)}</span>
+            <span>{entry.category.includes("/") ? compositeCategoryLabel(entry.category, locale, settings) : categoryLabel(entry.category, locale, undefined, settings)}</span>
             {entry.payment && <><span className="meta-separator">·</span><span>{paymentMethodLabel(entry.payment, locale)}</span></>}
             {entry.location && <><span className="meta-separator">·</span><Icon name="map-pin" size={12} /><span>{entry.location}</span></>}
             {entry.tags?.length ? <><span className="meta-separator">·</span><span className="entry-tags">{entry.tags.map((tag) => `#${tag}`).join(" ")}</span></> : null}

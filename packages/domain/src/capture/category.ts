@@ -1,5 +1,5 @@
 import type { EntryKind } from "../entry";
-import { billDirectionForCategory, categoryOptionsForKind, defaultCategoryForKind, type ChronoEonSettings } from "../settings";
+import { billCategoryForValue, billDirectionForCategory, categoryOptionsForKind, defaultCategoryForKind, type ChronoEonSettings } from "../settings";
 import type { CaptureHistoryItem } from "./index";
 import { titleMatchScore } from "./titleMatch";
 import { localDate } from "./time";
@@ -30,9 +30,16 @@ export function inferCategory(
   const direction: "income" | "expense" | "any" = directionHint === "any"
     ? "any"
     : amount !== undefined && amount > 0 ? "income" : "expense";
+  const canonicalValue = (value: string): string => {
+    if (kind !== "bill") return value;
+    const primary = billCategoryForValue(value, settings);
+    if (!primary) return value;
+    const sub = value.split("/").slice(1).join("/");
+    return sub ? `${primary.id}/${sub}` : primary.id;
+  };
   const valid = new Set(options.map((option) => option.value));
-  if (kind === "bill") for (const primary of settings.bill.categories) valid.add(primary.name);
-  const available = (category: string) => valid.has(category)
+  if (kind === "bill") for (const primary of settings.bill.categories) valid.add(primary.id);
+  const available = (category: string) => valid.has(canonicalValue(category))
     && (kind !== "bill" || direction === "any" || billDirectionForCategory(category, settings) === direction);
   const recent = history.filter((item) => item.kind === kind && available(item.category)).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 500);
   const today = Date.parse(localDate(now));
@@ -42,7 +49,7 @@ export function inferCategory(
     const candidate = titleMatchScore(title, item.title) * (age <= 90 ? 1 : 0.85);
     if (candidate >= 0.35 && candidate > score) { best = item; score = candidate; }
   }
-  if (best) return { value: best.category, confidence: score };
+  if (best) return { value: canonicalValue(best.category), confidence: score };
   if (kind !== "bill") {
     for (const [keywords, names] of schedule) {
       if (!keywords.test(raw)) continue;
@@ -55,11 +62,11 @@ export function inferCategory(
       const primary = settings.bill.categories.find((category) => category.id === id && category.direction === direction);
       if (primary) {
         const child = primary.sub.find((name) => sub?.test(name));
-        return { value: child ? primary.name + "/" + child : primary.name, confidence: 0.75 };
+        return { value: child ? primary.id + "/" + child : primary.id, confidence: 0.75 };
       }
     }
   }
   let value = defaultCategoryForKind(kind, settings, calendarId);
-  if (kind === "bill" && !available(value)) value = settings.bill.categories.find((category) => category.direction === direction)?.name ?? value;
+  if (kind === "bill" && !available(value)) value = settings.bill.categories.find((category) => category.direction === direction)?.id ?? value;
   return { value, confidence: 0 };
 }

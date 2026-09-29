@@ -25,7 +25,7 @@ export interface SyncBackend {
   publish(publication: Publication): Promise<{ conflict: boolean }>;
 }
 export interface EngineResult { ok: true; sent: number; received: number; conflicts: number; snapshotCreated: boolean; attachmentCount: number }
-export interface SyncRunOptions { rebuildSnapshot?: boolean }
+export interface SyncRunOptions { rebuildSnapshot?: boolean; /** Verified remote apply, with no publication or snapshot compaction. Requires an existing remote dataset. */ pullOnly?: boolean }
 const HASH = /^[a-f0-9]{64}$/;
 const IMAGE_PATH = /^attachments\/([a-f0-9]{64})\.webp$/;
 export function validDocumentPath(path: string): boolean {
@@ -59,6 +59,7 @@ export class SyncEngine {
   private running: Promise<EngineResult> | null = null;
   private rebuildRequested = false;
   private rebuilding = false;
+  private pulling = false;
   constructor(readonly store: SyncStore, private readonly backend: SyncBackend, private readonly options: {
     deviceName: string; now?: () => Date; onApplied?: () => Promise<void> | void;
     /** Native ingestion finishes before any journal batch can reference those bytes. */
@@ -67,21 +68,26 @@ export class SyncEngine {
     cancelled?: () => boolean;
   }) {}
   run(options: SyncRunOptions = {}): Promise<EngineResult> {
+    const pullOnly = options.pullOnly === true;
+    if (pullOnly && options.rebuildSnapshot) return Promise.reject(new Error("SYNC_INVALID_RUN_OPTIONS"));
+    // A pull caller must never accidentally join a publishing run.
+    if (this.running && pullOnly !== this.pulling) return Promise.reject(new Error("SYNC_BUSY"));
+    if (!this.running) this.pulling = pullOnly;
     if (options.rebuildSnapshot && !this.rebuilding) this.rebuildRequested = true;
     this.running ??= (async () => {
       let result: EngineResult;
       do {
         this.rebuilding = this.rebuildRequested;
         this.rebuildRequested = false;
-        result = await this.perform(this.rebuilding);
+        result = await this.perform(this.rebuilding, pullOnly);
       } while (this.rebuildRequested);
       return result;
     })().catch(async (error: unknown) => {
       if (!(error instanceof Error && error.message === "SYNC_CANCELLED")) await this.store.failed(error instanceof Error ? error.message : String(error)); throw error;
-    }).finally(() => { this.running = null; this.rebuilding = false; this.rebuildRequested = false; });
+    }).finally(() => { this.running = null; this.rebuilding = false; this.rebuildRequested = false; this.pulling = false; });
     return this.running;
   }
-  private async perform(rebuildSnapshot: boolean): Promise<EngineResult> {
+  private async perform(rebuildSnapshot: boolean, pullOnly: boolean): Promise<EngineResult> {
     await this.options.prepareAttachments?.();
     if (!this.backend.id) throw new Error("SYNC_BACKEND_ID_REQUIRED");
     if (this.options.cancelled?.()) throw new Error("SYNC_CANCELLED");
@@ -95,6 +101,7 @@ export class SyncEngine {
       if (this.options.cancelled?.()) throw new Error("SYNC_CANCELLED");
       const remote = await this.backend.fetch(known);
       if (this.options.cancelled?.()) throw new Error("SYNC_CANCELLED");
+      if (pullOnly && !remote.index) throw new Error("SYNC_REMOTE_EMPTY");
       if (remote.index) validateIndex(remote.index);
       const datasetId = await this.store.bindDataset(remote.index?.datasetId);
       const expected = new Map([...(remote.index?.snapshot ? [remote.index.snapshot] : []), ...remote.index?.batches ?? []].map((ref) => [ref.path, ref.hash]));
@@ -106,6 +113,8 @@ export class SyncEngine {
       received += applied;
       if (applied) await this.options.onApplied?.();
       if (this.options.cancelled?.()) throw new Error("SYNC_CANCELLED");
+      if (pullOnly) return { ok: true, sent: 0, received, conflicts: (await this.store.status()).conflicts,
+        snapshotCreated: false, attachmentCount: remote.index!.attachments.length };
       await this.options.beforePublish?.();
       const pending = await this.store.pack(now);
       const allBatches = await Promise.all(pending.map(async (batch) => ({ ...batch, hash: await contentHash(batch.content) })));

@@ -10,7 +10,7 @@ describe("migrations", () => {
     await ensureMigrated(backend);
     const version = await backend.select<{ user_version: number }>("PRAGMA user_version");
     expect(version[0].user_version).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe(10);
+    expect(SCHEMA_VERSION).toBe(12);
 
     const tables = await backend.select<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('timer_session', 'timer_segments')"
@@ -24,6 +24,20 @@ describe("migrations", () => {
 
     const entryColumns = await backend.select<{ name: string }>("PRAGMA table_info(entries)");
     expect(entryColumns.map((row) => row.name)).not.toContain("body");
+    await backend.close();
+  });
+
+  it("adds items to v10 without touching existing user data or adding bill foreign keys", async () => {
+    const backend = await MemorySqliteBackend.open([]);
+    await ensureMigrated(backend, MIGRATION_STEPS.filter((step) => step.version <= 10));
+    await backend.execute("INSERT INTO entries(id,modality,title,date,created_at) VALUES ('existing','bill','Existing bill','2026-09-01','2026-09-01T00:00:00Z')");
+    await ensureMigrated(backend);
+    expect(await backend.select("SELECT id,title FROM entries")).toEqual([{ id: "existing", title: "Existing bill" }]);
+    expect(await backend.select("PRAGMA foreign_key_list(items)")).toEqual([]);
+    const indexes = await backend.select<{ name: string; unique: number }>("PRAGMA index_list(items)");
+    expect(indexes.filter((index) => index.unique && !index.name.startsWith("sqlite_autoindex"))).toEqual([]);
+    expect(await backend.select("SELECT * FROM items")).toEqual([]);
+    await verifyIntegrity(backend);
     await backend.close();
   });
 
@@ -43,7 +57,7 @@ describe("migrations", () => {
     await ensureMigrated(backend, [{ version: 1, sql: SCHEMA_SQL }]);
     expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(1);
     await ensureMigrated(backend);
-    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(10);
+    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(12);
     await backend.close();
   });
 
@@ -62,14 +76,14 @@ describe("migrations", () => {
        VALUES ('x2', 'task', 'T2', NULL, 'body only', '2026-08-01', 1, '2026-08-01 00:00')`
     );
     await ensureMigrated(backend);
-    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(10);
+    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(12);
     const rows = await backend.select<{ id: string; note: string | null }>("SELECT id, note FROM entries ORDER BY id");
     expect(rows[0].note).toBe("short note\n\nlong\nbody");
     expect(rows[1].note).toBe("body only");
     await backend.close();
   });
 
-  it("reports a healthy database and ships both DDL assets", async () => {
+  it("reports a healthy database and ships both DDL items", async () => {
     const backend = await MemorySqliteBackend.open([]);
     await ensureMigrated(backend);
     await expect(verifyIntegrity(backend)).resolves.toBeUndefined();

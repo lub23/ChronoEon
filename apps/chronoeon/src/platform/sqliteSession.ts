@@ -5,6 +5,7 @@ import {
   AiConversationStore,
   RUNTIME_PRAGMAS,
   SqliteEntryStore,
+  SqliteItemStore,
   TauriSqliteBackend,
   TimerStore,
   SyncStore,
@@ -16,6 +17,7 @@ import { isTauri } from "./desktop";
 
 export interface SqliteStoreSession {
   store: SqliteEntryStore;
+  items: SqliteItemStore;
   timers: TimerStore;
   conversations: AiConversationStore;
   sync: SyncStore;
@@ -77,6 +79,7 @@ async function createSession(backend: PersistencePort): Promise<SqliteStoreSessi
   if (isTauri()) void prepareAttachmentImports(sync).then(() => store.notifyRebuilt()).catch(() => store.notifyRebuilt());
   return {
     store,
+    items: new SqliteItemStore(backend),
     timers: new TimerStore(backend),
     conversations: new AiConversationStore(backend),
     sync,

@@ -123,6 +123,21 @@ async function compressDemoFile(file: File): Promise<Blob> {
   return lastBlob;
 }
 
+/** Items share the canonical compressed photo store; originals are never synced. */
+export async function pickItemCover(): Promise<AttachmentPick | null> {
+  const [file] = await pickImageFiles(false);
+  if (!file) return null;
+  if (isTauri()) {
+    const compressed = await compressPickedFile(file);
+    const reference = attachmentReference(compressed.sha256);
+    return { reference, displayUrl: await resolveAttachmentUrl(reference) ?? "", name: file.name, persisted: true };
+  }
+  const buffer = await compressDemoFile(file);
+  const reference = URL.createObjectURL(buffer);
+  sessionUrls.set(reference, reference);
+  return { reference, displayUrl: reference, name: file.name, persisted: false };
+}
+
 export interface AttachmentContext {
   settings: ChronoEonSettings;
   entryDate: string;

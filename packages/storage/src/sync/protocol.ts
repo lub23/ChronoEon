@@ -1,7 +1,7 @@
 import { merge } from "node-diff3";
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-export type EntityKind = "entry" | "attachment" | "conversation" | "message" | "settings";
+export type EntityKind = "entry" | "asset" | "attachment" | "conversation" | "message" | "settings";
 export type Clock = Record<string, number>;
 export type EntityData = Record<string, Json>;
 export interface SyncOperation {
@@ -32,7 +32,7 @@ export interface SyncConflict {
 }
 export const SETTINGS_ID = "00000000-0000-5000-8000-000000000001";
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const KINDS = new Set(["entry", "attachment", "conversation", "message", "settings"]);
+const KINDS = new Set(["entry", "asset", "attachment", "conversation", "message", "settings"]);
 const EXISTS = "$exists";
 const TAG = "$tag:";
 export function stableJson(value: unknown): string {
@@ -143,7 +143,7 @@ export function validateOperation(value: unknown): asserts value is SyncOperatio
     || !Number.isFinite(Date.parse(op.timestamp)) || !validClock(op.context)
     || (op.context[op.deviceId] ?? 0) >= op.sequence
     || !op.data || !op.base || Array.isArray(op.data) || typeof op.data !== "object" || typeof op.base !== "object"
-    || op.data[EXISTS] !== !(op.op === "delete" || op.op === "attachment.remove")) throw new Error("Invalid sync operation");
+  || op.data[EXISTS] !== !(op.op === "delete" || op.op === "attachment.remove")) throw new Error("Invalid sync operation");
   for (const field of Object.keys(op.data)) if (["__proto__", "constructor", "prototype"].includes(field)) throw new Error("Invalid sync field");
 }
 export function validateState(value: unknown): asserts value is EntityState {

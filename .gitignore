@@ -9,6 +9,10 @@
 # npm
 node_modules
 
+# Python conversion/test caches
+__pycache__/
+*.pyc
+
 # Exclude sourcemaps
 *.map
 

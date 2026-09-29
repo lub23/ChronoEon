@@ -1,6 +1,6 @@
 import { nextSnapshotAt } from "./snapshotPolicy";
 import { packState, unpackState } from "./stateCodec";
-import { createEntryId } from "@chronoeon/domain";
+import { itemImageHash, createEntryId } from "@chronoeon/domain";
 import type { PersistencePort, SqlParam } from "../persistence/PersistencePort";
 import { notifyLocalChange, runDatabaseOperation, subscribeLocalChanges } from "../persistence/coordinator";
 import { ENTITY_TABLES } from "./entitySchema";
@@ -209,7 +209,7 @@ export class SyncStore {
       const children = await this.db.select<{entity: EntityKind; id: string}>("SELECT entity,id FROM sync_links WHERE parent_entity=? AND parent_id=?", [parent.entity,parent.id]);
       for (const child of children) if (!affected.has(`${child.entity}/${child.id}`)) { affected.set(`${child.entity}/${child.id}`,child); pending.push(child); }
     }
-    const order: EntityKind[] = ["entry", "conversation", "attachment", "message", "settings"];
+    const order: EntityKind[] = ["entry", "asset", "conversation", "attachment", "message", "settings"];
     const keys = [...affected.values()].sort((a,b) => order.indexOf(a.entity)-order.indexOf(b.entity) || a.id.localeCompare(b.id));
     await this.db.execute("UPDATE sync_control SET applying=1 WHERE id=1");
     for (const key of keys) {
@@ -412,10 +412,15 @@ export class SyncStore {
   attachmentHashes(): Promise<string[]> {
     return this.run(async () => {
       const hashes = new Set<string>();
-      for await (const row of this.stateRows("WHERE entity='attachment'")) {
+      for await (const row of this.stateRows("WHERE entity IN ('attachment','asset')")) {
         const state = unpackState(JSON.parse(row.state_json));
         if (!(await this.reachable(state))) continue;
-        for (const version of state.fields.sha256 ?? []) if (typeof version.value === "string" && /^[a-f0-9]{64}$/.test(version.value)) hashes.add(version.value);
+        const versions = state.entity === "asset" ? state.fields.image : state.fields.sha256;
+        for (const version of versions ?? []) {
+          if (typeof version.value !== "string") continue;
+          const hash = state.entity === "asset" ? itemImageHash(version.value) : version.value;
+          if (hash && /^[a-f0-9]{64}$/.test(hash)) hashes.add(hash);
+        }
       }
       return [...hashes].sort();
     });

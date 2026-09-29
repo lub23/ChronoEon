@@ -25,9 +25,9 @@ export function DayPhotoBackground({ images, intervalMs = 7000, className, onOpe
   const shown = photos.includes(current) ? current : photos[seed % photos.length] ?? "";
 
   useEffect(() => {
-    if (shown === current) return;
+    if (shown === current && (!incoming || photos.includes(incoming))) return;
     setCurrent(shown); setIncoming(null); setFading(false);
-  }, [shown, current]);
+  }, [shown, current, incoming, photos]);
 
   useEffect(() => {
     if (photos.length <= 1 || incoming) return;
@@ -89,7 +89,7 @@ export function DayPhotoBackground({ images, intervalMs = 7000, className, onOpe
     : shown === next ? [shown] : [shown, next];
   return <>
     <span className={className ? `day-photo-bg ${className}` : "day-photo-bg"} aria-hidden="true">
-      <span className="day-photo-images">{frames.map((url, index) => <img key={index} src={url} alt="" draggable={false}
+      <span className="day-photo-images">{frames.map((url, index) => <img key={url} src={url} alt="" draggable={false}
         ref={url === incoming ? incomingRef : undefined}
         className={url === incoming
           ? `day-photo-frame is-incoming${fading ? " is-ready" : ""}`

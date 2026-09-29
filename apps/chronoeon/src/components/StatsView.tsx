@@ -14,16 +14,19 @@ import {
   reviewGranularities,
   reviewCategoryOptions,
   reviewBuckets,
+  type Item,
   type BillCategoryStat,
   type BillSubCategoryStat,
   type ChronoEonSettings,
   type Entry,
   type EntryStatus,
+  formatEntryTime,
   type Locale,
   type ReviewBucket,
   type ReviewGranularity,
   type StatsPresetKey,
-  type StatsRange
+  type StatsRange,
+  titleFor,
 } from "@chronoeon/domain";
 import { catalogLabel, categoryLabel, compositeCategoryLabel, t, type MessageKey } from "../i18n";
 import { GlassDatePicker } from "./GlassDateTimePicker";
@@ -34,6 +37,7 @@ import { Icon } from "./Icon";
 import { TaskSummaryList } from "./TaskSummaryList";
 import { registerModalDismiss } from "./modalLayer";
 import { usePersistentPreference } from "../hooks/usePersistentPreference";
+import { ItemsView } from "./ItemsView";
 
 interface StatsViewProps {
   entries: Entry[];
@@ -44,14 +48,31 @@ interface StatsViewProps {
   onToggle?: (id: string, entry?: Entry) => void;
   onStatus?: (entry: Entry, status: EntryStatus) => void;
   onOpenDate?: (date: string) => void;
+  items?: Item[];
+  allEntries?: Entry[];
+  onAddItem?: () => void;
+  onEditItem?: (item: Item) => void;
+  onOpenBill?: (entry: Entry) => void;
 }
 
 type StatsTab = "bills" | "tasks";
+export type InsightsTab = StatsTab | "items";
+
+export function StatsView({ tab = "bills", onTabChange, ...props }: StatsViewProps & { tab?: InsightsTab; onTabChange?: (tab: InsightsTab) => void }) {
+  if (tab !== "items") return <StatsDetailView {...props} tab={tab} onTabChange={value => onTabChange?.(value)} />;
+  return <section className="stats-page">
+    <header className="page-title-row view-title-row"><h2 className="view-heading"><span className="headline-leaf">{t("insightsTitle", props.locale)}</span></h2></header>
+    <ItemsView items={props.items ?? []} entries={props.allEntries ?? props.entries} locale={props.locale} settings={props.settings} today={props.today} search={props.search} onAdd={props.onAddItem} onEdit={props.onEditItem} onOpenBill={props.onOpenBill} />
+  </section>;
+}
 interface CategoryDetail {
   title: string;
   color: string;
   entries: Entry[];
+  total: number;
 }
+type DetailSortField = "date" | "title" | "amount";
+type DetailSort = { field: DetailSortField; direction: "asc" | "desc" } | null;
 interface SplitConnector {
   d: string;
   x: number;
@@ -59,7 +80,9 @@ interface SplitConnector {
   endX: number;
   endY: number;
   color: string;
-  label?: string;
+  label: string;
+  percent: string;
+  amountColor: string;
 }
 
 const presets: Array<{ key: StatsPresetKey; label: MessageKey }> = [
@@ -84,11 +107,19 @@ function unsignedMoney(symbol: string, amount: number): string {
   return money(symbol, Math.abs(amount));
 }
 
-function categoryText(category: string | undefined, locale: Locale): string {
+/** Keep category totals visually bounded: 100K–999.99K, then M/G. */
+function compactMoney(symbol: string, amount: number): string {
+  const value = Math.abs(amount);
+  const compact = (scaled: number, suffix: string) => `${symbol}${scaled.toFixed(2).replace(/\.?0+$/, "")}${suffix}`;
+  if (value >= 1_000_000_000) return compact(value / 1_000_000_000, "G");
+  if (value >= 1_000_000) return compact(value / 1_000_000, "M");
+  if (value >= 100_000) return compact(value / 1_000, "K");
+  return unsignedMoney(symbol, amount);
+}
+
+function categoryText(category: string | undefined, locale: Locale, settings: ChronoEonSettings): string {
   if (!category?.trim()) return t("categoryUncategorized", locale);
-  return category.includes("/")
-    ? compositeCategoryLabel(category, locale)
-    : categoryLabel(category, locale, catalogLabel(category, locale));
+  return categoryLabel(category, locale, undefined, settings);
 }
 
 function monthLabel(month: number, locale: Locale): string {
@@ -145,14 +176,14 @@ function bucketLabels(buckets: ReviewBucket[], granularity: ReviewGranularity, l
   });
 }
 
-export function StatsView({ entries, locale, settings, today, search = "", onToggle, onStatus, onOpenDate }: StatsViewProps) {
-  const [tab, setTab] = usePersistentPreference<StatsTab>("stats-tab", "bills");
+function StatsDetailView({ entries, locale, settings, today, search = "", onToggle, onStatus, onOpenDate, tab, onTabChange }: StatsViewProps & { tab: StatsTab; onTabChange: (tab: InsightsTab) => void }) {
   const [preset, setPreset] = usePersistentPreference<StatsPresetKey>("stats-preset", "this_month");
   const [customRange, setCustomRange] = usePersistentPreference<StatsRange | null>("stats-custom-range", null);
  const [keyword, setKeyword] = usePersistentPreference("stats-keyword", "");
   const [granularity, setGranularity] = usePersistentPreference<{ range: string; value: ReviewGranularity } | null>("stats-review-granularity", null);
   const [hiddenSeries, setHiddenSeries] = usePersistentPreference<Record<StatsTab, string[]>>("stats-review-hidden-series", { bills: [], tasks: [] });
  const [detail, setDetail] = useState<CategoryDetail | null>(null);
+ const [detailSort, setDetailSort] = useState<DetailSort>(null);
  const [isRangePending, startRangeTransition] = useTransition();
 
  const range = useMemo(
@@ -202,7 +233,7 @@ export function StatsView({ entries, locale, settings, today, search = "", onTog
       values: buckets.map(bucket => bucket.billIncome),
     }] : []),
     ...categoryOptions.map(option => {
-      const label = categoryLabel(option.value, locale, catalogLabel(option.value, locale, option.label));
+      const label = categoryLabel(option.value, locale, option.label, settings);
       if (tab !== "bills") return { key: "category:" + option.value, label,
         color: option.color ?? "var(--ink-faint)",
         values: buckets.map(bucket => bucket.scheduleCategories[option.value] ?? 0),
@@ -245,6 +276,23 @@ export function StatsView({ entries, locale, settings, today, search = "", onTog
         ? { start: value || range.end, end: range.end }
         : { start: range.start, end: value || range.start });
     });
+  }
+
+  const sortedDetailEntries = useMemo(() => {
+    if (!detailSort) return detail?.entries ?? [];
+    const sign = detailSort.direction === "asc" ? 1 : -1;
+    return [...(detail?.entries ?? [])].sort((left, right) => {
+      if (detailSort.field === "title") return sign * titleFor(left, locale).localeCompare(titleFor(right, locale), locale);
+      if (detailSort.field === "amount") return sign * (Math.abs(left.amount ?? 0) - Math.abs(right.amount ?? 0));
+      const leftAt = `${left.date} ${left.start ?? "00:00"}`;
+      const rightAt = `${right.date} ${right.start ?? "00:00"}`;
+      return sign * leftAt.localeCompare(rightAt);
+    });
+  }, [detail?.entries, detailSort, locale]);
+
+  function toggleDetailSort(field: DetailSortField) {
+    setDetailSort(current => current?.field !== field ? { field, direction: "asc" }
+      : current.direction === "asc" ? { field, direction: "desc" } : null);
   }
 
   return (
@@ -290,15 +338,6 @@ export function StatsView({ entries, locale, settings, today, search = "", onTog
       )}
 
       <div className="stats-toolbar panel">
-        <div className="stats-tabs" role="tablist" aria-label={t("insights", locale)}>
-          <button type="button" role="tab" aria-selected={tab === "bills"} className={tab === "bills" ? "is-active" : ""} onClick={() => setTab("bills")}>
-            <Icon name="coins" size={15} />{t("statsBills", locale)}
-          </button>
-          <button type="button" role="tab" aria-selected={tab === "tasks"} className={tab === "tasks" ? "is-active" : ""} onClick={() => setTab("tasks")}>
-            <Icon name="clock" size={15} />{t("statsTasks", locale)}
-          </button>
-        </div>
-
         <div className="stats-range" role="group" aria-label={t("statsPeriod", locale)}>
           {presets.map((item) => (
             <button
@@ -332,7 +371,7 @@ export function StatsView({ entries, locale, settings, today, search = "", onTog
                     <span className="stats-match-title">{entry.title}</span>
                     <span className="stats-match-cat">
                       <i style={{ background: entry.color ?? "var(--accent)" }} aria-hidden="true" />
-                      {categoryText(entry.category, locale)}
+                      {categoryText(entry.category, locale, settings)}
                     </span>
                     {entry.kind === "bill" && typeof entry.amount === "number" && (
                       <span className={entry.amount >= 0 ? "is-income" : "is-expense"}>{money(symbol, Math.abs(entry.amount))}</span>
@@ -405,6 +444,46 @@ export function StatsView({ entries, locale, settings, today, search = "", onTog
        )}
      </section>
 
+      {tab === "bills" && (
+      <section className="stats-card panel">
+        <header className="stats-card-header">
+          <h3><Icon name="calendar" size={16} /> {t("statsHeatmap", locale)}</h3>
+          <span className="stats-card-total">{t("statsHeatmapYearTotal", locale)} · {money(symbol, -heatmap.total)}</span>
+        </header>
+        <div className="heatmap-scroll">
+          <div className="heatmap-grid" style={{ "--heatmap-weeks": heatmap.weeks.length } as React.CSSProperties} role="img" aria-label={`${t("statsHeatmap", locale)} ${heatmap.year}`}>
+            <div className="heatmap-months">
+              {heatmap.monthLabels.map((label) => (
+                <span key={`${label.week}-${label.month}`} style={{ gridColumnStart: label.week + 1 }}>{monthLabel(label.month, locale)}</span>
+              ))}
+            </div>
+            <div className="heatmap-weeks">
+              {heatmap.weeks.map((week, weekIndex) => (
+                <div key={weekIndex} className="heatmap-week">
+                  {week.map((day) => (
+                    <button
+                      key={day.date}
+                      type="button"
+                      className={`heatmap-cell heat-${day.level}${day.inYear ? "" : " is-outside"}${day.date === today ? " is-today" : ""}`}
+                      title={day.inYear ? `${day.date} · ${day.total > 0 ? money(symbol, -day.total) : t("statsHeatmapLess", locale)}` : day.date}
+                      aria-label={`${day.date} ${day.total > 0 ? money(symbol, -day.total) : ""}`}
+                      onClick={() => day.inYear && onOpenDate?.(day.date)}
+                      tabIndex={day.inYear && day.total > 0 ? 0 : -1}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <footer className="heatmap-legend">
+          <span>{t("statsHeatmapLess", locale)}</span>
+          {[0, 1, 2, 3, 4].map((level) => <i key={level} className={`heatmap-cell heat-${level}`} />)}
+          <span>{t("statsHeatmapMore", locale)}</span>
+       </footer>
+      </section>
+      )}
+
       <section className="stats-card panel">
         <header className="stats-card-header">
           <h3><Icon name="tag" size={16} /> {t("statsKeyword", locale)}</h3>
@@ -446,7 +525,7 @@ export function StatsView({ entries, locale, settings, today, search = "", onTog
                         <span className="stats-match-title">{entry.title}</span>
                         <span className="stats-match-cat">
                           <i style={{ background: entry.color ?? "var(--accent)" }} aria-hidden="true" />
-                          {categoryText(entry.category, locale)}
+                          {categoryText(entry.category, locale, settings)}
                         </span>
                         {entry.kind === "bill" && typeof entry.amount === "number" && (
                           <span className={entry.amount >= 0 ? "is-income" : "is-expense"}>{money(symbol, entry.amount)}</span>
@@ -460,45 +539,6 @@ export function StatsView({ entries, locale, settings, today, search = "", onTog
         )}
       </section>
 
-      {tab === "bills" && (
-      <section className="stats-card panel">
-        <header className="stats-card-header">
-          <h3><Icon name="calendar" size={16} /> {t("statsHeatmap", locale)}</h3>
-          <span className="stats-card-total">{t("statsHeatmapYearTotal", locale)} · {money(symbol, -heatmap.total)}</span>
-        </header>
-        <div className="heatmap-scroll">
-          <div className="heatmap-grid" role="img" aria-label={`${t("statsHeatmap", locale)} ${heatmap.year}`}>
-            <div className="heatmap-months">
-              {heatmap.monthLabels.map((label) => (
-                <span key={`${label.week}-${label.month}`} style={{ gridColumnStart: label.week + 1 }}>{monthLabel(label.month, locale)}</span>
-              ))}
-            </div>
-            <div className="heatmap-weeks">
-              {heatmap.weeks.map((week, weekIndex) => (
-                <div key={weekIndex} className="heatmap-week">
-                  {week.map((day) => (
-                    <button
-                      key={day.date}
-                      type="button"
-                      className={`heatmap-cell heat-${day.level}${day.inYear ? "" : " is-outside"}${day.date === today ? " is-today" : ""}`}
-                      title={day.inYear ? `${day.date} · ${day.total > 0 ? money(symbol, -day.total) : t("statsHeatmapLess", locale)}` : day.date}
-                      aria-label={`${day.date} ${day.total > 0 ? money(symbol, -day.total) : ""}`}
-                      onClick={() => day.inYear && onOpenDate?.(day.date)}
-                      tabIndex={day.inYear && day.total > 0 ? 0 : -1}
-                    />
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        <footer className="heatmap-legend">
-          <span>{t("statsHeatmapLess", locale)}</span>
-          {[0, 1, 2, 3, 4].map((level) => <i key={level} className={`heatmap-cell heat-${level}`} />)}
-          <span>{t("statsHeatmapMore", locale)}</span>
-       </footer>
-      </section>
-      )}
 
      <MotionPresence>{detail && createPortal(
         <div className="stats-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetail(null); }}>
@@ -509,21 +549,32 @@ export function StatsView({ entries, locale, settings, today, search = "", onTog
                 <h3>{detail.title}</h3>
                 <small>{detail.entries.length} {t("entriesSuffix", locale)}</small>
               </div>
+              <strong className={`stats-detail-total ${detail.total >= 0 ? "is-income" : "is-expense"}`}>{money(symbol, detail.total)}</strong>
               <button type="button" className="icon-button subtle" onClick={() => setDetail(null)} aria-label={t("close", locale)}><Icon name="close" size={15} /></button>
             </header>
-            <ul className="stats-match-list stats-detail-list">
-              {detail.entries.map((entry) => (
-                <li key={`${entry.id}:${entry.date}`}>
-                  <button type="button" onClick={() => { setDetail(null); onOpenDate?.(entry.date); }}>
-                    <span className="stats-match-date">{entry.date}</span>
-                    <span className="stats-match-title">{entry.title}</span>
-                    {typeof entry.amount === "number" && (
-                      <span className={entry.amount >= 0 ? "is-income" : "is-expense"}>{money(symbol, Math.abs(entry.amount))}</span>
-                    )}
+            <div className="stats-detail-table" role="table" aria-label={detail.title}>
+              <div className="stats-detail-head" role="row">
+                {(["date", "title", "amount"] as const).map(field => (
+                  <button key={field} type="button" role="columnheader"
+                    aria-sort={detailSort?.field === field ? (detailSort.direction === "asc" ? "ascending" : "descending") : "none"}
+                    className={`stats-detail-sort${detailSort?.field === field ? " is-active" : ""}`}
+                    onClick={() => toggleDetailSort(field)}>
+                    <span>{t(field === "date" ? "detailTime" : field === "title" ? "detailTitle" : "detailAmount", locale)}</span>
+                    <i aria-hidden="true"><b /><b /></i>
                   </button>
-                </li>
+                ))}
+              </div>
+              {sortedDetailEntries.map(entry => (
+                <button key={`${entry.id}:${entry.date}`} type="button" role="row" className="stats-detail-row"
+                  onClick={() => { setDetail(null); onOpenDate?.(entry.date); }}>
+                  <span role="cell">{entry.date} {formatEntryTime(entry, locale)}</span>
+                  <span role="cell">{titleFor(entry, locale)}</span>
+                  {typeof entry.amount === "number"
+                    ? <span role="cell" className={entry.amount >= 0 ? "is-income" : "is-expense"}>{money(symbol, Math.abs(entry.amount))}</span>
+                    : <span role="cell" />}
+                </button>
               ))}
-            </ul>
+            </div>
           </section>
         </div>,
         document.body,
@@ -649,7 +700,6 @@ function CategorySplitCard({
       const bar = barRef.current;
       if (!host || !bar) return;
       const hostRect = host.getBoundingClientRect();
-      const barRect = bar.getBoundingClientRect();
       const next: SplitConnector[] = [];
       const marks = subs.map((_, index) => {
         const segment = bar.children[index] as HTMLElement | undefined;
@@ -657,11 +707,10 @@ function CategorySplitCard({
         if (!segment || !target) return null;
         const segmentRect = segment.getBoundingClientRect();
         const targetRect = target.getBoundingClientRect();
-        const barLeft = barRect.left - hostRect.left;
         return {
           startX: segmentRect.left + segmentRect.width / 2 - hostRect.left,
           startY: segmentRect.top + segmentRect.height / 2 - hostRect.top,
-          endX: Math.max(0, barLeft - 1),
+          endX: targetRect.right - hostRect.left + 6,
           endY: targetRect.top + targetRect.height / 2 - hostRect.top,
         };
       });
@@ -679,7 +728,9 @@ function CategorySplitCard({
             endX: mark.endX,
             endY: mark.endY,
             color: category.color,
-            label: subShare > 0 ? `${subShare}%` : "",
+            label: sub.total ? compactMoney(symbol, sub.total) : "",
+            percent: subShare > 0 ? `${subShare}%` : "",
+            amountColor: sub.total >= 0 ? "#2f8f5b" : "#c0392b",
           });
         });
       }
@@ -691,7 +742,7 @@ function CategorySplitCard({
     const observer = new ResizeObserver(measure);
     observer.observe(categoryRef.current);
     return () => observer.disconnect();
-  }, [category.color, expanded, subs]);
+  }, [category.color, expanded, subs, symbol]);
 
   return (
     <li
@@ -712,31 +763,24 @@ function CategorySplitCard({
         ) : (
           <span className="stats-split-toggle-space" aria-hidden="true" />
         )}
-        <button
-          type="button"
-          className="stats-split-name-btn"
-          onClick={() => onOpenDetail({ title: label, color: category.color, entries: category.entries })}
-        >
+        <button type="button" className="stats-split-main-btn"
+          onClick={() => onOpenDetail({ title: label, color: category.color, entries: category.entries, total: category.total })}>
          <span className="stats-split-name">
           <span className="stats-split-name-text">
            {label}
-            <small>({category.count})</small>
             </span>
           </span>
+          <span ref={barRef} className="stats-split-bar" role="img" aria-label={`${label} ${compactMoney(symbol, category.total)} (${flowShare.toFixed(1)}%)`}>
+            {segments.map((segment, index) => (
+              <i key={segment.name} data-last={index === segments.length - 1 || undefined}
+                style={{ flexGrow: Math.max(1, Math.abs(segment.total)), "--seg-color": segment.color } as React.CSSProperties} />
+            ))}
+          </span>
+          <span className="stats-split-value">
+            <strong className={category.total >= 0 ? "is-income" : "is-expense"}>{compactMoney(symbol, category.total)}</strong>
+            <small>{flowShare.toFixed(1)}%</small>
+          </span>
         </button>
-        <span ref={barRef} className="stats-split-bar" role="img" aria-label={`${label} ${unsignedMoney(symbol, category.total)} (${flowShare.toFixed(1)}%)`}>
-          {segments.map((segment, index) => (
-            <i
-              key={segment.name}
-              data-last={index === segments.length - 1 || undefined}
-              style={{ flexGrow: Math.max(1, Math.abs(segment.total)), "--seg-color": segment.color } as React.CSSProperties}
-            />
-          ))}
-        </span>
-        <div className="stats-split-value">
-          <strong className={category.total >= 0 ? "is-income" : "is-expense"}>{unsignedMoney(symbol, category.total)}</strong>
-          <small>{flowShare.toFixed(1)}%</small>
-        </div>
       </div>
 
       {subs.length > 0 && expanded && (
@@ -747,7 +791,7 @@ function CategorySplitCard({
                 <button
                   type="button"
                   className="stats-split-sub"
-                  onClick={() => onOpenDetail({ title: catalogLabel(sub.name, locale), color: category.color, entries: sub.entries })}
+                  onClick={() => onOpenDetail({ title: compositeCategoryLabel(`${category.id}/${sub.name}`, locale), color: category.color, entries: sub.entries, total: sub.total })}
                 >
                   <span
                     className="stats-split-sub-name"
@@ -756,9 +800,8 @@ function CategorySplitCard({
                       else subNameRefs.current.delete(subIndex);
                     }}
                   >
-                    {catalogLabel(sub.name, locale)} <small>({sub.count})</small>
+                    {compositeCategoryLabel(`${category.id}/${sub.name}`, locale)} <small>({sub.count})</small>
                   </span>
-                  <strong className={sub.total >= 0 ? "is-income" : "is-expense"}>{unsignedMoney(symbol, sub.total)}</strong>
                 </button>
               </li>
             );
@@ -776,7 +819,13 @@ function CategorySplitCard({
           ))}
           {connectors.map((connector, index) =>
             connector.label ? (
-              <text key={`label-${index}`} x={(connector.x + connector.endX) / 2} y={connector.endY - 3} textAnchor="middle">{connector.label}</text>
+              <text key={`label-${index}`} className={connector.amountColor === "#2f8f5b" ? "is-income" : "is-expense"}
+                x={connector.endX - 2} y={connector.endY - 3} textAnchor="end">{connector.label}</text>
+            ) : null,
+          )}
+          {connectors.map((connector, index) =>
+            connector.percent ? (
+              <text key={`percent-${index}`} x={connector.endX - 2} y={connector.endY + 11} textAnchor="end">{connector.percent}</text>
             ) : null,
           )}
         </svg>

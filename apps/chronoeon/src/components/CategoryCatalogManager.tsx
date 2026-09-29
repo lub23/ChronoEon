@@ -183,7 +183,7 @@ export function CategoryCatalogManager({
     ? reassignOptions.filter((option) => {
       const source = categories.find((category) => category.id === pendingDelete.id);
       if (!source) return true;
-      if (mode === "bill") return option.value.split("/")[0] !== source.name;
+      if (mode === "bill") return option.value.split("/")[0] !== source.id;
       return option.value !== source.id;
     })
     : [];
@@ -193,7 +193,7 @@ export function CategoryCatalogManager({
     const source = categories.find((category) => category.id === id);
     const targets = reassignOptions.filter((option) => {
       if (!source) return true;
-      if (mode === "bill") return option.value.split("/")[0] !== source.name;
+      if (mode === "bill") return option.value.split("/")[0] !== source.id;
       return option.value !== source.id;
     });
     if (!count || !targets.length || !onReassignDelete) {

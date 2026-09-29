@@ -344,7 +344,7 @@ export function defaultCategoryForKind(
     const sub = primary.sub.includes(settings.bill.defaultSubCategoryId)
       ? settings.bill.defaultSubCategoryId
       : primary.sub[0];
-    return sub ? `${primary.name}/${sub}` : primary.name;
+    return sub ? `${primary.id}/${sub}` : primary.id;
   }
   const calendar = selectedCalendar(settings, calendarId);
   return calendar.defaultCategoryId || calendar.categories[0]?.id || "uncategorized";
@@ -355,11 +355,7 @@ export function categoryOptionsForKind(
   settings: ChronoEonSettings = DEFAULT_CHRONOEON_SETTINGS,
   calendarId?: string
 ): EntryCategoryOption[] {
-  if (kind === "bill") {
-    return settings.bill.categories.flatMap((category) => category.sub.length
-      ? category.sub.map((sub) => ({ value: `${category.name}/${sub}`, label: sub, group: category.name, color: category.color }))
-      : [{ value: category.name, label: category.name, group: category.name, color: category.color }]);
-  }
+  if (kind === "bill") return billCategoryOptions(settings);
   return selectedCalendar(settings, calendarId).categories.map((category) => ({
     value: category.id,
     label: category.name,
@@ -396,7 +392,17 @@ export function scheduleCategoryOptions(
   return options;
 }
 
-/** Filter options for the bill catalog, grouped by primary category name. */
+/** IDs identify catalogs even when their display names coincide. */
+export function billCategoryForValue(
+  value: string,
+  settings: ChronoEonSettings = DEFAULT_CHRONOEON_SETTINGS,
+): BillPrimaryCategory | undefined {
+  const primary = value.split("/")[0].toLocaleLowerCase();
+  return settings.bill.categories.find((category) => category.id.toLocaleLowerCase() === primary)
+    ?? settings.bill.categories.find((category) => category.name.toLocaleLowerCase() === primary);
+}
+
+/** Filter options use stable parent IDs, grouped by user-owned display names. */
 export function billCategoryOptions(
   settings: ChronoEonSettings = DEFAULT_CHRONOEON_SETTINGS,
   stored: string[] = []
@@ -405,13 +411,13 @@ export function billCategoryOptions(
   const seen = new Set<string>();
   for (const category of settings.bill.categories) {
     if (!category.sub.length) {
-      if (seen.has(category.name)) continue;
-      seen.add(category.name);
-      options.push({ value: category.name, label: category.name, color: category.color, group: category.name });
+      if (seen.has(category.id)) continue;
+      seen.add(category.id);
+      options.push({ value: category.id, label: category.name, color: category.color, group: category.name });
       continue;
     }
     for (const sub of category.sub) {
-      const value = `${category.name}/${sub}`;
+      const value = `${category.id}/${sub}`;
       if (seen.has(value)) continue;
       seen.add(value);
       options.push({ value, label: sub, color: category.color, group: category.name });
@@ -421,10 +427,10 @@ export function billCategoryOptions(
     if (seen.has(value)) continue;
     seen.add(value);
     const [primary, secondary] = value.split("/");
-    const owner = settings.bill.categories.find((category) => category.name === primary);
+    const owner = billCategoryForValue(value, settings);
     options.push({
       value,
-      label: secondary ?? value,
+      label: secondary || owner?.name || value,
       color: owner?.color,
       group: owner?.name ?? primary,
     });
@@ -436,11 +442,7 @@ export function billDirectionForCategory(
   category: string,
   settings: ChronoEonSettings = DEFAULT_CHRONOEON_SETTINGS,
 ): "income" | "expense" {
-  const [primaryName] = category.split("/");
-  const primary = settings.bill.categories.find((candidate) =>
-    candidate.id.toLocaleLowerCase() === primaryName.toLocaleLowerCase()
-    || candidate.name.toLocaleLowerCase() === primaryName.toLocaleLowerCase());
-  return primary?.direction ?? "expense";
+  return billCategoryForValue(category, settings)?.direction ?? "expense";
 }
 
 /** Bills store magnitudes; category direction is the single sign source. */
@@ -460,10 +462,7 @@ export function resolveEntryColor(
   calendarId?: string
 ): string {
   if (kind === "bill") {
-    const [primary] = category.split("/");
-    const billCategory = settings.bill.categories.find((candidate) =>
-      candidate.id.toLocaleLowerCase() === primary.toLocaleLowerCase()
-      || candidate.name.toLocaleLowerCase() === primary.toLocaleLowerCase());
+    const billCategory = billCategoryForValue(category, settings);
     if (billCategory) return billCategory.color;
   }
 

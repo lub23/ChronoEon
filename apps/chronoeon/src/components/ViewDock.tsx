@@ -1,4 +1,5 @@
 import { MotionPresence } from "./MotionPresence";
+import type { InsightsTab } from "./StatsView";
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import type { AppView, Locale } from "../domain/entry";
 import { t } from "../i18n";
@@ -12,6 +13,8 @@ interface ViewDockProps {
   timerActive?: boolean;
   /** Visible civil-day columns in Day view, 1-6. */
   dayCount: number;
+  /** Insights content type; the Dock owns this switch so no extra toolbar is needed. */
+  insightsTab?: InsightsTab;
   /**
    * Mini window: the same dock minus the week, month, 4/5/6-day and
    * statistics entries, plus the "restore the normal window" action.
@@ -19,6 +22,7 @@ interface ViewDockProps {
   mini?: boolean;
   onViewChange: (view: AppView) => void;
   onDayCountChange: (days: number) => void;
+  onInsightsTabChange?: (tab: InsightsTab) => void;
   /** Mini only: the shared filter trigger occupies the old New slot. */
   filterControl?: ReactNode;
   onTimer: () => void;
@@ -56,9 +60,11 @@ export function ViewDock({
   calendarView = "day",
   timerActive = false,
   dayCount,
+  insightsTab = "bills",
   mini = false,
   onViewChange,
   onDayCountChange,
+  onInsightsTabChange,
   filterControl,
   onTimer,
   onQuickNote,
@@ -66,7 +72,9 @@ export function ViewDock({
   children,
 }: ViewDockProps) {
   const [switchOpen, setSwitchOpen] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState(false);
   const switchGroupRef = useRef<HTMLDivElement>(null);
+  const insightsGroupRef = useRef<HTMLDivElement>(null);
   const calendarActive = activeView === "day" || activeView === "week";
   const calendarIcon: IconName = calendarView === "week" ? "week" : "day";
   const calendarLabel = calendarView === "week" ? t("week", locale) : t("day", locale);
@@ -89,6 +97,19 @@ export function ViewDock({
   }, [switchOpen]);
 
   useEffect(() => { if (!calendarActive) setSwitchOpen(false); }, [calendarActive]);
+  useEffect(() => {
+    if (!insightsOpen) return;
+    const dismiss = (event: Event) => {
+      if (insightsGroupRef.current?.contains(event.target as Node)) return;
+      if (event.target instanceof Element && event.target.closest(".glass-select-popup")) return;
+      setInsightsOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); setInsightsOpen(false); } };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("pointerdown", dismiss); window.removeEventListener("keydown", onKey); };
+  }, [insightsOpen]);
+  useEffect(() => { if (activeView !== "insights") setInsightsOpen(false); }, [activeView]);
   return (
     <nav className={`view-dock is-icon-only${mini ? " is-mini" : ""}`} aria-label={t("views", locale)}>
       {mini && filterControl && <>{filterControl}<span className="view-dock-divider" aria-hidden="true" /></>}
@@ -173,19 +194,45 @@ export function ViewDock({
           <QuickNoteGlyph />
         </button>
 
-        {dockItems.filter((item) => !(mini && item.view === "insights")).map((item) => (
-          <button
-            key={item.view}
-            className={activeView === item.view ? "view-dock-item is-active" : "view-dock-item"}
-            type="button"
-            onClick={() => { setSwitchOpen(false); onViewChange(item.view); }}
-            aria-label={t(item.label, locale)}
-            aria-current={activeView === item.view ? "page" : undefined}
-            title={t(item.label, locale)}
-          >
-            <Icon name={item.icon} size={18} />
-          </button>
-        ))}
+        {dockItems.filter((item) => !(mini && item.view === "insights")).map((item) => item.view === "insights"
+          ? <div key={item.view} className="view-dock-day-group" ref={insightsGroupRef}>
+              <button
+                className={activeView === item.view ? "view-dock-item is-active" : "view-dock-item"}
+                type="button"
+                onClick={() => { if (activeView === item.view) setInsightsOpen(open => !open); else onViewChange(item.view); }}
+                aria-label={t(item.label, locale)}
+                aria-current={activeView === item.view ? "page" : undefined}
+                aria-expanded={activeView === item.view ? insightsOpen : undefined}
+                title={t(item.label, locale)}
+              >
+                <Icon name={item.icon} size={18} />
+              </button>
+              <MotionPresence>{insightsOpen && (
+                <div className="view-dock-days-menu" role="menu" aria-label={t("insights", locale)}>
+                  {(["bills", "tasks", "items"] as const).map((tab) => (
+                    <button key={tab} type="button" role="menuitemradio" aria-checked={insightsTab === tab}
+                      className={insightsTab === tab ? "is-selected" : ""}
+                      onClick={() => { onInsightsTabChange?.(tab); setInsightsOpen(false); }}>
+                      {insightsTab === tab ? <Icon name="check" size={12} /> : <i />}
+                      <Icon name={tab === "bills" ? "coins" : tab === "tasks" ? "clock" : "box"} size={12} />
+                      {t(tab === "bills" ? "statsBills" : tab === "tasks" ? "statsTasks" : "items", locale)}
+                    </button>
+                  ))}
+                </div>
+              )}</MotionPresence>
+            </div>
+          : <button
+              key={item.view}
+              className={activeView === item.view ? "view-dock-item is-active" : "view-dock-item"}
+              type="button"
+              onClick={() => { setSwitchOpen(false); onViewChange(item.view); }}
+              aria-label={t(item.label, locale)}
+              aria-current={activeView === item.view ? "page" : undefined}
+              title={t(item.label, locale)}
+            >
+              <Icon name={item.icon} size={18} />
+            </button>
+        )}
       </div>
       <span className="view-dock-divider" aria-hidden="true" />
       <button

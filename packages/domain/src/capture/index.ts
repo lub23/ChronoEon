@@ -1,11 +1,11 @@
 import type { EntryDraft, EntryKind, Locale } from "../entry";
-import { billDirectionForCategory, categoryOptionsForKind, type ChronoEonSettings } from "../settings";
+import { categoryOptionsForKind, type ChronoEonSettings } from "../settings";
 import { extractNote } from "./note";
 import { inferCategory } from "./category";
-import { inferLocation } from "./location";
+import { inferLocation, inferLocationCandidates } from "./location";
 
 export { inferCategory } from "./category";
-export { inferLocation } from "./location";
+export { inferLocation, inferLocationCandidates } from "./location";
 import { extractKind } from "./kind";
 import { extractMoney } from "./money";
 import { extractPlace } from "./place";
@@ -40,22 +40,22 @@ export interface CaptureResult {
   decisions: CaptureFieldDecisions;
 }
 
-/** Sentence/comma/semicolon separators split quick notes into draft items.
-    Dots and commas inside decimal or grouped numbers stay with the number. */
+/** Only periods, semicolons and newlines split notes; commas stay in the item.
+    A period between digits belongs to the decimal number. */
 export function splitCaptureItems(input: string): string[] {
   const items: string[] = [];
   let start = 0;
   const commit = (end: number) => {
-    const item = input.slice(start, end).trim().replace(/^[,，.。;；]+|[,，.。;；]+$/g, "");
+    const item = input.slice(start, end).trim();
     if (item) items.push(item);
     start = end + 1;
   };
   for (let index = 0; index < input.length; index += 1) {
     const character = input[index];
-    if (character !== "." && character !== "," && character !== "，" && character !== "。" && character !== ";" && character !== "；") continue;
+    if (character !== "." && character !== "。" && character !== ";" && character !== "；" && character !== "\n" && character !== "\r") continue;
     const previous = input[index - 1] ?? "";
     const next = input[index + 1] ?? "";
-    if ((character === "." || character === ",") && /\d/.test(previous) && /\d/.test(next)) continue;
+    if (character === "." && /\d/.test(previous) && /\d/.test(next)) continue;
     commit(index);
   }
   if (start < input.length) commit(input.length);
@@ -79,8 +79,9 @@ export function parseCapture(input: string, { now, locale, settings, history = [
     : new Set(categoryOptionsForKind(kind, settings, settings.defaultCalendarID)
       .map((option) => option.value));
   if (kind === "bill") {
-    for (const category of settings.bill.categories.filter((candidate) => billDirectionForCategory(candidate.name, settings) === "expense")) {
-      for (const child of category.sub) availableCategories.add(`${category.name}/${child}`);
+    for (const category of settings.bill.categories.filter((candidate) => candidate.direction === "expense")) {
+      availableCategories.add(category.id);
+      for (const child of category.sub) availableCategories.add(`${category.id}/${child}`);
     }
   }
   const decisions = provisionalIndex.decide(title, { kind, availableCategories });

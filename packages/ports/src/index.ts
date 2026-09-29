@@ -1,4 +1,12 @@
-import type { Entry, EntryDraft, EntryKind, Locale } from "@chronoeon/domain";
+import type { Item, ChronoEonSettings, Entry, EntryDraft, EntryKind, Locale } from "@chronoeon/domain";
+
+/** Items include disposed history. Reverse bill links are derived from list(). */
+export interface ItemStore {
+  list(): Promise<Item[]>;
+  /** Full upsert; current category settings validate new bill bindings. */
+  save(item: Item, settings: ChronoEonSettings): Promise<Item>;
+  subscribe?(listener: () => void): () => void;
+}
 
 export interface EntryQuery {
   from?: string;

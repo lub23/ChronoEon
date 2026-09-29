@@ -15,6 +15,7 @@ export class SyncScheduler {
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private unsubscribe: (() => void) | undefined;
   private disposed = false;
+  private paused = false;
   private running: Promise<void> | null = null;
   private lastEdit = Date.now();
   constructor(private readonly engine: Pick<SyncEngine, "run">, private readonly store: Pick<SyncStore, "subscribe" | "status" | "flush">,
@@ -31,19 +32,19 @@ export class SyncScheduler {
   }
   private debounce(): void {
     clearTimeout(this.debounceTimer);
-    if (!this.disposed) this.debounceTimer = setTimeout(() => {
+    if (!this.disposed && !this.paused) this.debounceTimer = setTimeout(() => {
       this.debounceTimer = undefined; void this.trigger();
     }, Math.max(0, this.lastEdit + 60_000 - Date.now()));
   }
   private retry(timestamp: number): void {
     clearTimeout(this.retryTimer);
-    if (!this.disposed) this.retryTimer = setTimeout(() => {
+    if (!this.disposed && !this.paused) this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined; void this.trigger();
     }, Math.max(1000, Math.min(15 * 60_000, timestamp - Date.now())));
   }
 
   private async poll(): Promise<void> {
-    if (this.disposed || !this.online()) return;
+    if (this.disposed || this.paused || !this.online()) return;
     // A pending local debounce already owns the next run; don't shorten its
     // quiet period or clear it. Its eventual trigger also fetches the remote.
     if (this.debounceTimer) return;
@@ -63,7 +64,7 @@ export class SyncScheduler {
     this.retry(Date.now() + 60_000);
   }
   trigger(options: SyncRunOptions = {}): Promise<void> {
-    if (this.disposed) return Promise.resolve();
+    if (this.disposed || this.paused) return Promise.resolve();
     if (options.rebuildSnapshot && !this.rebuilding) this.rebuildRequested = true;
     if (this.running) return this.running;
     clearTimeout(this.snapshotTimer); this.snapshotTimer = undefined;
@@ -74,23 +75,52 @@ export class SyncScheduler {
         this.rebuilding = this.rebuildRequested;
         this.rebuildRequested = false;
         await this.run(this.rebuilding);
-      } while (this.rebuildRequested && !this.disposed);
+      } while (this.rebuildRequested && !this.disposed && !this.paused);
     })().catch((error) => this.recover(error)).finally(() => { this.running = null; this.rebuilding = false; this.rebuildRequested = false; });
     return this.running;
   }
+  /** Drain any in-flight run and suppress every automatic/manual wake-up until
+   * a maintenance sequence using the same engine has finished. */
+  async runExclusive<T>(work: () => Promise<T>): Promise<T> {
+    if (this.disposed) throw new Error("SYNC_CANCELLED");
+    if (this.paused) throw new Error("SYNC_MAINTENANCE_BUSY");
+    this.paused = true;
+    this.rebuildRequested = false;
+    clearTimeout(this.debounceTimer); this.debounceTimer = undefined;
+    clearTimeout(this.retryTimer); this.retryTimer = undefined;
+    clearTimeout(this.snapshotTimer); this.snapshotTimer = undefined;
+    try {
+      await this.running;
+      if (this.disposed) throw new Error("SYNC_CANCELLED");
+      if (!this.online()) throw new Error("SYNC_OFFLINE");
+      this.report(null, true);
+      return await work();
+    } finally {
+      this.paused = false;
+      if (!this.disposed) {
+        this.report(null, false);
+        await this.scheduleNext().catch((error) => this.recover(error));
+      }
+    }
+  }
+
   private async run(rebuildSnapshot: boolean): Promise<void> {
     await this.store.flush();
-    if (this.disposed) return;
+    if (this.disposed || this.paused) return;
     if (!this.online()) { this.report(new Error("SYNC_OFFLINE"), false); return; }
     this.report(null, true);
     try {
       const result = await this.engine.run({ rebuildSnapshot });
-      if (!this.disposed) this.report(result, false);
+      if (!this.disposed && !this.paused) this.report(result, false);
     } catch (error) {
-      if (!this.disposed) this.report(error instanceof Error ? error : new Error(String(error)), false);
+      if (!this.disposed && !this.paused) this.report(error instanceof Error ? error : new Error(String(error)), false);
     }
-    if (this.disposed) return;
+    await this.scheduleNext();
+  }
+  private async scheduleNext(): Promise<void> {
+    if (this.disposed || this.paused) return;
     const status = await this.store.status();
+    if (this.disposed || this.paused) return;
     if (status.failures) this.retry(status.nextAttempt);
     else {
       if (status.pending && !this.debounceTimer) this.debounce();

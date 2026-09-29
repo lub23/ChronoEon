@@ -66,6 +66,19 @@ function chooseGranularity(label: string) {
   act(() => [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(button => button.textContent === label)!.click());
 }
 
+describe("compact statistics layout", () => {
+  it.each(["en", "zh"] as const)("keeps four headlines together and the full year before tag search (%s)", (locale) => {
+    act(() => root.render(<StatsView entries={[bill("purchase", "food/正餐", -120)]} locale={locale} settings={DEFAULT_CHRONOEON_SETTINGS} today="2026-09-01" />));
+    expect(host.querySelectorAll(".stats-kpi-row--headline > .stats-kpi")).toHaveLength(4);
+    const heatmap = host.querySelector<HTMLElement>(".heatmap-grid")!;
+    const weeks = heatmap.querySelectorAll(".heatmap-week");
+    expect(Number(heatmap.style.getPropertyValue("--heatmap-weeks"))).toBe(weeks.length);
+    expect(heatmap.querySelectorAll("button:not(.is-outside)")).toHaveLength(365);
+    const keyword = host.querySelector(".stats-keyword-input")!;
+    expect(heatmap.compareDocumentPosition(keyword) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
 describe("bill category split", () => {
   it("keeps the concise Insights title, date controls, and today marker", () => {
     act(() => {
@@ -93,12 +106,11 @@ describe("bill category split", () => {
           locale="zh"
           settings={DEFAULT_CHRONOEON_SETTINGS}
           today="2026-09-02"
+          tab="tasks"
           onToggle={onToggle}
         />,
       );
     });
-    act(() => host.querySelectorAll<HTMLButtonElement>(".stats-tabs button")[1]?.click());
-
     const cards = [...host.querySelectorAll<HTMLElement>(".stats-card")];
     const overdue = cards.find((card) => card.querySelector("h3")?.textContent?.includes("遗留待办"))!;
     const completed = cards.find((card) => card.querySelector("h3")?.textContent?.includes("已完成"))!;
@@ -144,7 +156,7 @@ describe("bill category split", () => {
     expect(host.querySelector(".review-chart-tooltip")?.textContent).toContain("2026年9月1日");
 
     act(() => {
-      host.querySelector<HTMLButtonElement>(".stats-split-name-btn")?.click();
+      host.querySelector<HTMLButtonElement>(".stats-split-main-btn")?.click();
     });
     expect(document.querySelector(".stats-detail")).toBeTruthy();
     expect(document.querySelector(".stats-detail-backdrop")?.parentElement).toBe(document.body);
@@ -192,16 +204,47 @@ describe("bill category split", () => {
     expect(new Set(labels).size).toBe(labels.length);
     expect(labels.at(-1)).toBe("12/31");
   });
+
+  it("cycles category details through unsorted, ascending and descending columns", async () => {
+    const entries = [
+      bill("third", "expense", -30),
+      bill("first", "expense", -10),
+      bill("second", "expense", -20),
+    ].map((entry, index) => ({ ...entry, date: `2026-09-0${3 - index}`, start: ["08:00", "09:00", "10:00"][index] }));
+
+    act(() => {
+      root.render(<StatsView entries={entries} locale="zh" settings={DEFAULT_CHRONOEON_SETTINGS} today="2026-09-03" />);
+    });
+    act(() => host.querySelector<HTMLButtonElement>(".stats-split-main-btn")!.click());
+
+    const detailHost = () => [...document.querySelectorAll<HTMLElement>(".stats-detail-backdrop")]
+      .filter(node => !node.querySelector(".stats-detail")?.closest("[inert]")).at(-1)!;
+    const rows = () => [...detailHost().querySelectorAll<HTMLElement>(".stats-detail-row")];
+    expect(rows()[0].textContent).toContain("2026-09-01");
+    expect(document.querySelector<HTMLButtonElement>(".stats-detail-sort")?.getAttribute("aria-sort")).toBe("none");
+
+    await act(async () => { document.querySelector<HTMLButtonElement>(".stats-detail-sort")!.click(); });
+    expect(document.querySelector<HTMLButtonElement>(".stats-detail-sort")?.getAttribute("aria-sort")).toBe("ascending");
+    expect(rows()[0].textContent).toContain("2026-09-01 10:00");
+
+    await act(async () => { document.querySelector<HTMLButtonElement>(".stats-detail-sort")!.click(); });
+    expect(document.querySelector<HTMLButtonElement>(".stats-detail-sort")?.getAttribute("aria-sort")).toBe("descending");
+    const descendingRows = rows();
+    expect(descendingRows[0].textContent).toContain("2026-09-03 08:00");
+
+    await act(async () => { document.querySelector<HTMLButtonElement>(".stats-detail-sort")!.click(); });
+    expect(document.querySelector<HTMLButtonElement>(".stats-detail-sort")?.getAttribute("aria-sort")).toBe("none");
+    expect(rows()[0].textContent).toContain("2026-09-01 10:00");
+  });
 });
 
 
 describe("remembered Insights selections", () => {
-  const renderStats = (today = "2026-09-10") => act(() => root.render(<StatsView entries={[]} locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} today={today} />));
+  const renderStats = (today = "2026-09-10") => act(() => root.render(<StatsView entries={[]} locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} today={today} tab="bills" />));
   const revisit = (today?: string) => { act(() => root.render(null)); renderStats(today); };
 
-  it("restores the tab, relative period, granularity and keyword after a view switch", () => {
+  it("remembers period, granularity and keyword after a view switch", () => {
     renderStats();
-    act(() => host.querySelectorAll<HTMLButtonElement>(".stats-tabs button")[1].click());
     act(() => host.querySelectorAll<HTMLButtonElement>(".stats-range button")[3].click());
     act(() => host.querySelector<HTMLButtonElement>(".review-granularity button")!.click());
     act(() => [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(button => button.textContent === "By month")!.click());
@@ -211,7 +254,6 @@ describe("remembered Insights selections", () => {
       search.dispatchEvent(new Event("input", { bubbles: true }));
     });
     revisit();
-    expect(host.querySelectorAll(".stats-tabs button")[1].getAttribute("aria-selected")).toBe("true");
     expect(host.querySelectorAll(".stats-range button")[3].classList.contains("is-active")).toBe(true);
     expect(host.querySelector(".review-granularity")?.textContent).toContain("By month");
     expect(host.querySelector<HTMLInputElement>(".stats-keyword-input input")?.value).toBe("project");
@@ -241,8 +283,8 @@ describe("weekly and selected category review curves", () => {
     ] },
     calendars: DEFAULT_CHRONOEON_SETTINGS.calendars.map(calendar => ({ ...calendar, categories: [{ id: "work", name: "Work", color: "#448866" }] })),
   };
-  function renderReview(locale: "en" | "zh" = "en") {
-    act(() => root.render(<StatsView entries={[bill("meal", "food/正餐", 120), bill("salary", "income/Salary", 80), task("work", "open")]} locale={locale} settings={catalog} today="2026-09-12" />));
+  function renderReview(locale: "en" | "zh" = "en", tab: "bills" | "tasks" = "bills") {
+    act(() => root.render(<StatsView entries={[bill("meal", "food/正餐", 120), bill("salary", "income/Salary", 80), task("work", "open")]} locale={locale} settings={catalog} today="2026-09-12" tab={tab} />));
   }
   it.each([["2026-09-13", false], ["2026-09-14", true]] as const)("shows the weekly option only for at least two weeks (%s)", (end, weekly) => {
     localStorage.setItem("chronoeon.preference.stats-custom-range", JSON.stringify({ start: "2026-09-01", end }));
@@ -290,12 +332,10 @@ describe("weekly and selected category review curves", () => {
     expect(host.querySelector('[data-testid="review-average-line-expenseTotal"]')).toBeNull();
     expect(host.querySelector('[data-testid="review-average-line-incomeTotal"]')).toBeTruthy();
     // Bill and schedule category selections are independent.
-    act(() => host.querySelectorAll<HTMLButtonElement>(".stats-tabs button")[1].click());
+    act(() => root.render(null)); renderReview("zh", "tasks");
     expect(host.querySelector('.review-chart-line[data-series="total"]')).toBeTruthy();
     expect(host.querySelector('[data-testid="review-average-line-scheduleTotal"]')).toBeTruthy();
     expect(host.querySelector('.review-chart-line[data-series="category:work"]')).toBeTruthy();
     expect(host.querySelector('.review-chart-line[data-series="category:food"]')).toBeNull();
-    act(() => host.querySelectorAll<HTMLButtonElement>(".stats-tabs button")[0].click());
-    expect(host.querySelector('.review-chart-line[data-series="total"]')).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { categoryOptionsForKind, defaultCategoryForKind, type ChronoEonSettings, type Locale, type TimerStartOptions } from "@chronoeon/domain";
+import { categoryOptionsForKind, defaultCategoryForKind, inferLocationCandidates, type CaptureHistoryItem, type ChronoEonSettings, type Locale, type TimerStartOptions } from "@chronoeon/domain";
 import { categoryLabel, t } from "../i18n";
 import { AttachmentField } from "./AttachmentField";
 import { GlassSelect } from "./GlassSelect";
@@ -19,6 +19,7 @@ interface TimerStartFormProps {
   onStart: (options: TimerStartOptions) => void;
   onNotice?: (message: string, tone?: "normal" | "warning") => void;
   onTitleChange?: (title: string) => void;
+  history?: readonly CaptureHistoryItem[];
 }
 
 export function timerCategoryOptions(settings: ChronoEonSettings, locale: Locale) {
@@ -44,13 +45,14 @@ export function TimerCategorySelect({ locale, settings, value, onChange }: { loc
  * promise (focused on open, Enter starts); location, note and photos are
  * optional and can also be filled in after the clock is running.
  */
-export function TimerStartForm({ locale, settings, category, onCategoryChange, showCategory = false, autoFocus = true, disabled = false, onStart, onNotice, onTitleChange }: TimerStartFormProps) {
+export function TimerStartForm({ locale, settings, category, onCategoryChange, showCategory = false, autoFocus = true, disabled = false, onStart, onNotice, onTitleChange, history = [] }: TimerStartFormProps) {
   const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
   const [note, setNote] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [locating, setLocating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const locationTouchedRef = useRef(false);
   const today = useMemo(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -61,6 +63,17 @@ export function TimerStartForm({ locale, settings, category, onCategoryChange, s
     const timeout = window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 30);
     return () => window.clearTimeout(timeout);
   }, [autoFocus]);
+
+  const locationSuggestions = useMemo(
+    () => settings.locationAutofill && title.trim() ? inferLocationCandidates(title.trim(), history, today) : [],
+    [history, settings.locationAutofill, title, today],
+  );
+
+  useEffect(() => {
+    if (!settings.locationAutofill || locationTouchedRef.current || location) return;
+    const suggestion = locationSuggestions[0]?.value;
+    if (suggestion) setLocation(suggestion);
+  }, [location, locationSuggestions, settings.locationAutofill]);
 
   function begin() {
     if (disabled) return;
@@ -122,9 +135,17 @@ export function TimerStartForm({ locale, settings, category, onCategoryChange, s
               <Icon name="map-pin" size={14} />
             </button>
           </span>
-          <input value={location} onChange={(event) => setLocation(event.target.value)} placeholder={t("locationPlaceholder", locale)} />
+          <input value={location} onChange={(event) => { locationTouchedRef.current = true; setLocation(event.target.value); }} placeholder={t("locationPlaceholder", locale)} />
         </label>
       </div>
+      {locationSuggestions.length > 1 && (
+        <div className="field-suggestions" role="group" aria-label={t("location", locale)}>
+          {locationSuggestions.map(suggestion => (
+            <button key={suggestion.value} type="button" className={location === suggestion.value ? "is-active" : ""}
+              onClick={() => { locationTouchedRef.current = true; setLocation(suggestion.value); }}>{suggestion.value}</button>
+          ))}
+        </div>
+      )}
       <label className="field-label timer-note-field"><span>{t("note", locale)}</span>
         <textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder={t("notePlaceholder", locale)} />
       </label>

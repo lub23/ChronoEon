@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { dueReminders, formatEntryTime, type DueReminder, type Entry, type Locale } from "@chronoeon/domain";
+import { dueReminders, formatEntryTime, type ChronoEonSettings, type DueReminder, type Entry, type Locale } from "@chronoeon/domain";
 import { categoryLabel, compositeCategoryLabel, t } from "../i18n";
 import { backgroundTimingSupported, configureBackground, consumeBackgroundReminders, acknowledgeBackgroundReminders } from "../platform/background";
 import {
@@ -17,19 +17,19 @@ const POLL_MS = 30_000;
 const DELIVERED_KEY = "chronoeon.reminders.delivered";
 const MAX_REMEMBERED = 400;
 
-function reminderCategory(entry: Entry, locale: Locale): string {
+function reminderCategory(entry: Entry, locale: Locale, settings?: ChronoEonSettings): string {
   return entry.kind === "bill"
-    ? compositeCategoryLabel(entry.category, locale)
-    : categoryLabel(entry.category, locale, entry.category);
+    ? compositeCategoryLabel(entry.category, locale, settings)
+    : categoryLabel(entry.category, locale, entry.category, settings);
 }
 
-function reminderDetail(entry: Entry, locale: Locale): string {
+function reminderDetail(entry: Entry, locale: Locale, settings?: ChronoEonSettings): string {
   const when = entry.allDay ? t("allDay", locale) : formatEntryTime(entry, locale);
   return [
     when ? `${t("reminderStarts", locale)} ${when}` : "",
     entry.location || "",
     entry.note?.replace(/\s+/g, " ").trim().slice(0, 140) || "",
-    reminderCategory(entry, locale),
+    reminderCategory(entry, locale, settings),
   ].filter(Boolean).join(" · ");
 }
 
@@ -54,6 +54,7 @@ function writeDelivered(keys: string[]): void {
 export interface ReminderOptions {
   entries: Entry[];
   locale: Locale;
+  settings?: ChronoEonSettings;
   enabled: boolean;
   ready?: boolean;
   onError?: (error: unknown) => void;
@@ -69,7 +70,7 @@ export interface ReminderController {
   reconcile: () => void;
 }
 
-export function useReminders({ entries, locale, enabled, ready = true, onError, onRemind }: ReminderOptions): ReminderController {
+export function useReminders({ entries, locale, settings, enabled, ready = true, onError, onRemind }: ReminderOptions): ReminderController {
   const [permission, setPermission] = useState<NotificationPermissionState>("denied");
   const native = backgroundTimingSupported();
   const delivered = useRef<Set<string>>(new Set(native ? [] : readDelivered()));
@@ -80,6 +81,7 @@ export function useReminders({ entries, locale, enabled, ready = true, onError, 
   const readyRef = useRef(ready); readyRef.current = ready;
   const entriesRef = useRef(entries);
   const localeRef = useRef(locale);
+  const settingsRef = useRef(settings); settingsRef.current = settings;
   const remindRef = useRef(onRemind);
   entriesRef.current = entries;
   localeRef.current = locale;
@@ -114,7 +116,7 @@ export function useReminders({ entries, locale, enabled, ready = true, onError, 
 
     const announceOne = (reminder: (typeof due)[number]) => {
       const title = reminder.entry.title || t("reminderTitle", activeLocale);
-      const detail = reminderDetail(reminder.entry, activeLocale);
+      const detail = reminderDetail(reminder.entry, activeLocale, settingsRef.current);
       void showSystemNotification({
         title: `🔔 ${t("reminderTitle", activeLocale)}`,
         body: detail ? `${title}\n${detail}` : title,

@@ -329,6 +329,25 @@ describe("unified capture and ask dialog", () => {
     expect(card.querySelector(".capture-review-kind .glass-select.is-compact")).toBeNull();
   });
 
+  it.each([false, "reject"] as const)("keeps the review editable when saving fails (%s)", async (failure) => {
+    const onConfirm = vi.fn(async () => {
+      if (failure === "reject") throw new Error("Save failed");
+      return false;
+    });
+    render(onConfirm);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    act(() => { setValue.call(textarea, "明天 14:00 开会，讨论预算"); textarea.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => { host.querySelector<HTMLButtonElement>(".chat-send")!.click(); await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(host.querySelectorAll(".capture-review-card")).toHaveLength(1);
+    await act(async () => { host.querySelector<HTMLButtonElement>(".capture-review-confirm")!.click(); });
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(host.querySelector(".chat-capture-review")).toBeTruthy();
+    expect(host.querySelector<HTMLButtonElement>(".capture-review-confirm")!.disabled).toBe(false);
+    expect(host.querySelector<HTMLInputElement>(".capture-review-title-input")!.disabled).toBe(false);
+  });
+
   it("auto-saves an unchanged offline capture after ten seconds", async () => {
     vi.useFakeTimers({ now: new Date(), shouldAdvanceTime: true });
     try {
@@ -342,7 +361,9 @@ describe("unified capture and ask dialog", () => {
       expect(host.querySelector(".chat-capture-review")).toBeTruthy();
       await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
       expect(onConfirm).toHaveBeenCalledTimes(1);
-      expect(host.textContent).toContain("已保存");
+      expect(host.querySelector(".chat-capture-review")).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(onConfirm).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
