@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
 from io import BytesIO
 import json
+import re
 from pathlib import Path
 import sys
 import uuid
@@ -27,6 +28,12 @@ HEADERS = ["日期", "标题", "项目", "明细", "金额", "支付方式", "�
 
 class LedgerError(ValueError):
     pass
+
+
+def parse_tags(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [tag for tag in re.split(r"[,\s、，]+", value) if tag]
 
 
 def rich_text(element: ET.Element | None) -> str | None:
@@ -85,11 +92,13 @@ def convert(workbook: Path) -> tuple[dict, dict]:
             raise LedgerError("Duplicate primary category headers")
         by_name = {category["name"]: category for category in categories}
         sheet_rows = sheets["收支"].findall("s:sheetData/s:row", NS)
+        stale_date_caches = 0
         if not sheet_rows or [cell_value(cell) for cell in sheet_rows[0] if cell.get("r").rstrip("0123456789") in "ABCDEFGHIJ"] != HEADERS:
             raise LedgerError("Transaction columns do not match the supported workbook schema")
         transactions = []
         duplicates = Counter()
         timed = 0
+        normalized_midnight = 0
         for row in sheet_rows[1:]:
             number = int(row.get("r"))
             cells = {cell.get("r").rstrip("0123456789"): cell for cell in row}
@@ -121,13 +130,18 @@ def convert(workbook: Path) -> tuple[dict, dict]:
             except (InvalidOperation, ValueError, OverflowError):
                 raise LedgerError(f"Invalid date or positive cent amount at row {number}") from None
             if values["I"] != str(date.year) or values["J"] != str(date.month):
-                raise LedgerError(f"Year/month formula cache differs from date at row {number}")
+                stale_date_caches += 1
+            # Ledger rows are never all-day events. A workbook 00:00 is kept as a
+            # real clock time and normalized to 01:00 so it remains visible in Day
+            # view and cannot be mistaken for the absence of a start time.
+            if date.hour == 0 and date.minute == 0:
+                date += timedelta(hours=1)
+                normalized_midnight += 1
             item = {"row": number, "date": date.date().isoformat(), "title": values["B"],
                     "categoryId": category["id"], "subcategory": values["D"], "amountCents": int(cents),
-                    "payment": values["F"], "tags": [values["H"]] if values["H"] else []}
-            if seconds:
-                item["time"] = date.strftime("%H:%M")
-                timed += 1
+                    "payment": values["F"], "tags": parse_tags(values["H"]),
+                    "time": date.strftime("%H:%M")}
+            timed += 1
             if values["G"]:
                 item["note"] = values["G"]
             # Workbook rows have no stable ID. Content + occurrence preserves
@@ -156,6 +170,8 @@ def convert(workbook: Path) -> tuple[dict, dict]:
                    "currency": "CNY", "categories": categories, "transactions": transactions, "summary": summary}
         report = {"source": payload["source"], "summary": summary, "primaryCategories": len(categories),
                   "subcategories": sum(len(category["sub"]) for category in categories), "timedTransactions": timed,
+                  "normalizedMidnight": normalized_midnight,
+                  "staleDateCaches": stale_date_caches,
                   "exactDuplicateGroups": sum(count > 1 for count in duplicates.values()),
                   "monthly": {month: summarize([item for item in transactions if item["date"].startswith(month)]) for month in sorted({item["date"][:7] for item in transactions})}}
     # Ensure a concurrent spreadsheet edit did not race conversion.

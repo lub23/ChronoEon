@@ -14,6 +14,24 @@ const history: CaptureHistoryItem[] = [
 ];
 
 describe("capture field decision index", () => {
+  it("recognises custom payment names literally, including regex punctuation", () => {
+    const custom = createDefaultSettings("en");
+    custom.calendars[0].paymentMethods = [{ id: "custom-pay", name: "Test+Pay" }];
+    expect(parseCapture("Coffee 20 yuan Test+Pay", { now, settings: custom, locale: "en" }).draft.payment).toBe("custom-pay");
+    expect(parseCapture("Coffee 20 yuan TestttPay", { now, settings: custom, locale: "en" }).draft.payment).toBeUndefined();
+  });
+  it("selects the dominant kind rather than the first kind in display order", () => {
+    const index = new CaptureDecisionIndex([
+      { kind: "event", title: "Review", category: "alpha", date: "2026-09-01" },
+      { kind: "task", title: "Review", category: "beta", date: "2026-09-02" },
+      { kind: "task", title: "Review", category: "beta", date: "2026-09-03" },
+    ]);
+    expect(index.decide("Review").kind.selected).toBe("task");
+  });
+  it("keeps a bare purchase quantity out of the amount field", () => {
+    expect(parseCapture("buy 2 books", { now, locale: "en", settings }).draft.amount).toBeUndefined();
+    expect(parseCapture("idea: Grow herbs", { now, locale: "en", settings }).draft.kind).toBe("idea");
+  });
   it("splits multiple notes while keeping commas and decimal amounts together", () => {
     expect(splitCaptureItems("九点半到十一点半工作。买菜 20.5 元；看半小时书，写 1,200 元报告"))
       .toEqual(["九点半到十一点半工作", "买菜 20.5 元", "看半小时书，写 1,200 元报告"]);

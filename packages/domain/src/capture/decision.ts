@@ -116,8 +116,7 @@ export class CaptureDecisionIndex {
     const queryTokens = titleTokens(title);
     const records = queryTokens.size ? this.matches(title, queryTokens) : [];
     const kindCandidates = this.rank(records, (item) => item.kind, undefined, title)
-      .map((candidate) => ({ ...candidate, value: candidate.value as EntryKind }))
-      .sort((left, right) => KIND_ORDER[left.value] - KIND_ORDER[right.value]);
+      .map((candidate) => ({ ...candidate, value: candidate.value as EntryKind }));
     const selectedKind = options.kind ?? chooseKind(kindCandidates);
     const scoped = records.filter((item) => item.item.kind === selectedKind);
     const category = this.rank(scoped, (item) => item.category, options.availableCategories, title);
@@ -167,9 +166,9 @@ export class CaptureDecisionIndex {
     }
     return [...groups.entries()]
       .map(([value, group]) => ({ value, count: group.count, match: group.match }))
-      .sort((left, right) => right.count - left.count
+      .sort((left, right) => right.match - left.match
+        || right.count - left.count
         || (groups.get(right.value)!.lastSeen - groups.get(left.value)!.lastSeen)
-        || right.match - left.match
         || left.value.localeCompare(right.value))
       .slice(0, 3)
       .map((candidate) => ({ ...candidate, match: candidate.match * (candidate.count / (total || 1)) }));
@@ -211,10 +210,11 @@ export class CaptureDecisionIndex {
 }
 
 function chooseKind(candidates: readonly CaptureKindCandidate[]): EntryKind | undefined {
+  const [first, second] = candidates;
+  if (first && second && first.count === second.count && first.match === second.match) return undefined;
   return significant(candidates)?.value;
 }
 
-const KIND_ORDER: Record<EntryKind, number> = { event: 0, task: 1, bill: 2, idea: 3 };
 
 /** A narrow win, or a repeated top choice, is strong enough to prefill. */
 function significant<T extends CaptureFieldCandidate | CaptureKindCandidate>(

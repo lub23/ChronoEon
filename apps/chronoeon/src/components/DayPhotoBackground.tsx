@@ -8,11 +8,30 @@ interface DayPhotoBackgroundProps {
   openLabel?: string;
 }
 const FADE_MS = 1200;
+// One clock per cadence for every visible day. Only the background components
+// subscribe: a slideshow tick never rebuilds calendar cells or foreground chips.
+const clocks = new Map<number, { listeners: Set<() => void>; timer: number }>();
+function subscribeClock(interval: number, listener: () => void) {
+  let clock = clocks.get(interval);
+  if (!clock) {
+    const listeners = new Set<() => void>();
+    clock = { listeners, timer: window.setInterval(() => {
+      if (!document.hidden) listeners.forEach(tick => tick());
+    }, interval) };
+    clocks.set(interval, clock);
+  }
+  clock.listeners.add(listener);
+  return () => {
+    clock.listeners.delete(listener);
+    if (!clock.listeners.size) { window.clearInterval(clock.timer); clocks.delete(interval); }
+  };
+}
 
 /** Two local image layers: decode the incoming photo before fading it over an
  * opaque current photo. Fading both out/in dims the entire calendar at midpoint. */
 export function DayPhotoBackground({ images, intervalMs = 7000, className, onOpen, openLabel }: DayPhotoBackgroundProps) {
-  const photos = useMemo(() => [...new Set(images)], [images]);
+  const signature = images.join("\u0000");
+  const photos = useMemo(() => [...new Set(signature ? signature.split("\u0000") : [])], [signature]);
   const seed = useMemo(() => {
     let hash = 0;
     for (const character of (photos[0] ?? "").slice(-128)) hash = (hash * 31 + character.charCodeAt(0)) | 0;
@@ -22,27 +41,25 @@ export function DayPhotoBackground({ images, intervalMs = 7000, className, onOpe
   const [incoming, setIncoming] = useState<string | null>(null);
   const [fading, setFading] = useState(false);
   const incomingRef = useRef<HTMLImageElement>(null);
-  const shown = photos.includes(current) ? current : photos[seed % photos.length] ?? "";
+  const shown = current;
 
   useEffect(() => {
-    if (shown === current && (!incoming || photos.includes(incoming))) return;
-    setCurrent(shown); setIncoming(null); setFading(false);
-  }, [shown, current, incoming, photos]);
+    if (!photos.length) { setCurrent(""); setIncoming(null); setFading(false); return; }
+    if (!photos.includes(current)) {
+      setIncoming(photos[seed % photos.length]); setFading(false);
+    } else if (incoming && !photos.includes(incoming)) {
+      setIncoming(null); setFading(false);
+    }
+  }, [photos, seed, current]);
 
+  const rotation = useRef(() => {});
+  rotation.current = () => {
+    if (!incoming) setIncoming(photos[(photos.indexOf(shown) + 1) % photos.length]);
+  };
   useEffect(() => {
-    if (photos.length <= 1 || incoming) return;
-    let timer = 0;
-    const schedule = () => {
-      window.clearTimeout(timer);
-      if (document.hidden) return;
-      timer = window.setTimeout(() => {
-        setIncoming(photos[(photos.indexOf(shown) + 1) % photos.length]);
-      }, intervalMs + seed % Math.max(1, Math.round(intervalMs * .2)));
-    };
-    schedule();
-    document.addEventListener("visibilitychange", schedule);
-    return () => { window.clearTimeout(timer); document.removeEventListener("visibilitychange", schedule); };
-  }, [photos, shown, incoming, intervalMs, seed]);
+    if (photos.length <= 1) return;
+    return subscribeClock(Math.max(1, intervalMs), () => rotation.current());
+  }, [photos.length > 1, intervalMs]);
 
   useEffect(() => {
     const image = incomingRef.current;
@@ -82,10 +99,10 @@ export function DayPhotoBackground({ images, intervalMs = 7000, className, onOpe
     };
   }, [incoming]);
 
-  if (!shown) return null;
+  if (!shown && !incoming) return null;
   const next = photos.length > 1 ? photos[(photos.indexOf(shown) + 1) % photos.length] : shown;
   const frames = incoming && incoming !== shown
-    ? [shown, incoming]
+    ? [shown, incoming].filter(Boolean)
     : shown === next ? [shown] : [shown, next];
   return <>
     <span className={className ? `day-photo-bg ${className}` : "day-photo-bg"} aria-hidden="true">

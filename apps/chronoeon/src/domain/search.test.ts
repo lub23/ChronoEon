@@ -37,7 +37,7 @@ describe("entry search", () => {
 
   it("searches catalog names and bilingual child labels rather than showing stored IDs", () => {
     const settings = createDefaultSettings();
-    settings.bill.categories.push({ id: "ledger-income", name: "其他收入", color: "#aaa", direction: "income", sub: ["转卖"] });
+    settings.calendars[0].billCategories.push({ id: "ledger-income", name: "其他收入", color: "#aaa", direction: "income", sub: ["转卖"] });
     const imported = entry({ kind: "bill", category: "ledger-income/转卖" });
     expect(entryMatchesSearch(imported, "其他收入", "zh", settings)).toBe(true);
     expect(entryMatchesSearch(imported, "转卖", "zh", settings)).toBe(true);

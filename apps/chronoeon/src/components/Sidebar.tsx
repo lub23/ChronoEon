@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useTouchDevice } from "../hooks/useTouchDevice";
 import type { AppView, Locale } from "../domain/entry";
+import type { InsightsTab } from "./StatsView";
 import { t, type MessageKey } from "../i18n";
 import { formatAccelerator } from "../platform/globalShortcut";
 import { Brand } from "./Brand";
@@ -12,8 +13,10 @@ interface SidebarProps {
   activeView: AppView;
   collapsed: boolean;
   dayCount?: number;
+  insightsTab?: InsightsTab;
   onViewChange: (view: AppView) => void;
   onDayCountChange?: (days: number) => void;
+  onInsightsTabChange?: (tab: InsightsTab) => void;
   onCollapsedChange: (collapsed: boolean) => void;
   onNew: () => void;
   onCompact: () => void;
@@ -34,8 +37,10 @@ export function Sidebar({
   activeView,
   collapsed,
   dayCount = 1,
+  insightsTab = "bills",
   onViewChange,
   onDayCountChange,
+  onInsightsTabChange,
   onCollapsedChange,
   onNew,
   onCompact,
@@ -45,7 +50,9 @@ export function Sidebar({
   const label = (key: MessageKey) => t(key, locale);
   const keyboardHint = t("keyboardHint", locale);
   const [dayMenuOpen, setDayMenuOpen] = useState(false);
+  const [insightsMenuOpen, setInsightsMenuOpen] = useState(false);
   const dayGroupRef = useRef<HTMLDivElement>(null);
+  const insightsGroupRef = useRef<HTMLDivElement>(null);
   const minDayCount = 1;
   const maxDayCount = 6;
   // The day menu exists for the collapsed rail only: expanded, the stepper is
@@ -71,6 +78,23 @@ export function Sidebar({
 
   useEffect(() => { if (!collapsed) setDayMenuOpen(false); }, [collapsed]);
   useEffect(() => { if (activeView !== "day") setDayMenuOpen(false); }, [activeView]);
+  useEffect(() => {
+    if (!insightsMenuOpen) return;
+    const dismiss = (event: Event) => {
+      if (insightsGroupRef.current?.contains(event.target as Node)) return;
+      if ((event.target as Element | null)?.closest?.(".nav-insights-item")) return;
+      setInsightsMenuOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setInsightsMenuOpen(false); };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [insightsMenuOpen]);
+  useEffect(() => { if (!collapsed) setInsightsMenuOpen(false); }, [collapsed]);
+  useEffect(() => { if (activeView !== "insights") setInsightsMenuOpen(false); }, [activeView]);
 
   return (
     <aside className={collapsed ? "sidebar is-collapsed" : "sidebar"}>
@@ -98,7 +122,9 @@ export function Sidebar({
           <Fragment key={item.id}>
             <button
               type="button"
-              className={(activeView === item.id ? "nav-item is-active" : "nav-item") + (item.id === "day" ? " nav-day-item" : "")}
+              className={(activeView === item.id ? "nav-item is-active" : "nav-item")
+                + (item.id === "day" ? " nav-day-item" : "")
+                + (item.id === "insights" ? " nav-insights-item" : "")}
               onClick={() => {
                 // Collapsed, the day row behaves like the Dock: selecting the
                 // calendar opens the day-range menu instead of a dead click.
@@ -107,11 +133,16 @@ export function Sidebar({
                   else onViewChange("day");
                   return;
                 }
+                if (item.id === "insights" && collapsed) {
+                  if (activeView === "insights") setInsightsMenuOpen((open) => !open);
+                  else onViewChange("insights");
+                  return;
+                }
                 onViewChange(item.id);
               }}
               aria-label={label(item.label)}
               aria-current={activeView === item.id ? "page" : undefined}
-              aria-expanded={item.id === "day" && collapsed ? dayMenuVisible : undefined}
+              aria-expanded={item.id === "day" && collapsed ? dayMenuVisible : item.id === "insights" && collapsed ? insightsMenuOpen : undefined}
               title={label(item.label)}
             >
               <Icon name={item.icon} size={19} />
@@ -136,6 +167,42 @@ export function Sidebar({
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+            {item.id === "insights" && collapsed && insightsMenuOpen && (
+              <div className="nav-day-wrap" ref={insightsGroupRef}>
+                <div className="view-dock-days-menu nav-day-menu" role="menu" aria-label={t("insights", locale)}>
+                  {(["bills", "tasks", "items"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={insightsTab === tab}
+                      className={insightsTab === tab ? "is-selected" : ""}
+                      onClick={() => { onInsightsTabChange?.(tab); onViewChange("insights"); setInsightsMenuOpen(false); }}
+                    >
+                      {insightsTab === tab ? <Icon name="check" size={12} /> : <i />}
+                      <Icon name={tab === "bills" ? "coins" : tab === "tasks" ? "clock" : "box"} size={12} />
+                      {t(tab === "bills" ? "statsBills" : tab === "tasks" ? "statsTasks" : "items", locale)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {item.id === "insights" && activeView === "insights" && !collapsed && onInsightsTabChange && (
+              <div className="sidebar-insights-switch" role="group" aria-label={t("insights", locale)}>
+                {(["bills", "tasks", "items"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    className={insightsTab === tab ? "is-active" : ""}
+                    aria-pressed={insightsTab === tab}
+                    onClick={() => onInsightsTabChange(tab)}
+                  >
+                    <Icon name={tab === "bills" ? "coins" : tab === "tasks" ? "clock" : "box"} size={13} />
+                    <span>{t(tab === "bills" ? "statsBills" : tab === "tasks" ? "statsTasks" : "items", locale)}</span>
+                  </button>
+                ))}
               </div>
             )}
             {item.id === "day" && activeView === "day" && !collapsed && onDayCountChange && (

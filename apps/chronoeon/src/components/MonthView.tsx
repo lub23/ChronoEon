@@ -1,9 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { addDays, endOfMonth, endOfWeek, format, getISOWeek, isSameDay, isSameMonth, parseISO, startOfMonth, startOfWeek } from "date-fns";
 import { enUS, zhCN } from "date-fns/locale";
-import { applyCalendarDrag, differenceInIsoDays, isEntryPast, type CalendarSchedulePatch } from "@chronoeon/domain";
+import { applyCalendarDrag, entriesByDateRange, differenceInIsoDays, isEntryPast, type CalendarSchedulePatch } from "@chronoeon/domain";
 import type { ChronoEonSettings, Entry, Locale } from "../domain/entry";
-import { entriesForDate } from "../domain/entry";
 import { kindAllowed, type AgendaFilter } from "../domain/agendaTimeline";
 import { getLunarInfo, lunarCellLabel, shouldShowLunar, type LunarPreference } from "../domain/lunar";
 import { layoutMonthGrid, monthSlotCapacity, MONTH_SLOT_PITCH as SLOT_PITCH, MONTH_SLOT_HEIGHT as SLOT_HEIGHT, MONTH_MORE_HEIGHT } from "../domain/monthLayout";
@@ -172,25 +171,39 @@ export function MonthView({
     return () => window.removeEventListener("resize", close);
   }, [peek]);
 
+  const entriesByDate = useMemo(() => Object.fromEntries(entriesByDateRange(entries, dayKeys[0], dayKeys[dayKeys.length - 1])), [dayKeys, entries]);
+
   const layout = useMemo(() => layoutMonthGrid(
     dayKeys,
-    (date) => entriesForDate(entries, date)
+    (date) => (entriesByDate[date] ?? [])
       .filter((entry) => kindAllowed(filter, entry.kind))
       .filter((entry) => entryMatchesSearch(entry, search, locale, settings)),
     capacity,
-    (date) => entriesForDate(entries, date),
+    (date) => (entriesByDate[date] ?? []),
     settings,
-  ), [capacity, dayKeys, entries, filter, locale, search, settings]);
+  ), [capacity, dayKeys, entriesByDate, filter, locale, search, settings]);
 
-  const entriesByDate = useMemo(() => {
-    const map: Record<string, Entry[]> = {};
-    for (const key of dayKeys) map[key] = entriesForDate(entries, key);
-    return map;
-  }, [dayKeys, entries]);
+
   const photos = useDayPhotos(entriesByDate, photosOnly || showPhotos, settings.photoDisplayMode);
 
   const dateLocale = locale === "zh" ? zhCN : enUS;
   const weekDays = Array.from({ length: 7 }, (_, index) => format(addDays(gridStart, index), "EEE", { locale: dateLocale }));
+  useEffect(() => {
+    if (!shouldShowLunar(lunar, locale) || !window.requestIdleCallback) return;
+    const dates = Array.from({ length: 84 }, (_, index) => addDays(days[0], index < 42 ? index - 42 : index));
+    let cancelled = false;
+    let idle = 0;
+    const warm = () => {
+      if (cancelled || !dates.length) return;
+      getLunarInfo(dates.shift()!);
+      schedule();
+    };
+    const schedule = () => {
+      if (dates.length) idle = window.requestIdleCallback(warm, { timeout: 1000 });
+    };
+    schedule();
+    return () => { cancelled = true; window.cancelIdleCallback(idle); };
+  }, [days, lunar, locale]);
   const today = new Date();
   const todayKey = format(today, "yyyy-MM-dd");
   const nowMinutes = today.getHours() * 60 + today.getMinutes();

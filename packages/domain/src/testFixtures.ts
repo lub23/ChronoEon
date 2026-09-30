@@ -18,13 +18,14 @@ export const EXAMPLE_BILL_CATEGORIES: BillPrimaryCategory[] = [
 /** Replace a settings object's catalogs with neutral test examples, in place. */
 export function useExampleCatalogs<T extends ChronoEonSettings>(settings: T): T {
   settings.calendars = settings.calendars.map((calendar, index) => index === 0
-    ? { ...calendar, categories: structuredClone(EXAMPLE_TASK_CATEGORIES), defaultCategoryId: "alpha" }
+    ? {
+      ...calendar,
+      categories: structuredClone(EXAMPLE_TASK_CATEGORIES),
+      defaultCategoryId: "alpha",
+      billCategories: structuredClone(EXAMPLE_BILL_CATEGORIES),
+      defaultBillCategoryId: "income",
+      defaultBillSubCategoryId: "Salary",
+    }
     : calendar);
-  settings.bill = {
-    ...settings.bill,
-    categories: structuredClone(EXAMPLE_BILL_CATEGORIES),
-    defaultCategoryId: "income",
-    defaultSubCategoryId: "Salary",
-  };
   return settings;
 }

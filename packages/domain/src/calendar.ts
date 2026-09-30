@@ -46,9 +46,9 @@ export interface TimedOverlapPlacement {
   groupId: number;
 }
 
-export const TIMED_ITEM_MIN_PX = 21;
-export const TIMED_ITEM_MIN_MINUTES = 20;
-export const BILL_ITEM_MIN_PX = 22;
+export const TIMED_ITEM_MIN_PX = 19;
+export const TIMED_ITEM_MIN_MINUTES = 18;
+export const BILL_ITEM_MIN_PX = 20;
 export const BILL_ITEM_MIN_MINUTES = 15;
 
 export function timedItemMinHeightPx(isBill: boolean, pixelsPerMinute: number): number {
@@ -338,9 +338,8 @@ export function entriesByDateRange(
   for (const entry of entries) {
     if (!isIsoDate(entry.date)) continue;
     const endDate = effectiveEntryEndDate(entry);
-    if (compareIsoDates(endDate, rangeStart) < 0 || compareIsoDates(entry.date, rangeEnd) > 0) continue;
-
     if (!entry.recurrence || entry.recurrence === "none") {
+      if (compareIsoDates(endDate, rangeStart) < 0 || compareIsoDates(entry.date, rangeEnd) > 0) continue;
       for (let date = overlapStart(entry.date, rangeStart); compareIsoDates(date, overlapEnd(endDate, rangeEnd)) <= 0; date = addIsoDays(date, 1)) {
         grouped.get(date)?.push(entry);
       }

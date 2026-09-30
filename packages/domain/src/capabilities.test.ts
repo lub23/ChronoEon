@@ -158,6 +158,36 @@ describe("statistics", () => {
     expect(expense?.sub.map((item) => item.name)).toEqual(["Daily", "Medical"]);
   });
 
+  it("resolves ledger category ids through the bill's own calendar", () => {
+    const custom = createDefaultSettings();
+    custom.calendars.push({
+      ...structuredClone(custom.calendars[0]),
+      id: "food-calendar",
+      name: "Food",
+      billCategories: [{
+        id: "ledger-aaaaaaaaaaaaaaaaaaaaaaaa",
+        name: "餐饮",
+        color: "#f47920",
+        direction: "expense",
+        sub: ["午餐"],
+      }],
+      defaultBillCategoryId: "ledger-aaaaaaaaaaaaaaaaaaaaaaaa",
+      defaultBillSubCategoryId: "午餐",
+    });
+    const stats = aggregateBillStats([
+      entry({
+        id: "lunch",
+        kind: "bill",
+        date: "2026-07-02",
+        calendar: "food-calendar",
+        category: "ledger-aaaaaaaaaaaaaaaaaaaaaaaa/午餐",
+        amount: 50,
+      }),
+    ], { start: "2026-07-01", end: "2026-07-31" }, custom);
+    expect(stats.categories[0]).toMatchObject({ id: "ledger-aaaaaaaaaaaaaaaaaaaaaaaa", name: "餐饮", total: -50 });
+    expect(stats.expense).toBe(50);
+  });
+
   it("measures task completion and per-category duration", () => {
     const entries: Entry[] = [
       entry({ id: "t1", kind: "task", date: "2026-07-27", start: "09:00", end: "10:30", status: "done" }),

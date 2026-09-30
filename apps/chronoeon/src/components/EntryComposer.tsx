@@ -6,6 +6,10 @@ import {
   TIMED_REMINDERS,
   categoryOptionsForKind,
   defaultCategoryForKind,
+  defaultItemCategoryForCalendar,
+  defaultPaymentMethodForCalendar,
+  itemCategoriesForCalendar,
+  paymentMethodsForCalendar,
   type ChronoEonSettings,
   type Entry,
   type EntryCategoryOption,
@@ -19,8 +23,11 @@ import {
   addIsoDays,
   parseClockMinutes,
   formatClockMinutes,
+  ITEM_CATEGORIES,
+  validateItemDraft,
+  type ItemDraft,
 } from "../domain/entry";
-import { inferCategory, inferLocationCandidates, type CaptureHistoryItem } from "@chronoeon/domain";
+import { CaptureDecisionIndex, inferCategory, inferLocationCandidates, type CaptureHistoryItem } from "@chronoeon/domain";
 import { entryToDraft, type EntryEditContext, type RecurrenceEditScope } from "../domain/entryWorkflow";
 import type { ConfirmRequest } from "./ConfirmDialog";
 import { catalogLabel, categoryLabel, compositeCategoryLabel, paymentMethodLabel, t, type MessageKey } from "../i18n";
@@ -30,24 +37,26 @@ import { GlassSelect, type GlassSelectOption } from "./GlassSelect";
 import { Icon } from "./Icon";
 import { TagInput } from "./TagInput";
 import { TaskStatusMenu } from "./TaskSummaryList";
-import { TaskStatusGlyph } from "./ItemGlyph";
+import { EntryGlyph, TaskStatusGlyph } from "./ItemGlyph";
 import { registerModalDismiss } from "./modalLayer";
 import { readCurrentPlace } from "../platform/location";
 import { labeledOptions, priorities, recurrenceOptions, reminderLabels, reminderTriggerLabel, weekdayIndexForDate } from "./entryFieldLabels";
-import { BillItemLinks } from "./BillItemLinks";
 import type { Item } from "@chronoeon/domain";
+import { ItemFields, ItemPhotoField } from "./ItemFields";
+import { acquisitionLabels, itemCategoryIconName } from "./ItemsView";
 import { RecurrenceWeekdays } from "./RecurrenceWeekdays";
 
 interface EntryComposerProps {
   locale: Locale;
   selectedDate: string;
+  entries?: Entry[];
   editing: Entry | null;
   /** Canonical series source when `editing` is a projected occurrence. */
   sourceEntry?: Entry | null;
   settings?: ChronoEonSettings;
   availableTags?: string[];
   onClose: () => void;
-  onSave: (draft: EntryDraft, editingId?: string, context?: EntryEditContext) => void | Promise<void>;
+  onSave: (draft: EntryDraft, editingId?: string, context?: EntryEditContext) => Entry | void | Promise<Entry | void>;
   onDelete: (id: string) => void | Promise<void>;
   onNotice?: (message: string, tone?: "normal" | "warning") => void;
   onConfirm?: (request: ConfirmRequest) => Promise<boolean>;
@@ -55,8 +64,13 @@ interface EntryComposerProps {
   /** Local entries are the only category-learning corpus; never sent anywhere. */
   history?: readonly CaptureHistoryItem[];
   items?: Item[];
+  editingItem?: Item | null;
+  initialItemDraft?: Partial<ItemDraft> | null;
+  onOpenBill?: (entry: Entry) => void;
   onEditItem?: (item: Item) => void;
-  onLinkItem?: (entry: Entry, item?: Item, category?: Item["category"]) => void;
+  onCreateItemFromBill?: (entry: Entry, category: Item["category"]) => void | Promise<void>;
+  onSaveItem?: (draft: ItemDraft, id?: string) => Promise<void>;
+  onDeleteItem?: (id: string) => void | Promise<void>;
 }
 
 function normalizeScheduleTimes(draft: EntryDraft, timeScale: ChronoEonSettings["timeScale"]): EntryDraft {
@@ -87,6 +101,7 @@ function initialDraft(selectedDate: string, editing: Entry | null, settings: Chr
   if (editing) return entryToDraft(editing);
   const now = new Date();
   const currentClock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const calendar = seed?.calendar ?? settings.defaultCalendarID;
   const draft: EntryDraft = {
     kind: "event",
     title: "",
@@ -94,10 +109,10 @@ function initialDraft(selectedDate: string, editing: Entry | null, settings: Chr
     start: seed?.start ?? (seed?.kind === "idea" ? currentClock : "09:00"),
     end: "",
     allDay: false,
-    calendar: settings.defaultCalendarID,
-    category: defaultCategoryForKind("event", settings),
+    calendar,
+    category: defaultCategoryForKind("event", settings, calendar),
     currency: settings.bill.currency,
-    payment: settings.bill.paymentMethods[0],
+    payment: defaultPaymentMethodForCalendar(settings, calendar),
     recurrence: "none",
     reminder: defaultReminder(seed?.kind ?? "event", seed?.allDay),
     ...seed,
@@ -106,6 +121,19 @@ function initialDraft(selectedDate: string, editing: Entry | null, settings: Chr
 }
 
 const kinds: EntryKind[] = ["task", "event", "idea", "bill"];
+const composerKinds = [...kinds, "item"] as const;
+
+function defaultItemDraft(date: string, settings: ChronoEonSettings, calendarId = settings.defaultCalendarID): ItemDraft {
+  return {
+    name: "", calendarId, category: defaultItemCategoryForCalendar(settings, calendarId), acquisition: "purchase",
+    acquiredOn: date, acquiredAt: "12:00", cost: 0, currency: settings.bill.currency,
+    payment: defaultPaymentMethodForCalendar(settings, calendarId), images: [],
+  };
+}
+
+function normalizeItemDraftClock(draft: Partial<ItemDraft> & Pick<ItemDraft, "name" | "calendarId" | "category" | "acquisition" | "acquiredOn" | "cost" | "currency">): ItemDraft {
+  return { ...draft, acquiredAt: draft.acquiredAt?.match(/(\d{2}:\d{2})$/)?.[1] ?? "12:00" };
+}
 
 function defaultReminder(kind: EntryKind, allDay?: boolean): Reminder {
   if (kind !== "task") return "none";
@@ -131,6 +159,7 @@ function withCurrentOption(options: EntryCategoryOption[], category: string): En
 export function EntryComposer({
   locale,
   selectedDate,
+  entries = [],
   editing,
   sourceEntry,
   settings = DEFAULT_CHRONOEON_SETTINGS,
@@ -144,13 +173,26 @@ export function EntryComposer({
   history = [],
   items = [],
   onEditItem,
-  onLinkItem,
+  onOpenBill,
+  onCreateItemFromBill,
+  editingItem = null,
+  initialItemDraft = null,
+  onSaveItem,
+  onDeleteItem,
 }: EntryComposerProps) {
   const occurrence = Boolean(editing?.recurrenceSourceId && editing.occurrenceDate);
   const source = sourceEntry ?? editing;
   const initialScope: RecurrenceEditScope = occurrence ? "occurrence" : "series";
   const [scope, setScope] = useState<RecurrenceEditScope>(initialScope);
   const [draft, setDraft] = useState<EntryDraft>(() => initialDraft(selectedDate, occurrence ? editing : source, settings, seed));
+  const [activeKind, setActiveKind] = useState<(typeof composerKinds)[number]>(
+    editingItem || initialItemDraft ? "item" : seed?.kind ?? draft.kind,
+  );
+  const [itemDraft, setItemDraft] = useState<ItemDraft | null>(() => editingItem
+    ? normalizeItemDraftClock({ ...defaultItemDraft(selectedDate, settings), ...editingItem })
+    : initialItemDraft ? normalizeItemDraftClock({ ...defaultItemDraft(selectedDate, settings), ...initialItemDraft }) : null);
+  const [billItemCategory, setBillItemCategory] = useState("");
+  const linkedBillItem = editing?.kind === "bill" ? items.find(item => item.purchaseEntryId === editing.id || item.saleEntryId === editing.id) : undefined;
   // Category direction owns the sign, so the composer only edits a magnitude.
   const [amountText, setAmountText] = useState(() => (
     draft.amount == null ? "" : String(Math.abs(draft.amount))
@@ -166,22 +208,48 @@ export function EntryComposer({
   // second submit before the first lands would create a duplicate row.
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false); // ref so the guard holds even inside one render tick
+  const [itemBusy, setItemBusy] = useState(false);
+  const itemBusyRef = useRef(false);
   const [locating, setLocating] = useState(false);
+  const now = new Date();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   // A selected value wins over every later title-derived suggestion.
   const categoryTouchedRef = useRef(false);
   // A cleared or typed location is explicit, even when the field is empty.
   const locationTouchedRef = useRef(false);
+  const itemTouchedRef = useRef(new Set<keyof ItemDraft>());
+  const itemPristineRef = useRef(JSON.stringify(itemDraft));
+  const localHistory = useMemo(() => history.filter(entry => !entry.calendar || entry.calendar === draft.calendar), [history, draft.calendar]);
+  const itemHistory = useMemo(() => items.filter(item => item.calendarId === itemDraft?.calendarId && item.id !== editingItem?.id).map(item => ({
+    id: item.id, kind: "event" as const, title: item.name, category: item.category, location: item.location, date: item.acquiredOn,
+  })), [items, itemDraft?.calendarId, editingItem?.id]);
+  const itemSuggestions = useMemo(() => itemDraft && settings.locationAutofill
+    ? inferLocationCandidates(itemDraft.name, [...itemHistory, ...history.filter(entry => !entry.calendar || entry.calendar === itemDraft.calendarId)], itemDraft.acquiredOn)
+    : [], [itemDraft?.name, itemDraft?.calendarId, itemDraft?.acquiredOn, itemHistory, history, settings.locationAutofill]);
+  useEffect(() => {
+    if (!itemDraft || editingItem) return;
+    const availableCategories = new Set(itemCategoriesForCalendar(settings, itemDraft.calendarId).map(item => item.id));
+    const category = new CaptureDecisionIndex(itemHistory).decide(itemDraft.name, { kind: "event", availableCategories }).category.selected
+      ?? defaultItemCategoryForCalendar(settings, itemDraft.calendarId);
+    const location = itemSuggestions[0]?.value;
+    setItemDraft(current => {
+      if (!current) return current;
+      const nextCategory = itemTouchedRef.current.has("category") ? current.category : category;
+      const nextLocation = itemTouchedRef.current.has("location") || !settings.locationAutofill ? current.location : location;
+      return current.category === nextCategory && current.location === nextLocation ? current : { ...current, category: nextCategory, location: nextLocation };
+    });
+  }, [itemDraft?.name, itemDraft?.calendarId, itemHistory, itemSuggestions, editingItem, settings]);
   const [statusMenu, setStatusMenu] = useState<{ left: number; top: number } | null>(null);
   const locationSuggestions = useMemo(
-    () => settings.locationAutofill && draft.title.trim() && !locationTouchedRef.current
-      ? inferLocationCandidates(draft.title.trim(), history, draft.date)
+    () => settings.locationAutofill && draft.title.trim()
+      ? inferLocationCandidates(draft.title.trim(), localHistory, draft.date)
       : [],
-    [draft.date, draft.title, history, settings.locationAutofill],
+    [draft.date, draft.title, localHistory, settings.locationAutofill],
   );
   // The draft at open time is the discard baseline: Esc (or the close button)
   // with unsaved changes asks before losing them.
   const pristineRef = useRef<string>(JSON.stringify(initialDraft(selectedDate, occurrence ? editing : source, settings, seed)));
-  const dirty = JSON.stringify(draft) !== pristineRef.current;
+  const dirty = activeKind === "item" ? JSON.stringify(itemDraft) !== itemPristineRef.current : JSON.stringify(draft) !== pristineRef.current;
 
   const requestClose = useCallback(() => {
     if (!dirty) {
@@ -220,28 +288,36 @@ export function EntryComposer({
     setDraft(initialDraft(selectedDate, nextScope === "occurrence" ? editing : source, settings, seed));
     pristineRef.current = JSON.stringify(initialDraft(selectedDate, nextScope === "occurrence" ? editing : source, settings, seed));
     // A saved category is already an explicit user choice; never auto-replace it.
-    categoryTouchedRef.current = Boolean(source);
-    locationTouchedRef.current = Boolean(source?.location || seed?.location);
+    categoryTouchedRef.current = Boolean(source || seed?.category);
+    locationTouchedRef.current = Boolean(source || seed?.location);
+    setBillItemCategory("");
     setError(null);
   }, [selectedDate, editing, source, settings, occurrence, seed]);
+
+  useEffect(() => {
+    itemTouchedRef.current = new Set(Object.keys(editingItem ?? initialItemDraft ?? {}) as Array<keyof ItemDraft>);
+    itemPristineRef.current = JSON.stringify(editingItem || initialItemDraft ? normalizeItemDraftClock({ ...defaultItemDraft(selectedDate, settings), ...(editingItem ?? initialItemDraft) }) : null);
+    if (editingItem) setItemDraft(normalizeItemDraftClock({ ...defaultItemDraft(selectedDate, settings), ...editingItem }));
+    else if (initialItemDraft) setItemDraft(normalizeItemDraftClock({ ...defaultItemDraft(selectedDate, settings), ...initialItemDraft }));
+    setActiveKind(editingItem || initialItemDraft ? "item" : seed?.kind ?? editing?.kind ?? "event");
+  }, [selectedDate, editing, editingItem, initialItemDraft, seed, settings]);
 
   // Reuse the offline capture learner: recent exact/subtitle matches beat the
   // built-in keyword rules, while an explicit picker choice becomes final.
   useEffect(() => {
     if (categoryTouchedRef.current) return;
     const title = draft.title.trim();
-    if (!title) return;
-    const suggestion = inferCategory(title, draft.title, draft.kind, settings, history, new Date(), draft.amount, draft.calendar, "any");
-    if (suggestion.confidence <= 0 || suggestion.value === draft.category) return;
-    setDraft((current) => ({ ...current, category: suggestion.value }));
-  }, [draft.title, draft.kind, draft.amount, draft.category, history, settings]);
+    const suggestion = inferCategory(title, draft.title, draft.kind, settings, localHistory, new Date(), draft.amount, draft.calendar, "any");
+    const category = suggestion.confidence > 0 ? suggestion.value : defaultCategoryForKind(draft.kind, settings, draft.calendar);
+    if (category !== draft.category) setDraft((current) => ({ ...current, category }));
+  }, [draft.title, draft.kind, draft.amount, draft.calendar, draft.category, localHistory, settings]);
 
   // Same local-learning idea as categories, but rank equal title matches by
   // calendar distance and stop as soon as the user owns the location field.
   useEffect(() => {
-    if (!settings.locationAutofill || locationTouchedRef.current || draft.location) return;
+    if (!settings.locationAutofill || locationTouchedRef.current) return;
     const location = locationSuggestions[0]?.value;
-    if (location) update("location", location);
+    if (location !== draft.location) update("location", location);
   }, [draft.location, locationSuggestions, settings.locationAutofill]);
 
   const categoryOptions = useMemo(
@@ -338,12 +414,13 @@ export function EntryComposer({
     setError(null);
   }
 
-  function changeKind(kind: EntryKind) {
+  function changeEntryKind(kind: EntryKind) {
+    if (kind !== "bill") setBillItemCategory("");
     setDraft((current) => {
       const options = categoryOptionsForKind(kind, settings, current.calendar);
       const category = options.some((option) => option.value === current.category)
         ? current.category
-        : defaultCategoryForKind(kind, settings);
+        : defaultCategoryForKind(kind, settings, current.calendar);
       return {
         ...current,
         kind,
@@ -354,7 +431,7 @@ export function EntryComposer({
         allDay: kind === "task" || kind === "event" ? current.allDay : false,
         amount: kind === "bill" ? current.amount : undefined,
         currency: kind === "bill" ? current.currency ?? settings.bill.currency : undefined,
-        payment: kind === "bill" ? current.payment ?? settings.bill.paymentMethods[0] : undefined,
+        payment: kind === "bill" ? current.payment ?? defaultPaymentMethodForCalendar(settings, current.calendar) : undefined,
         recurrence: kind === "idea" ? "none" : current.recurrence,
         recurringDays: kind === "idea" ? undefined : current.recurringDays,
         recurringEnd: kind === "idea" ? undefined : current.recurringEnd,
@@ -363,6 +440,28 @@ export function EntryComposer({
         urgency: kind === "idea" ? undefined : current.urgency,
       };
     });
+  }
+
+  function changeKind(kind: (typeof composerKinds)[number], item?: Item) {
+    if (kind === "item") {
+      setBillItemCategory("");
+      const next = item
+        ? normalizeItemDraftClock({ ...defaultItemDraft(selectedDate, settings), ...item })
+        : itemDraft ?? normalizeItemDraftClock({
+          ...defaultItemDraft(draft.date, settings, draft.calendar),
+          name: draft.title,
+          acquiredOn: draft.date,
+          acquiredAt: draft.start ?? "12:00",
+          cost: draft.kind === "bill" ? Math.abs(draft.amount ?? 0) : 0,
+          currency: draft.currency ?? settings.bill.currency,
+          payment: draft.payment ?? defaultPaymentMethodForCalendar(settings, draft.calendar),
+        });
+      setItemDraft(next);
+      setActiveKind("item");
+      return;
+    }
+    setActiveKind(kind);
+    changeEntryKind(kind);
   }
 
   function changeRecurrence(recurrence: Recurrence) {
@@ -386,8 +485,17 @@ export function EntryComposer({
     setError(null);
   }
 
+  function patchItem(value: Partial<ItemDraft>) {
+    for (const key of Object.keys(value) as Array<keyof ItemDraft>) itemTouchedRef.current.add(key);
+    setItemDraft(current => ({ ...(current ?? defaultItemDraft(selectedDate, settings)), ...value }));
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (activeKind === "item") {
+      await submitItem();
+      return;
+    }
     if (submittingRef.current) return;
     const normalized = normalizeScheduleTimes(draft, settings.timeScale);
     if (normalized !== draft) setDraft(normalized);
@@ -398,16 +506,40 @@ export function EntryComposer({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      await onSave(
+      const saved = await onSave(
         normalized.kind === "task" || normalized.kind === "event"
           ? { ...normalized, title: normalized.title.trim() }
           : { ...normalized, title: normalized.title.trim(), end: "", endDate: undefined },
         source?.id,
         { scope, occurrenceDate: occurrenceOnly ? editing?.occurrenceDate : undefined },
       );
+      if (normalized.kind === "bill" && saved && !linkedBillItem && billItemCategory && onCreateItemFromBill) {
+        try {
+          await onCreateItemFromBill(saved, billItemCategory);
+        } catch {
+          onNotice?.(t("itemSaveFailed", locale), "warning");
+        }
+      }
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
+    }
+  }
+
+  async function submitItem() {
+    if (!itemDraft || itemBusyRef.current || !onSaveItem) return;
+    itemBusyRef.current = true;
+    setItemBusy(true);
+    setError(null);
+    try {
+      const normalized = { ...itemDraft, name: itemDraft.name.trim() };
+      validateItemDraft(normalized);
+      await onSaveItem(normalized, editingItem?.id);
+    } catch {
+      setError("itemSaveFailed" as MessageKey);
+    } finally {
+      itemBusyRef.current = false;
+      setItemBusy(false);
     }
   }
 
@@ -440,24 +572,37 @@ export function EntryComposer({
       >
         <i className="composer-handle" aria-hidden="true" style={{ width: 37, height: 4 }} />
         <header className="composer-header">
-          <div className="composer-title-line">
-            <h2 id="composer-title">{editing ? t("editTitle", locale) : t("createTitle", locale)}</h2>
+          <div className={`composer-title-line${activeKind === "item" ? " composer-title-line--item" : ""}`}>
+            <h2 id="composer-title">{activeKind === "item" ? (editingItem ? t("editTitle", locale) : t("createTitle", locale)) : editing ? t("editTitle", locale) : t("createTitle", locale)}</h2>
             <div className="composer-category-field composer-category-field--top">
               <GlassSelect
-                value={draft.category}
+                value={activeKind === "item" ? itemDraft?.category ?? defaultItemCategoryForCalendar(settings, itemDraft?.calendarId ?? draft.calendar) : draft.category}
                 ariaLabel={t("category", locale)}
-                options={draft.kind === "bill"
+                options={activeKind !== "item" && draft.kind === "bill"
                   ? billGroups.flatMap(([group, options]) => options.map((option) => ({
                     value: option.value,
                     label: option.group ? compositeCategoryLabel(option.value, locale, settings) : categoryLabel(option.value, locale, option.label, settings),
                     color: option.color,
                     group,
                   })))
-                  : categoryOptions.map((option) => ({ value: option.value, label: categoryLabel(option.value, locale, option.label, settings), color: option.color, group: option.group }))}
-                onChange={(value) => { categoryTouchedRef.current = true; update("category", value); }}
+                  : activeKind === "item"
+                    ? itemCategoriesForCalendar(settings, itemDraft?.calendarId ?? draft.calendar).map(option => ({ value: option.id, label: option.name, mark: <Icon name={itemCategoryIconName(option.id, settings, itemDraft?.calendarId ?? draft.calendar)} size={15} /> }))
+                    : categoryOptions.map((option) => ({ value: option.value, label: categoryLabel(option.value, locale, option.label, settings), color: option.color, group: option.group }))}
+                onChange={(value) => {
+                  if (activeKind === "item") patchItem({ category: value as Item["category"] });
+                  else { categoryTouchedRef.current = true; update("category", value); }
+                }}
               />
             </div>
-            {draft.kind === "task" && (
+            {activeKind === "item" && (
+              <GlassSelect
+                value={itemDraft?.acquisition ?? "purchase"}
+                ariaLabel={t("itemAcquisition", locale)}
+                options={Object.entries(acquisitionLabels).map(([value, label]) => ({ value, label: t(label, locale) }))}
+                onChange={value => patchItem({ acquisition: value as ItemDraft["acquisition"], ...(value !== "purchase" ? { purchaseEntryId: undefined, cost: 0 } : {}) })}
+              />
+            )}
+            {activeKind === "task" && draft.kind === "task" && (
               <button
                 type="button"
                 className="icon-button composer-status-toggle"
@@ -474,7 +619,7 @@ export function EntryComposer({
                 <TaskStatusGlyph status={draft.status ?? "open"} size={16} />
               </button>
             )}
-            {draft.kind === "task" || draft.kind === "event" ? (
+            {activeKind !== "item" && (draft.kind === "task" || draft.kind === "event") ? (
               <label className="all-day-toggle all-day-toggle--compact composer-header-toggle">
                 <input type="checkbox" checked={Boolean(draft.allDay)} onChange={(event) => changeAllDay(event.target.checked)} />
                 <i className="fake-checkbox" aria-hidden="true" />
@@ -489,9 +634,9 @@ export function EntryComposer({
 
         <div className="composer-kind-bar">
           <div className="kind-switcher" role="tablist" aria-label={t("type", locale)}>
-            {kinds.map((kind) => (
-              <button key={kind} disabled={occurrenceOnly} type="button" role="tab" aria-selected={draft.kind === kind} className={draft.kind === kind ? `is-active kind-${kind}` : ""} onClick={() => changeKind(kind)}>
-                <span className={`kind-dot kind-dot--${kind}`} />{t(kind, locale)}
+            {composerKinds.map((kind) => (
+              <button key={kind} disabled={occurrenceOnly} type="button" role="tab" aria-selected={activeKind === kind} className={activeKind === kind ? `is-active kind-${kind}` : ""} onClick={() => changeKind(kind)}>
+                {kind === "item" ? <Icon name="box" size={17} /> : <EntryGlyph kind={kind} size={17} />}{t(kind === "item" ? "items" : kind, locale)}
               </button>
             ))}
             </div>
@@ -508,13 +653,34 @@ export function EntryComposer({
             </section>
           )}
 
+          {activeKind === "item" && itemDraft && (
+            <ItemFields
+              draft={itemDraft}
+              patch={patchItem}
+              locationSuggestions={itemSuggestions}
+              items={items}
+              entries={entries}
+              locale={locale}
+              settings={settings}
+              today={todayKey}
+              busy={itemBusy}
+              editing={Boolean(editingItem)}
+              itemId={editingItem?.id}
+              onOpenBill={onOpenBill}
+              showDate
+              showPhotos={false}
+              onError={message => setError(message as MessageKey)}
+            />
+          )}
+
+          {activeKind !== "item" && (
           <div className="title-location-row">
             <label className={`field-label field-label--large field-label--title${error === "required" ? " has-error" : ""}`}>
               <span>{t("title", locale)} <em>*</em></span>
               <input disabled={occurrenceOnly} autoFocus={!occurrenceOnly} value={draft.title} onChange={(event) => update("title", event.target.value)} placeholder={t("titlePlaceholder", locale)} />
               {error === "required" && <small>{t("required", locale)}</small>}
             </label>
-            {draft.kind !== "idea" && (
+            {draft.kind !== "idea" ? (
               <label className="field-label location-field">
                 <span>
                   {t("location", locale)}
@@ -550,10 +716,16 @@ export function EntryComposer({
                   )}
                 </div>
               </label>
+            ) : (
+              <label className="field-label idea-title-tags">
+                <span>{t("tags", locale)}</span>
+                <TagInput value={draft.tags} available={availableTags} onChange={(tags) => update("tags", tags)} locale={locale} />
+              </label>
             )}
           </div>
+          )}
 
-          {locationSuggestions.length > 1 && draft.kind !== "idea" && (
+          {locationSuggestions.length > 1 && draft.kind !== "idea" && activeKind !== "item" && (
             <div className="field-suggestions" role="group" aria-label={t("location", locale)}>
               {locationSuggestions.map(suggestion => (
                 <button key={suggestion.value} type="button" className={draft.location === suggestion.value ? "is-active" : ""}
@@ -562,7 +734,7 @@ export function EntryComposer({
             </div>
           )}
 
-          {statusMenu && draft.kind === "task" && (
+          {statusMenu && draft.kind === "task" && activeKind !== "item" && (
             <TaskStatusMenu
               state={{ status: draft.status ?? "open", left: statusMenu.left, top: statusMenu.top }}
               locale={locale}
@@ -574,9 +746,10 @@ export function EntryComposer({
             />
           )}
 
+          {activeKind !== "item" && (
           <div className={draft.kind === "task" || draft.kind === "event" ? "when-groups" : "when-groups when-groups--single"}>
             <div className="when-group">
-              <span>{t("start", locale)}</span>
+              <span>{t("time", locale)}</span>
               <div className="when-controls">
                 <GlassDatePicker
                   value={draft.date}
@@ -627,12 +800,13 @@ export function EntryComposer({
               </div>
             )}
           </div>
+          )}
 
-          {error && error !== "required" && <p className="form-error" role="alert">{t(error, locale)}</p>}
+          {activeKind !== "item" && error && error !== "required" && <p className="form-error" role="alert">{t(error, locale)}</p>}
 
-          {!occurrenceOnly && (
+          {!occurrenceOnly && activeKind !== "item" && (
             <>
-              {draft.kind === "bill" && <div className="bill-primary-row">
+              {draft.kind === "bill" && activeKind === "bill" && <div className="bill-primary-row">
                 <label className="field-label"><span>{t("amount", locale)}</span>
                   <input
                     type="number"
@@ -667,7 +841,7 @@ export function EntryComposer({
                     ariaLabel={t("payment", locale)}
                     options={[
                       { value: "", label: t("paymentNone", locale) },
-                      ...settings.bill.paymentMethods.map((method) => ({ value: method, label: paymentMethodLabel(method, locale) })),
+                      ...paymentMethodsForCalendar(settings, draft.calendar).map((method) => ({ value: method.id, label: paymentMethodLabel(method.name, locale) })),
                     ]}
                     onChange={(value) => update("payment", value || undefined)}
                   />
@@ -718,12 +892,12 @@ export function EntryComposer({
               )}
 
               {/* A three-line note beside the single-line tags. */}
-              <div className="composer-pair">
+              <div className={draft.kind === "idea" ? "composer-pair composer-pair--note-only" : "composer-pair"}>
                 <label className="field-label"><span>{t("note", locale)}</span><textarea rows={4} value={draft.note ?? ""} onChange={(event) => update("note", event.target.value)} placeholder={t("notePlaceholder", locale)} /></label>
                 <div className="composer-pair-side">
-                  <label className="field-label"><span>{t("tags", locale)}</span>
+                  {draft.kind !== "idea" && <label className="field-label"><span>{t("tags", locale)}</span>
                     <TagInput value={draft.tags} available={availableTags} onChange={(tags) => update("tags", tags)} locale={locale} />
-                  </label>
+                  </label>}
                   {/* Importance and urgency sit under the tags, where a narrow
                       phone still fits them. */}
                   {(draft.kind === "task" || draft.kind === "event") && (
@@ -746,14 +920,33 @@ export function EntryComposer({
                       </label>
                     </div>
                   )}
+                  {draft.kind === "bill" && (
+                    <label className="field-label item-from-bill-field">
+                      <span className="linked-field-heading">{t("itemAddFromBill", locale)}{linkedBillItem && onEditItem && <button type="button" className="icon-button" aria-label={`${t("itemAddFromBill", locale)} · ${linkedBillItem.name}`} onClick={() => onEditItem(linkedBillItem)}><Icon name="arrow-right" size={14} /></button>}</span>
+                      <GlassSelect
+                        value={linkedBillItem?.category ?? billItemCategory}
+                        disabled={Boolean(linkedBillItem)}
+                        ariaLabel={t("itemAddFromBill", locale)}
+                        options={[
+                          { value: "", label: t("itemNoAdd", locale) },
+                          ...itemCategoriesForCalendar(settings, draft.calendar).map(option => ({
+                            value: option.id,
+                            label: option.name,
+                            mark: <Icon name={itemCategoryIconName(option.id, settings, draft.calendar)} size={15} />,
+                          })),
+                        ]}
+                        onChange={setBillItemCategory}
+                      />
+                    </label>
+                  )}
                 </div>
               </div>
 
-              {editing?.kind === "bill" && draft.kind === "bill" && onEditItem && onLinkItem && <BillItemLinks entry={editing} items={items} locale={locale} settings={settings} onEdit={onEditItem} onLink={onLinkItem} />}
               <AttachmentField
                 locale={locale}
                 settings={settings}
                 entryDate={draft.date}
+                icon={<EntryGlyph kind={draft.kind} status={draft.status} size={20} />}
                 value={draft.images ?? []}
                 onChange={(next) => update("images", next.length ? next : undefined)}
                 onNotice={onNotice}
@@ -761,9 +954,29 @@ export function EntryComposer({
             </>
           )}
 
+          {activeKind === "item" && itemDraft && (
+            <>
+              <ItemPhotoField
+                value={itemDraft.images ?? []}
+                locale={locale}
+                settings={settings}
+                entryDate={itemDraft.acquiredOn}
+                busy={itemBusy}
+                disabled={itemBusy}
+                onChange={images => patchItem({ images })}
+                onNotice={message => setError(message as MessageKey)}
+              />
+              {error && <p className="form-error" role="alert">{t(error, locale)}</p>}
+            </>
+          )}
+
           <footer className="composer-footer">
-            {source ? <button className="danger-button" type="button" onClick={remove}><Icon name="trash" size={16} />{t(recurringSeries ? "deleteSeries" : "delete", locale)}</button> : <span />}
-            <div><button className="secondary-button" type="button" onClick={requestClose}>{t("cancel", locale)}</button><button className="primary-action" type="submit" disabled={submitting}>{t(occurrenceOnly ? "moveOccurrence" : "save", locale)}<Icon name="arrow-right" size={16} /></button></div>
+            {activeKind === "item"
+              ? editingItem && onDeleteItem
+                ? <button className="danger-button" type="button" onClick={() => { void onDeleteItem(editingItem.id); }}><Icon name="trash" size={16} />{t("delete", locale)}</button>
+                : <span />
+              : source ? <button className="danger-button" type="button" onClick={remove}><Icon name="trash" size={16} />{t(recurringSeries ? "deleteSeries" : "delete", locale)}</button> : <span />}
+            <div><button className="primary-action" type="submit" disabled={activeKind === "item" ? itemBusy : submitting}>{t(occurrenceOnly ? "moveOccurrence" : "save", locale)}<Icon name="arrow-right" size={16} /></button></div>
           </footer>
         </form>
       </section>

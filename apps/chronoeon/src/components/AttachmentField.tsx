@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { attachmentLabel, type ChronoEonSettings, type Locale } from "@chronoeon/domain";
 import { pickEntryAttachments, releaseAttachment } from "../platform/attachments";
 import { isMobilePlatform } from "../hooks/useTouchDevice";
@@ -15,6 +15,8 @@ interface AttachmentFieldProps {
   disabled?: boolean;
   /** Offer a "take photo" action on phones (camera capture). */
   camera?: boolean;
+  /** Modality/category glyph shown until the first image replaces it. */
+  icon?: ReactNode;
   onChange: (next: string[]) => void;
   onNotice?: (message: string, tone?: "normal" | "warning") => void;
 }
@@ -31,6 +33,7 @@ export function AttachmentField({
   value,
   disabled = false,
   camera = false,
+  icon,
   onChange,
   onNotice
 }: AttachmentFieldProps) {
@@ -60,24 +63,17 @@ export function AttachmentField({
   const sessionOnly = value.some((reference) => reference.startsWith("blob:"));
 
   return (
-    <section className="attachment-field" aria-label={t("attachments", locale)}>
-      <div className="attachment-head">
-        <span className="field-label-text">{t("attachments", locale)}{value.length > 0 && <small> · {value.length} {t("attachmentsCount", locale)}</small>}</span>
-        <div className="attachment-actions">
-          {showCamera && (
-            <button type="button" className="secondary-button attachment-add" onClick={() => void add(true)} disabled={disabled || busy}>
-              <Icon name="camera" size={15} />{t("takePhoto", locale)}
-            </button>
-          )}
-          <button type="button" className="secondary-button attachment-add" onClick={() => void add()} disabled={disabled || busy}>
-            <Icon name="image" size={15} />{busy ? t("importExportBusy", locale) : t("addAttachment", locale)}
-          </button>
+    <section className="attachment-field item-photo-field" aria-label={t("attachments", locale)}>
+      <div className="item-photo-head">
+        {value.length === 0 && <span className="item-photo-default" aria-hidden="true">{icon ?? <Icon name="image" size={20} />}</span>}
+        <div className="item-photo-copy">
+          <span className="field-label-text">{t("attachments", locale)}{value.length > 0 && <small> · {value.length} {t("attachmentsCount", locale)}</small>}</span>
+          <p className="field-hint">{sessionOnly ? t("attachmentSessionOnly", locale) : t("attachmentHint", locale)}</p>
         </div>
       </div>
-      <p className="field-hint">{sessionOnly ? t("attachmentSessionOnly", locale) : t("attachmentHint", locale)}</p>
       {value.length > 0 && (
         <>
-          <ul className="attachment-grid">
+          <ul className="attachment-grid item-photo-grid">
             {value.map((reference, position) => (
               <li key={reference}>
                 <button
@@ -105,6 +101,16 @@ export function AttachmentField({
           <p className="field-hint field-hint--quiet">{t("attachmentKeepsFile", locale)}</p>
         </>
       )}
+      <div className="item-photo-actions attachment-actions">
+        {showCamera && (
+          <button type="button" className="secondary-button attachment-add" onClick={() => void add(true)} disabled={disabled || busy}>
+            <Icon name="camera" size={15} />{t("takePhoto", locale)}
+          </button>
+        )}
+        <button type="button" className="secondary-button attachment-add" onClick={() => void add()} disabled={disabled || busy}>
+          <Icon name="image" size={15} />{busy ? t("importExportBusy", locale) : t("addAttachment", locale)}
+        </button>
+      </div>
     </section>
   );
 }

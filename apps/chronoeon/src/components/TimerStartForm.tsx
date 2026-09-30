@@ -65,14 +65,14 @@ export function TimerStartForm({ locale, settings, category, onCategoryChange, s
   }, [autoFocus]);
 
   const locationSuggestions = useMemo(
-    () => settings.locationAutofill && title.trim() ? inferLocationCandidates(title.trim(), history, today) : [],
-    [history, settings.locationAutofill, title, today],
+    () => settings.locationAutofill && title.trim() ? inferLocationCandidates(title.trim(), history.filter(entry => !entry.calendar || entry.calendar === settings.defaultCalendarID), today) : [],
+    [history, settings.locationAutofill, settings.defaultCalendarID, title, today],
   );
 
   useEffect(() => {
-    if (!settings.locationAutofill || locationTouchedRef.current || location) return;
+    if (!settings.locationAutofill || locationTouchedRef.current) return;
     const suggestion = locationSuggestions[0]?.value;
-    if (suggestion) setLocation(suggestion);
+    setLocation(suggestion ?? "");
   }, [location, locationSuggestions, settings.locationAutofill]);
 
   function begin() {

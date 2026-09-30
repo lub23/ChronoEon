@@ -13,7 +13,7 @@ async function device() {
   return { ...result, items: new SqliteItemStore(result.backend), sync: new SyncStore(result.backend) };
 }
 function item(patch: Partial<ItemDraft> = {}) {
-  return draftToItem({ name: "Camera", category: "electronics", acquisition: "purchase", acquiredOn: "2026-09-01", acquiredAt: "09:00", cost: 1200, currency: "CNY", ...patch });
+  return draftToItem({ name: "Camera", calendarId: "default", category: "electronics", acquisition: "purchase", acquiredOn: "2026-09-01", acquiredAt: "09:00", cost: 1200, currency: "CNY", ...patch });
 }
 function bill(category = "expense", patch: Partial<Entry> = {}): Entry {
   return { id: createEntryId(), kind: "bill", title: "Camera bill", category, date: "2026-09-01", amount: 1200, currency: "CNY", color: "#aaaaaa", createdAt: "2026-09-01T00:00:00.000Z", ...patch };
@@ -24,7 +24,7 @@ describe("SQLite items", () => {
     const d = await device();
     expect(await d.items.list()).toEqual([]);
     const listener = vi.fn(); const unsubscribe = d.items.subscribe(listener);
-    const first = await d.items.save(item({ image: `attachments/${"a".repeat(64)}.webp`, notes: "Daily" }), settings);
+    const first = await d.items.save(item({ images: [`attachments/${"a".repeat(64)}.webp`], notes: "Daily" }), settings);
     const updated = await d.items.save({ ...first, name: "Updated", cost: 1300, createdAt: "2030-01-01T00:00:00Z" }, settings);
     expect(updated.createdAt).toBe(first.createdAt);
     expect(updated.updatedAt > first.updatedAt).toBe(true);
@@ -73,7 +73,7 @@ describe("SQLite items", () => {
     await expect(d.items.save(item({ purchaseEntryId: income.id }), settings)).rejects.toMatchObject({ code: "ItemBillDirectionMismatch" });
     await expect(d.items.save(item({ disposal: "sold", disposedOn: "2026-09-20", saleEntryId: purchase.id }), settings)).rejects.toMatchObject({ code: "ItemBillDirectionMismatch" });
     const custom = structuredClone(settings);
-    custom.bill.categories = [{ id: "custom", name: "Reimbursement", color: "#aaa", sub: ["Sale"], direction: "income" }];
+    custom.calendars[0].billCategories = [{ id: "custom", name: "Reimbursement", color: "#aaa", sub: ["Sale"], direction: "income" }];
     const customBill = await d.store.create(bill("Reimbursement/Sale"));
     await expect(d.items.save(item({ disposal: "sold", disposedOn: "2026-09-20", saleEntryId: customBill.id }), custom)).resolves.toMatchObject({ saleEntryId: customBill.id });
   });
@@ -101,7 +101,7 @@ describe("SQLite items", () => {
   it("rejects invalid edits and noncanonical images before any journal write", async () => {
     const d = await device(); const first = await d.items.save(item(), settings);
     await d.sync.flush();
-    for (const patch of [{ cost: -1 }, { acquiredOn: "2026-02-30", acquiredAt: "09:00" }, { disposal: "lost" as const }, { image: "blob:demo" }, { image: "../../photo.webp" }]) {
+    for (const patch of [{ cost: -1 }, { acquiredOn: "2026-02-30", acquiredAt: "09:00" }, { disposal: "lost" as const }, { images: ["blob:demo"] }, { images: ["../../photo.webp"] }]) {
       await expect(d.items.save({ ...first, ...patch }, settings)).rejects.toMatchObject({ code: "InvalidItem" });
     }
     expect(await d.items.list()).toEqual([first]);

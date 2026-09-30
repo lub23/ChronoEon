@@ -24,13 +24,18 @@ export function horizontalScrollOwner(target: Element, boundary: Element, dx: nu
   return null;
 }
 
-export function navigationPageKey(view: AppView, date: Date): string {
+type InsightsPage = "bills" | "tasks" | "items";
+const INSIGHTS_ORDER: InsightsPage[] = ["bills", "tasks", "items"];
+export function navigationPageKey(view: AppView, date: Date, insightsTab?: InsightsPage): string {
+  if (view === "insights" && insightsTab) return `insights:${insightsTab}`;
   return view === "month" ? `month:${format(date, "yyyy-MM")}` : view;
 }
 
-interface PagePreview { view: AppView; date: Date; side: number; axis: "x" | "y" }
+interface PagePreview { insightsTab?: InsightsPage; view: AppView; date: Date; side: number; axis: "x" | "y" }
 
 interface Options {
+  insightsTab?: InsightsPage;
+  onInsightsTabChange?: (tab: InsightsPage) => void;
   enabled: boolean;
   activeView: AppView;
   selectedDate: Date;
@@ -51,6 +56,7 @@ export function useSwipeNavigation(options: Options) {
   const sideRef = useRef<"left" | "right">("left");
   const busy = useRef(false);
   const committing = useRef<PagePreview | null>(null);
+  const previewDate = useRef<Date | null>(null);
   const committingSidebar = useRef<boolean | null>(null);
   const queued = useRef<AppView | null>(null);
   const transitionCleanup = useRef<(() => void) | undefined>(undefined);
@@ -91,12 +97,15 @@ export function useSwipeNavigation(options: Options) {
       clearTimeout(timer.current);
       transitionCleanup.current?.();
       transitionCleanup.current = undefined;
-      if (commit && navigationPageKey(target.view, target.date) !== navigationPageKey(latest.current.activeView, latest.current.selectedDate)) {
+      if (commit && navigationPageKey(target.view, target.date, target.insightsTab) !== navigationPageKey(latest.current.activeView, latest.current.selectedDate, latest.current.insightsTab)) {
         // Keep the completed transform until React promotes the already-mounted
         // neighbor. Resetting here paints the outgoing view at x=0 for a frame.
         committing.current = target;
         if (target.axis === "y") latest.current.onDateChange(target.date);
-        else latest.current.onViewChange(target.view);
+        else {
+          if (target.insightsTab) latest.current.onInsightsTabChange?.(target.insightsTab);
+          latest.current.onViewChange(target.view);
+        }
       } else resetPage();
     };
     if (!pager || !extent || !duration()) { done(); return; }
@@ -111,6 +120,7 @@ export function useSwipeNavigation(options: Options) {
     timer.current = setTimeout(done, motion + 40);
   }, [resetPage]);
   const selectView = useCallback((view: AppView) => {
+    previewDate.current = null;
     const current = latest.current;
     if (busy.current) { queued.current = view; return; }
     if (frame.current !== undefined) cancelAnimationFrame(frame.current);
@@ -124,22 +134,45 @@ export function useSwipeNavigation(options: Options) {
     busy.current = true;
     pager.classList.add("is-swiping");
     pager.style.setProperty("--page-offset", "0px");
-    const target: PagePreview = { view, side, date: current.selectedDate, axis: "x" };
+    const target: PagePreview = { view, side, date: current.selectedDate, axis: "x", insightsTab: view === "insights" ? current.insightsTab : undefined };
     setPreview(target);
     // Let the incoming surface paint in its offscreen position before settling.
     frame.current = requestAnimationFrame(() => {
       frame.current = requestAnimationFrame(() => settlePage(target, true));
     });
   }, [settlePage]);
+  const stepMonth = useCallback((direction: -1 | 1) => {
+    const current = latest.current;
+    // Rapid repeat clicks update the requested date, never lose a click or
+    // promote an obsolete preview after the user has already moved on.
+    const date = addMonths(previewDate.current ?? current.selectedDate, direction);
+    previewDate.current = date;
+    if (frame.current !== undefined) cancelAnimationFrame(frame.current);
+    committing.current = null;
+    resetPage();
+    const pager = pagerRef.current;
+    if (current.activeView !== "month" || !pager?.clientHeight || !duration()) {
+      previewDate.current = null; current.onDateChange(date); return;
+    }
+    const target: PagePreview = { view: "month", date, side: direction, axis: "y" };
+    busy.current = true;
+    pager.classList.add("is-swiping");
+    pager.style.setProperty("--page-offset", "0px");
+    setPreview(target);
+    frame.current = requestAnimationFrame(() => {
+      frame.current = requestAnimationFrame(() => settlePage(target, true));
+    });
+  }, [resetPage, settlePage]);
   selection.current = selectView;
   useLayoutEffect(() => {
     // React has committed the new page's data-position, but the browser has not
     // painted yet. One atomic hand-off preserves scroll and component state.
     const target = committing.current;
-    if (!target || navigationPageKey(target.view, target.date) !== navigationPageKey(options.activeView, options.selectedDate)) return;
+    if (!target || navigationPageKey(target.view, target.date, target.insightsTab) !== navigationPageKey(options.activeView, options.selectedDate, options.insightsTab)) return;
     committing.current = null;
+    previewDate.current = null;
     resetPage();
-  }, [options.activeView, options.selectedDate, resetPage]);
+  }, [options.activeView, options.selectedDate, options.insightsTab, resetPage]);
 
   const resetSidebar = useCallback(() => {
     sidebarRef.current?.classList.remove("is-swiping");
@@ -157,6 +190,7 @@ export function useSwipeNavigation(options: Options) {
 
   const openSidebar = useCallback(() => {
     // The newest explicit action wins over an unfinished page transition.
+    previewDate.current = null;
     queued.current = null; committing.current = null; committingSidebar.current = null;
     if (frame.current !== undefined) cancelAnimationFrame(frame.current);
     resetPage(); resetSidebar();
@@ -218,7 +252,7 @@ export function useSwipeNavigation(options: Options) {
       };
       if (!g.kind) {
         const current = latest.current;
-        const vertical = Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx) * 1.15;
+        const vertical = Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) * 1.5;
         if (vertical) {
           if (current.activeView !== "month" || current.menuOpen) { gesture = null; return; }
           g.axis = "y";
@@ -230,9 +264,16 @@ export function useSwipeNavigation(options: Options) {
           pagerRef.current?.classList.add("is-swiping");
           setPreview(g.page);
         } else {
-          if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(dy) * 1.15) return;
+          if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
           g.side = dx < 0 ? 1 : -1;
-          const view = VIEW_ORDER[VIEW_ORDER.indexOf(current.activeView) + g.side];
+          let view = VIEW_ORDER[VIEW_ORDER.indexOf(current.activeView) + g.side];
+          let insightsTab: InsightsPage | undefined;
+          if (current.insightsTab && current.onInsightsTabChange) {
+            if (current.activeView === "insights") {
+              insightsTab = INSIGHTS_ORDER[INSIGHTS_ORDER.indexOf(current.insightsTab) + g.side];
+              if (insightsTab) view = "insights";
+            } else if (view === "insights") insightsTab = g.side > 0 ? "bills" : "items";
+          }
           if (current.menuOpen) { g.kind = "sidebar"; g.opening = false; }
           else {
             const scroller = horizontalScrollOwner(g.target, pagerRef.current!, dx);
@@ -244,7 +285,7 @@ export function useSwipeNavigation(options: Options) {
               setSidebarSide(sideRef.current);
             } else {
               g.kind = "page";
-              g.page = { view, date: current.selectedDate, side: g.side, axis: "x" };
+              g.page = { view, date: current.selectedDate, side: g.side, axis: "x", insightsTab };
               lockPointer();
               pagerRef.current?.classList.add("is-swiping");
               setPreview(g.page);
@@ -347,5 +388,5 @@ export function useSwipeNavigation(options: Options) {
     };
   }, [options.enabled, resetPage, resetSidebar, settlePage]);
 
-  return { pagerRef, sidebarRef, backdropRef, preview, sidebarSide, selectView, openSidebar };
+  return { pagerRef, sidebarRef, backdropRef, preview, sidebarSide, selectView, stepMonth, openSidebar };
 }

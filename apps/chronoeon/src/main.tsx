@@ -2,7 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { TimerOverlay } from "./components/TimerOverlay";
-import "@fontsource/ma-shan-zheng/chinese-simplified.css";
+import "@fontsource/ma-shan-zheng/index.css";
+import "@fontsource/great-vibes/index.css";
 import "./styles.css";
 import "./styles/agendaTimeline.css";
 

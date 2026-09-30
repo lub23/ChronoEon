@@ -1,5 +1,5 @@
 import type { EntryDraft, EntryKind, Locale } from "../entry";
-import { categoryOptionsForKind, type ChronoEonSettings } from "../settings";
+import { billCategoriesForCalendar, categoryOptionsForKind, type ChronoEonSettings } from "../settings";
 import { extractNote } from "./note";
 import { inferCategory } from "./category";
 import { inferLocation, inferLocationCandidates } from "./location";
@@ -17,6 +17,7 @@ export { CaptureDecisionIndex, type CaptureFieldDecisions } from "./decision";
 
 export interface CaptureHistoryItem {
   id?: string;
+  calendar?: string;
   kind: EntryKind;
   title: string;
   category: string;
@@ -79,7 +80,7 @@ export function parseCapture(input: string, { now, locale, settings, history = [
     : new Set(categoryOptionsForKind(kind, settings, settings.defaultCalendarID)
       .map((option) => option.value));
   if (kind === "bill") {
-    for (const category of settings.bill.categories.filter((candidate) => candidate.direction === "expense")) {
+    for (const category of billCategoriesForCalendar(settings, settings.defaultCalendarID).filter((candidate) => candidate.direction === ((money.amount ?? -1) > 0 ? "income" : "expense"))) {
       availableCategories.add(category.id);
       for (const child of category.sub) availableCategories.add(`${category.id}/${child}`);
     }

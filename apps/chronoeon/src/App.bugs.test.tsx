@@ -148,7 +148,7 @@ describe("app: create flow (browser demo)", () => {
     window.localStorage.setItem("chronoeon.preference.view", JSON.stringify("insights"));
     act(() => { root.render(<App />); });
     await flush(150);
-    expect(host.textContent).toContain("从容看数据");
+    expect(host.textContent).toContain("澄怀观数");
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, cancelable: true }));
@@ -352,12 +352,9 @@ describe("app: create flow (browser demo)", () => {
     expect([...sheet.querySelectorAll("button.glass-select-trigger")]
       .some((button) => button.getAttribute("aria-label") === "重要性")).toBe(true);
 
-    // Four glass kind dots, one per entry kind.
-    const dots = sheet.querySelectorAll(".kind-switcher .kind-dot");
-    expect(dots.length).toBe(4);
-    for (const kind of ["task", "event", "idea", "bill"]) {
-      expect([...dots].some((dot) => dot.className.includes(`kind-dot--${kind}`)), `kind dot for ${kind}`).toBe(true);
-    }
+    // Each of the five record kinds has its own glyph, not a colored dot.
+    expect(sheet.querySelectorAll(".kind-switcher button svg")).toHaveLength(5);
+    expect(sheet.querySelector(".kind-switcher .kind-dot")).toBeNull();
   });
 
   it("keeps Quick Capture text inside the unified capture conversation", async () => {
@@ -538,6 +535,12 @@ describe("app: create flow (browser demo)", () => {
         .find((item) => item.textContent?.includes("统计"))!.click();
     });
     await flush();
+    // Bills -> schedules -> items are three independent pager surfaces.
+    for (let step = 0; step < 2; step++) {
+      await act(async () => { touchSwipe(220, 90); });
+      await flush();
+      expect(document.querySelector(".mobile-sidebar-backdrop")?.className).not.toContain("is-open");
+    }
     await act(async () => { touchSwipe(220, 90); });
     await flush();
     expect(document.querySelector(".mobile-sidebar-backdrop")?.className).toContain("is-open");

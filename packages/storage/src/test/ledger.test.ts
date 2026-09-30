@@ -40,7 +40,7 @@ async function fixture() {
 }
 
 describe("atomic ledger replacement", () => {
-  it("replaces only bills, preserves catalogs/preferences and journals deletions + inserts + settings", async () => {
+  it("replaces bills and catalogs, preserves non-bills/preferences and journals changes", async () => {
     const { store, backend, sync, settings } = await fixture();
     await store.create(entry());
     const event = await store.create(entry(eventId, "event"));
@@ -58,8 +58,7 @@ describe("atomic ledger replacement", () => {
     expect((await store.deletedEntries()).map((row) => row.id)).toEqual([oldId]);
     expect(await backend.select("SELECT * FROM ledger_test_bindings")).toEqual([{ id: "asset", purchase_entry_id: oldId }]);
     const saved = await sync.getSettings() as { settings: ChronoEonSettings; preferences: { theme: string } };
-    expect(saved.settings.bill.categories.slice(0, settings.bill.categories.length)).toEqual(settings.bill.categories);
-    expect(saved.settings.bill.categories).toHaveLength(settings.bill.categories.length + 2);
+    expect(saved.settings.calendars[0].billCategories.map(category => category.id)).toEqual([incomeId, expenseId]);
     expect(saved.preferences).toEqual({ theme: "dark" });
     expect(await sync.deviceId()).toBe(deviceId);
     expect(await sync.bindDataset()).toBe(datasetId);
@@ -96,7 +95,7 @@ describe("atomic ledger replacement", () => {
   it("rejects stale settings, absent settings and a non-bill ID collision before changing bills", async () => {
     const { store, sync, settings } = await fixture();
     await store.create(entry());
-    const changed = structuredClone(settings); changed.bill.categories[0].name = "Edited";
+    const changed = structuredClone(settings); changed.calendars[0].billCategories[0].name = "Edited";
     await sync.setSettings({ settings: changed });
     await expect(store.replaceBills(settings, payload())).rejects.toThrow("LEDGER_SETTINGS_CHANGED");
     await sync.setSettings({ settings });

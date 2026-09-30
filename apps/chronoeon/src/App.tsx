@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { addDays, addMonths, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { draftToEntry, entriesForDate, isAppView, resolveEntryColor, type AppView, type DueReminder, type Entry, type EntryDraft, type EntryStatus, type Locale, type ThemeMode } from "./domain/entry";
 import { EMPTY_ENTRY_FILTER, entryMatchesFilter, filterActive, type EntryFilter } from "./domain/entryFilter";
-import { billCategoryOptions, createDefaultSettings, createEntryId, formatEntryTime, normalizeChronoEonSettings, outstandingTaskSections, scheduleCategoryOptions, timerSessionToDraft, type AIProviderConfig, type ChronoEonSettings, type TimerSegment, type TimerSession } from "@chronoeon/domain";
+import { billCategoryOptions, createDefaultSettings, createEntryId, defaultItemCategoryForCalendar, defaultPaymentMethodForCalendar, formatEntryTime, localizeBuiltinSettings, normalizeChronoEonSettings, outstandingTaskSections, scheduleCategoryOptions, timerSessionToDraft, type AIProviderConfig, type ChronoEonSettings, type TimerSegment, type TimerSession } from "@chronoeon/domain";
 import type { LunarPreference } from "./domain/lunar";
 import { entryToDraft, entryWithDraft, entryWithOccurrenceMove, entryWithOccurrenceStatus, sourceEntryId, type EntryEditContext } from "./domain/entryWorkflow";
 import { entryMatchesSearch } from "./domain/search";
@@ -47,9 +47,8 @@ import { AmbientParticles } from "./components/AmbientParticles";
 import { EntryComposer } from "./components/EntryComposer";
 import { Icon } from "./components/Icon";
 import { IdeasView } from "./components/IdeasView";
-import { ItemEditor } from "./components/ItemEditor";
 import { useSqliteItems } from "./hooks/useSqliteItems";
-import { billCategoryForValue, billDirectionForCategory, draftToItem, validateItemDraft, type Item, type ItemDraft } from "@chronoeon/domain";
+import { billCategoryForValue, draftToItem, validateItemDraft, type Item, type ItemDraft } from "@chronoeon/domain";
 import type { SqliteItemStore } from "@chronoeon/storage";
 import { StatsView, type InsightsTab } from "./components/StatsView";
 import { MonthView } from "./components/MonthView";
@@ -130,7 +129,8 @@ function App() {
   const sqliteItems = useSqliteItems(itemStore);
   const [demoItems, setDemoItems] = useState<Item[]>([]);
   const items = isTauri() ? sqliteItems.items : demoItems;
-  const [itemEditor, setItemEditor] = useState<{ item?: Item; seed?: Partial<ItemDraft> } | null>(null);
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [itemDraftSeed, setItemDraftSeed] = useState<Partial<ItemDraft> | null>(null);
   const [syncJournal, setSyncJournal] = useState<SyncStore | null>(null);
   const [chatSyncVersion, setChatSyncVersion] = useState(0);
   const [timerStore, setTimerStore] = useState<TimerStore | null>(null);
@@ -304,6 +304,8 @@ function App() {
   }, []);
 
   const navigation = useSwipeNavigation({
+    insightsTab,
+    onInsightsTabChange: setInsightsTab,
     enabled: mobileViewport && !compact,
     activeView,
     selectedDate,
@@ -320,7 +322,7 @@ function App() {
 
   const changeLocale = useCallback((next: Locale) => {
     setLocale(next);
-    updateSettings({ ...settings, language: next });
+    updateSettings(localizeBuiltinSettings(settings, next));
   }, [setLocale, settings, updateSettings]);
 
   useEffect(() => {
@@ -487,6 +489,28 @@ function App() {
     onConflicts: (count) => notify(`${t("syncConflictNotice", locale)} (${count})`, "warning"),
   });
 
+  const storedSettingsApplied = useRef(false);
+  useEffect(() => {
+    if (!syncJournal || storedSettingsApplied.current) return;
+    storedSettingsApplied.current = true;
+    void syncJournal.getSettings().then((payload) => {
+      if (!payload?.settings) return;
+      const imported = importSettingsBundleJson(JSON.stringify(payload));
+      updateSettings(imported.settings);
+      setLocale(imported.settings.language);
+      if (imported.preferences.theme) setTheme(imported.preferences.theme);
+      if (imported.preferences.accentTheme) setAccentTheme(imported.preferences.accentTheme);
+      if (imported.preferences.dayPhotos !== undefined) setDayPhotos(imported.preferences.dayPhotos);
+      if (imported.preferences.lunar) setLunar(imported.preferences.lunar);
+      if (imported.preferences.lowEndMode !== undefined) setLowEndMode(imported.preferences.lowEndMode);
+      if (imported.preferences.remindersEnabled !== undefined) setRemindersEnabled(imported.preferences.remindersEnabled);
+      if (imported.preferences.captureShortcut) setCaptureShortcut(imported.preferences.captureShortcut);
+      if (imported.preferences.captureShortcutEnabled !== undefined) setCaptureShortcutEnabled(imported.preferences.captureShortcutEnabled);
+      if (imported.preferences.miniShortcut) setMiniShortcut(imported.preferences.miniShortcut);
+      if (imported.preferences.miniShortcutEnabled !== undefined) setMiniShortcutEnabled(imported.preferences.miniShortcutEnabled);
+    }).catch((error) => console.warn("Could not read stored settings", error));
+  }, [setAccentTheme, setCaptureShortcut, setCaptureShortcutEnabled, setDayPhotos, setLocale, setLunar, setLowEndMode, setMiniShortcut, setMiniShortcutEnabled, setRemindersEnabled, setTheme, syncJournal, updateSettings]);
+
   /**
    * Serialize writes as a FIFO queue. Two overlapping writes race on the same
    * row, so the second one used to be dropped without a word; queueing keeps
@@ -533,7 +557,7 @@ function App() {
   const reassignCategories = useCallback(async (sourceCategory: string, targetCategory: string) => {
     if (!sourceCategory || !targetCategory || sourceCategory === targetCategory) return;
     const matches = entriesRef.current.filter((entry) => {
-      if (entry.kind === "bill") return billCategoryForValue(entry.category, settings)?.id === sourceCategory;
+      if (entry.kind === "bill") return billCategoryForValue(entry.category, settings, entry.calendar)?.id === sourceCategory;
       return entry.category === sourceCategory;
     });
     for (const entry of matches) {
@@ -544,6 +568,24 @@ function App() {
       });
     }
   }, [persistUpdated, settings]);
+
+  const reassignItemCategories = useCallback(async (sourceCategory: string, targetCategory: string) => {
+    if (!sourceCategory || !targetCategory || sourceCategory === targetCategory) return;
+    const matches = items.filter(item => item.category === sourceCategory);
+    if (!matches.length) return;
+    if (isTauri()) {
+      const session = await createSqliteStoreSession();
+      if (!session) throw new Error("SQLite storage is unavailable");
+      for (const item of matches) {
+        await session.items.save({ ...item, category: targetCategory, updatedAt: new Date().toISOString() }, settingsRef.current);
+      }
+      await sqliteItems.reload();
+      return;
+    }
+    setDemoItems(current => current.map(item => item.category === sourceCategory
+      ? { ...item, category: targetCategory, updatedAt: new Date().toISOString() }
+      : item));
+  }, [items, sqliteItems.reload]);
 
   const persistDeleted = useCallback(async (id: string): Promise<void> => {
     if (isTauri()) { await ensureSqliteStore().then((store) => store.delete(id)); return; }
@@ -586,6 +628,8 @@ function App() {
     setEditingEntry(null);
     setEditingSourceEntry(null);
     setComposerSeed(undefined);
+    setEditingItem(null);
+    setItemDraftSeed(null);
   }, []);
 
   const openSettings = useCallback((section: SettingsSection = "general") => {
@@ -641,6 +685,8 @@ function App() {
   }, [chatOpen, closeComposer, composerOpen, openSettings, filterOpen, settingsOpen, showFilter, timerOpen]);
 
   const openComposer = useCallback((entry: Entry | null = null) => {
+    setEditingItem(null);
+    setItemDraftSeed(null);
     const source = entry?.recurrenceSourceId
       ? entries.find((candidate) => candidate.id === sourceEntryId(entry)) ?? entry
       : entry;
@@ -654,6 +700,15 @@ function App() {
     setComposerSeed(seed);
     setEditingEntry(null);
     setEditingSourceEntry(null);
+    setComposerOpen(true);
+  }, []);
+
+  const openItemComposer = useCallback((item: Item | null = null, seed: Partial<ItemDraft> = {}) => {
+    setComposerSeed(undefined);
+    setEditingEntry(null);
+    setEditingSourceEntry(null);
+    setEditingItem(item);
+    setItemDraftSeed(seed);
     setComposerOpen(true);
   }, []);
 
@@ -699,7 +754,7 @@ function App() {
         }
         closeComposer();
         notify(t("occurrenceMoved", locale));
-        return;
+        return updatedSource;
       }
 
       const updated = entryWithDraft(previous, draft, settings);
@@ -711,7 +766,7 @@ function App() {
       }
       closeComposer();
       notify(updated.recurrence !== "none" && updated.date !== previous.date ? t("seriesMoved", locale) : t("updated", locale));
-      return;
+      return updated;
     }
 
     const created = draftToEntry(draft, "local", resolveEntryColor(draft.category, draft.kind, settings, draft.calendar));
@@ -719,6 +774,7 @@ function App() {
       await persistCreated(created);
       closeComposer();
       notify(t("created", locale));
+      return created;
     } catch (error) {
       reportWriteFailure(error);
     }
@@ -726,7 +782,7 @@ function App() {
 
   /** Public save entry point: serialized so overlapping writes cannot race. */
   const handleSave = useCallback(async (draft: EntryDraft, editingId?: string, context?: EntryEditContext) => {
-    await withSaving(() => saveEntry(draft, editingId, context));
+    return withSaving(() => saveEntry(draft, editingId, context));
   }, [saveEntry, withSaving]);
 
   const handleReschedule = useCallback(async (entry: Entry, patch: import("@chronoeon/domain").CalendarSchedulePatch) => {
@@ -951,6 +1007,7 @@ function App() {
       setSelectedDate(new Date());
       return;
     }
+    if (activeView === "month") { navigation.stepMonth(direction); return; }
     if (compact) {
       // The title-bar arrows always step one civil day on phones and in the
       // mini window, whatever the visible day count is.
@@ -960,9 +1017,7 @@ function App() {
     // Day steps one day at a time: the arrows are a title-bar control, not a
     // page-turn for a multi-day board. Week keeps its whole-week step and
     // Month keeps its month step.
-    setSelectedDate((current) => activeView === "month"
-      ? addMonths(current, direction)
-      : addDays(current, (activeView === "week" ? 7 : 1) * direction));
+    setSelectedDate((current) => addDays(current, (activeView === "week" ? 7 : 1) * direction));
   }
 
   function commitView(view: AppView) {
@@ -1122,17 +1177,17 @@ function App() {
   viewActions.current = { toggleTask, setEntryStatus, convertIdea, openComposerAt, openComposer, selectView, openEntryMenu, handleReschedule };
   // A clock tick, speech update or toast must not rebuild a whole calendar.
   // Keep just the active/incoming JSX surfaces stable; events read live actions.
-  const currentPageKey = navigationPageKey(activeView, selectedDate);
+  const currentPageKey = navigationPageKey(activeView, selectedDate, insightsTab);
   const visiblePages = useMemo(() => {
-    const current = { key: navigationPageKey(activeView, selectedDate), view: activeView, date: selectedDate };
+    const current = { key: navigationPageKey(activeView, selectedDate, insightsTab), view: activeView, date: selectedDate, insightsTab };
     const incoming = navigation.preview;
-    const incomingKey = incoming && navigationPageKey(incoming.view, incoming.date);
+    const incomingKey = incoming && navigationPageKey(incoming.view, incoming.date, incoming.insightsTab);
     return incoming && incomingKey !== current.key
-      ? [current, { key: incomingKey!, view: incoming.view, date: incoming.date }] : [current];
-  }, [activeView, selectedDate, navigation.preview?.view, navigation.preview?.date]);
-  const renderedViews = useMemo(() => {
+      ? [current, { key: incomingKey!, view: incoming.view, date: incoming.date, insightsTab: incoming.insightsTab }] : [current];
+  }, [activeView, selectedDate, insightsTab, navigation.preview?.view, navigation.preview?.date, navigation.preview?.insightsTab]);
+  const renderPage = useMemo(() => {
   /** `visibleDays` lets the mini window use its own 1-3 day range. */
-    function renderView(visibleDays: number, view: AppView, selectedDate: Date) {
+    function renderView(visibleDays: number, view: AppView, selectedDate: Date, pageTab?: InsightsTab) {
     // "Photos only" hides every item chip. The calendar views keep the entries
     // themselves because they read the day's photos from them; the list-like
     // views simply render nothing.
@@ -1171,11 +1226,22 @@ function App() {
       );
     }
     if (view === "ideas") return <IdeasView entries={itemEntries} locale={locale} settings={settings} search={search} today={todayKey} onEdit={entry => viewActions.current.openComposer(entry)} onConvert={(id, date) => { void viewActions.current.convertIdea(id, date); }} onNew={() => viewActions.current.openComposerAt({ kind: "idea", date: todayKey, start: format(new Date(), "HH:mm") })} />;
-    return <StatsView tab={insightsTab} onTabChange={setInsightsTab} items={items} allEntries={entries} onAddItem={() => setItemEditor({})} onEditItem={item => setItemEditor({ item })} onOpenBill={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={search} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} />;
+    return <StatsView tab={pageTab ?? "bills"} onTabChange={setInsightsTab} items={items} allEntries={entries} onAddItem={() => openItemComposer()} onEditItem={item => openItemComposer(item)} onOpenBill={entry => viewActions.current.openComposer(entry)} onEditEntry={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={search} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} />;
   }
-    return new Map(visiblePages.map(page => [page.key, renderView(compact ? safeMiniDayCount : safeDayCount, page.view, page.date)]));
-  }, [visiblePages, compact, safeMiniDayCount, safeDayCount, entryFilter.photosOnly,
-    searchedEntries, entries, items, selectedDate, locale, settings, filter, search, lunar, dayPhotos, todayKey]);
+    // Keep JSX identity for the outgoing page when a neighbor mounts and when
+    // that neighbor is promoted. Never rerender both heavy surfaces on lock.
+    const pages = new Map<string, ReturnType<typeof renderView>>();
+    return (page: { key: string; view: AppView; date: Date; insightsTab?: InsightsTab }) => {
+      const key = `${page.key}:${page.date.toISOString()}`;
+      if (!pages.has(key)) {
+        pages.set(key, renderView(compact ? safeMiniDayCount : safeDayCount, page.view, page.date, page.insightsTab));
+        if (pages.size > 3) pages.delete(pages.keys().next().value!);
+      }
+      return pages.get(key)!;
+    };
+  }, [compact, safeMiniDayCount, safeDayCount, entryFilter.photosOnly,
+    searchedEntries, entries, items, locale, settings, filter, search, lunar, dayPhotos, todayKey]);
+  const renderedViews = useMemo(() => new Map(visiblePages.map(page => [page.key, renderPage(page)])), [visiblePages, renderPage]);
 
   const preferences: AppPreferences = { lunar, dayPhotos, accentTheme, remindersEnabled, captureShortcut, captureShortcutEnabled, miniShortcut, miniShortcutEnabled, lowEndMode };
 
@@ -1258,6 +1324,7 @@ function App() {
     theme={theme}
     settings={settings}
     entries={entries}
+    items={items}
     preferences={preferences}
     transferBusy={transferBusy}
     notificationPermission={reminders.permission}
@@ -1281,6 +1348,7 @@ function App() {
     onThemeChange={setTheme}
     onSettingsChange={updateSettings}
     onReassignCategories={reassignCategories}
+    onReassignItemCategories={reassignItemCategories}
     onPreferencesChange={applyPreferences}
     onRequestNotifications={() => { void reminders.requestPermission(); }}
     onExportEntries={exportEntries}
@@ -1360,29 +1428,22 @@ function App() {
     search={search} onSearch={setSearch} onKindChange={setFilter} onChange={setEntryFilter} onClose={closeFilter}
     onOpenEntry={entry => { setSelectedDate(parseISO(entry.date)); openComposer(entry); }} /> : null;
 
-  function openItemFromBill(entry: Entry, item?: Item, category?: Item["category"]) {
-    if (category) {
-      void (async () => {
-        const item = draftToItem({ name: entry.title, category, acquisition: "purchase", acquiredOn: entry.date, acquiredAt: entry.start ?? "12:00", cost: Math.abs(entry.amount ?? 0), currency: entry.currency ?? settings.bill.currency, purchaseEntryId: entry.id });
-        if (isTauri()) {
-          const session = await createSqliteStoreSession();
-          if (!session) return;
-          await session.items.save(item, settingsRef.current);
-          await sqliteItems.reload();
-        } else setDemoItems(current => [...current, item]);
-        notify(t("itemSaved", locale));
-      })();
-      return;
-    }
-    const income = billDirectionForCategory(entry.category, settings) === "income";
-    const seed: Partial<ItemDraft> = income
-      ? { disposal: "sold", disposedOn: entry.date, saleEntryId: entry.id, saleAmount: Math.abs(entry.amount ?? 0) }
-      : { name: item?.name ?? entry.title, category: category ?? "other", acquisition: "purchase", acquiredOn: entry.date, acquiredAt: entry.start ?? "12:00", cost: Math.abs(entry.amount ?? 0), currency: entry.currency ?? settings.bill.currency, purchaseEntryId: entry.id };
-    setItemEditor({ item, seed });
+  async function createItemFromBill(entry: Entry, category: Item["category"]) {
+    const calendarId = entry.calendar ?? settings.defaultCalendarID;
+    const item = draftToItem({ name: entry.title, calendarId, category, acquisition: "purchase", acquiredOn: entry.date, acquiredAt: entry.start ?? "12:00", cost: Math.abs(entry.amount ?? 0), currency: entry.currency ?? settings.bill.currency, location: entry.location, payment: entry.payment ?? defaultPaymentMethodForCalendar(settings, calendarId), purchaseEntryId: entry.id, notes: entry.note });
+    if (isTauri()) {
+      const session = await createSqliteStoreSession();
+      if (!session) throw new Error("SQLite storage is unavailable");
+      await session.items.save(item, settingsRef.current);
+      await sqliteItems.reload();
+    } else setDemoItems(current => [...current, item]);
+    notify(t("itemSaved", locale));
   }
-  const itemDialog = itemEditor ? <ItemEditor key={itemEditor.item?.id ?? "new"} item={itemEditor.item} seed={itemEditor.seed} items={items} entries={entries} locale={locale} settings={settings} today={todayKey} onClose={() => setItemEditor(null)} onSave={async draft => {
+  const handleSaveItem = useCallback(async (draft: ItemDraft, id?: string) => {
     validateItemDraft(draft);
-    const item = itemEditor.item ? { ...itemEditor.item, ...draft } : draftToItem(draft);
+    const item = id
+      ? { ...draft, id, createdAt: editingItem?.createdAt ?? new Date().toISOString(), updatedAt: editingItem?.updatedAt ?? new Date().toISOString() }
+      : draftToItem(draft);
     if (isTauri()) {
       const session = await createSqliteStoreSession();
       if (!session) throw new Error("SQLite storage is unavailable");
@@ -1391,10 +1452,21 @@ function App() {
     } else {
       setDemoItems(current => [...current.filter(existing => existing.id !== item.id), { ...item, updatedAt: new Date().toISOString() }]);
     }
+    closeComposer();
     notify(t("itemSaved", locale));
-  }} /> : null;
+  }, [closeComposer, editingItem, locale, notify, sqliteItems.reload]);
+  const handleDeleteItem = useCallback(async (id: string) => {
+    if (isTauri()) {
+      const session = await createSqliteStoreSession();
+      if (!session) throw new Error("SQLite storage is unavailable");
+      await session.items.delete(id);
+      await sqliteItems.reload();
+    } else setDemoItems(current => current.filter(item => item.id !== id));
+    closeComposer();
+    notify(t("deleted", locale));
+  }, [closeComposer, locale, notify, sqliteItems.reload]);
 
-  const captureDialog = composerOpen ? <EntryComposer items={items} onEditItem={item => setItemEditor({ item })} onLinkItem={openItemFromBill} availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
+  const captureDialog = composerOpen ? <EntryComposer onOpenBill={entry => viewActions.current.openComposer(entry)} entries={entries} items={items} editingItem={editingItem} initialItemDraft={itemDraftSeed} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onEditItem={item => openItemComposer(item)} onCreateItemFromBill={createItemFromBill} availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
     locale={locale} settings={settings} selectedDate={selectedKey} editing={editingEntry} sourceEntry={editingSourceEntry}
     history={entries} onClose={closeComposer} onSave={handleSave} onDelete={handleDelete} onNotice={notify} onConfirm={confirm}
     initialDraft={composerSeed} /> : null;
@@ -1441,7 +1513,7 @@ function App() {
                 {miniView === "agenda" && <>
                   <header className="hero-header view-title-row">
                     <div>
-                      <h1 className="view-heading"><span className="headline-leaf">{t("welcome", locale)}</span></h1>
+                      <h1 className="view-heading"><span className="headline-leaf">{t("listTitle", locale)}</span></h1>
                     </div>
                   </header>
                 </>}
@@ -1469,7 +1541,6 @@ function App() {
           </ViewDock>
         </main>
         <MotionPresence>{captureDialog}</MotionPresence>
-      <MotionPresence>{itemDialog}</MotionPresence>
         <MotionPresence>{chatDialog}</MotionPresence>
         <MotionPresence>{filterPanel}</MotionPresence>
         <MotionPresence>{settingsDialog}</MotionPresence>
@@ -1497,7 +1568,7 @@ function App() {
       {/* The drawer must never inherit the collapsed rail's 72px width, or the
           opened menu wraps every label into a vertical sliver. */}
       <div ref={navigation.sidebarRef} data-side={navigation.sidebarSide} aria-hidden={mobileViewport && !mobileMenuOpen ? true : undefined} inert={mobileViewport && !mobileMenuOpen} className={[mobileMenuOpen ? "sidebar-wrap is-open" : "sidebar-wrap", sidebarCollapsed && !mobileViewport && !mobileMenuOpen ? "is-collapsed" : ""].filter(Boolean).join(" ")}>
-        <Sidebar locale={locale} activeView={activeView} collapsed={sidebarCollapsed && !mobileViewport && !mobileMenuOpen} dayCount={activeView === "day" ? safeDayCount : undefined} onViewChange={selectView} onDayCountChange={setDayCount} onCollapsedChange={setSidebarCollapsedState} onNew={() => openComposer()} onCompact={toggleCompact} onOpenSettings={() => { openSettings(); setMobileMenuOpen(false); }} />
+        <Sidebar locale={locale} activeView={activeView} collapsed={sidebarCollapsed && !mobileViewport && !mobileMenuOpen} dayCount={activeView === "day" ? safeDayCount : undefined} insightsTab={insightsTab} onViewChange={selectView} onDayCountChange={setDayCount} onInsightsTabChange={setInsightsTab} onCollapsedChange={setSidebarCollapsedState} onNew={() => openComposer()} onCompact={toggleCompact} onOpenSettings={() => { openSettings(); setMobileMenuOpen(false); }} />
       </div>
       <main className="main-shell">
         {!lowEndMode && <TreeCanopy />}
@@ -1528,7 +1599,7 @@ function App() {
               {view === "agenda" && <>
                 <header className="hero-header view-title-row">
                   <div>
-                    <h1 className="view-heading"><span className="headline-leaf">{t("welcome", locale)}</span></h1>
+                      <h1 className="view-heading"><span className="headline-leaf">{t("listTitle", locale)}</span></h1>
                   </div>
                   <div className="hero-tools">
                     <div className="hero-summary">
@@ -1592,7 +1663,6 @@ function App() {
         </ViewDock>
       </main>
       <MotionPresence>{captureDialog}</MotionPresence>
-      <MotionPresence>{itemDialog}</MotionPresence>
       <MotionPresence>{chatDialog}</MotionPresence>
       <MotionPresence>{filterPanel}</MotionPresence>
       <MotionPresence>{settingsDialog}</MotionPresence>

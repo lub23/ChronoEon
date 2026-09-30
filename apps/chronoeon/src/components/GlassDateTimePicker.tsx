@@ -118,14 +118,14 @@ interface GlassDatePickerProps {
 
 export function GlassDatePicker({ value, onChange, ariaLabel, placeholder = "", locale, min, max, disabled, clearable = true, highlight, weekStartsOn, inline = false, hideIcon = false }: GlassDatePickerProps) {
   const [open, setOpen] = useState(false);
-  const [viewDate, setViewDate] = useState(() => new Date());
+  const [viewDate, setViewDate] = useState(() => value ? parseISO(value) : new Date());
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const dateLocale = locale === "zh" ? zhCN : enUS;
   const { position, placed } = usePickerSurface(open, triggerRef, popupRef, () => setOpen(false));
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     setViewDate(value ? parseISO(value) : new Date());
   }, [open, value]);

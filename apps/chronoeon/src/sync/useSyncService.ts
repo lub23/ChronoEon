@@ -17,7 +17,8 @@ export class LedgerReplacementError extends Error {
 }
 
 function catalogSignature(payload: Record<string, unknown>): string {
-  return stableJson((payload.settings as ChronoEonSettings | undefined)?.bill?.categories);
+  const settings = payload.settings as ChronoEonSettings | undefined;
+  return stableJson(settings?.calendars.find(calendar => calendar.id === settings.defaultCalendarID)?.billCategories);
 }
 
 export interface SyncServiceState {

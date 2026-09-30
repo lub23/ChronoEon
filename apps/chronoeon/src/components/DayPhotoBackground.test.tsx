@@ -11,6 +11,27 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); });
 describe("local photo crossfade", () => {
+  it("crossfades a replacement list without removing the decoded outgoing image", async () => {
+    act(() => root.render(<DayPhotoBackground images={["/old.jpg"]} />));
+    const old = host.querySelector(".is-current");
+    act(() => root.render(<DayPhotoBackground images={["/replacement.jpg"]} />));
+    expect(host.querySelector(".is-current")).toBe(old);
+    const incoming = host.querySelector<HTMLImageElement>(".is-incoming")!;
+    incoming.decode = vi.fn(async () => {});
+    await act(async () => incoming.dispatchEvent(new Event("load")));
+    act(() => vi.advanceTimersByTime(40));
+    expect(incoming.classList.contains("is-ready")).toBe(true);
+    act(() => vi.advanceTimersByTime(1250));
+    expect(host.querySelector(".is-current")).toBe(incoming);
+    expect(old?.isConnected).toBe(false);
+  });
+  it("uses one shared tick across different dates without rerendering foreground", () => {
+    act(() => root.render(<><DayPhotoBackground images={["/one.jpg", "/two.jpg"]} intervalMs={1000} /><DayPhotoBackground images={["/a.jpg", "/b.jpg"]} intervalMs={1000} /></>));
+    act(() => vi.advanceTimersByTime(999));
+    expect(host.querySelectorAll(".is-incoming")).toHaveLength(0);
+    act(() => vi.advanceTimersByTime(1));
+    expect(host.querySelectorAll(".is-incoming")).toHaveLength(2);
+  });
   it("keeps the current photo opaque until the incoming photo decodes, then promotes that same node", async () => {
     const renderParent = vi.fn();
     function Parent() { renderParent(); return <DayPhotoBackground images={["/one.jpg", "/two.jpg", "/three.jpg"]} intervalMs={1000} />; }

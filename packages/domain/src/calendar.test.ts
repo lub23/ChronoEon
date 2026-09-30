@@ -5,6 +5,7 @@ import {
   classifyCrossDayDateTimes,
   classifyCrossDayEntry,
   entriesForDate,
+  entriesByDateRange,
   entrySegmentForDate,
   formatEntryTime,
   getDailyFilePath,
@@ -30,6 +31,18 @@ function entry(partial: Partial<Entry> & Pick<Entry, "id" | "date">): Entry {
 }
 
 describe("shared calendar domain", () => {
+  it("range projection matches per-day expansion for old recurring series and moved overnight occurrences", () => {
+    const records = [
+      entry({ id: "weekly", date: "2026-01-01", recurrence: "weekly", recurringDays: [1, 3] }),
+      entry({ id: "night", date: "2026-01-01", start: "23:00", end: "01:00", recurrence: "daily", recurringEnd: "2026-10-04", recurrenceMoves: { "2026-09-20": { begin: "2026-10-02 23:00", end: "2026-10-03 01:00" } } }),
+      entry({ id: "plain", date: "2026-10-02", endDate: "2026-10-04" }),
+    ];
+    const grouped = entriesByDateRange(records, "2026-10-01", "2026-10-07");
+    for (const date of isoDateRange("2026-10-01", "2026-10-07")) {
+      const ordered = (rows: Entry[]) => rows.sort((a,b) => a.id.localeCompare(b.id));
+      expect(ordered(grouped.get(date)!)).toEqual(ordered(entriesForDate(records, date)));
+    }
+  });
   it("uses civil UTC dates across leap days and bounded ranges", () => {
     expect(addIsoDays("2028-02-28", 1)).toBe("2028-02-29");
     expect(addIsoDays("2028-02-29", 1)).toBe("2028-03-01");

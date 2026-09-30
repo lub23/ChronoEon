@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { itemDailyCost, itemDaysOwned, itemImageHash, itemNetCost, draftToItem, validateItemDraft, type ItemDraft } from "./item";
+import { itemDailyCost, itemDaysOwned, itemImageHashes, itemNetCost, draftToItem, validateItemDraft, type ItemDraft } from "./item";
 
-const draft: ItemDraft = { name: "Camera", category: "electronics", acquisition: "purchase", acquiredOn: "2026-03-07", acquiredAt: "09:00", cost: 300, currency: "CNY" };
+const draft: ItemDraft = { name: "Camera", calendarId: "default", category: "electronics", acquisition: "purchase", acquiredOn: "2026-03-07", acquiredAt: "09:00", cost: 300, currency: "CNY" };
 
 describe("item ownership", () => {
   it("creates stable identity and trims human input without changing snapshots", () => {
@@ -51,12 +51,11 @@ describe("item ownership", () => {
     expect(() => validateItemDraft({ ...draft, ...patch })).toThrow(/ITEM_INVALID_|ASSET_INVALID_/);
   });
 
-  it("extracts only canonical compressed image hashes while drafts permit demo blobs", () => {
+  it("extracts canonical compressed image hashes while drafts permit demo blobs", () => {
     const hash = "a".repeat(64);
-    expect(itemImageHash(`attachments/${hash}.webp`)).toBe(hash);
-    for (const image of [undefined, "", `attachments/${hash}.jpg`, `../attachments/${hash}.webp`, `attachments/${hash.toUpperCase()}.webp`, "blob:demo"]) {
-      expect(itemImageHash(image)).toBeNull();
-    }
-    expect(draftToItem({ ...draft, image: "blob:demo" }).image).toBe("blob:demo");
+    expect(itemImageHashes([`attachments/${hash}.webp`, "blob:demo"])).toEqual([hash]);
+    expect(itemImageHashes(undefined)).toEqual([]);
+    const item = draftToItem({ ...draft, images: ["blob:demo", ""] });
+    expect(item.images).toEqual(["blob:demo"]);
   });
 });

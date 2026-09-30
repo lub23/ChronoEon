@@ -1,5 +1,5 @@
 import type { EntryKind } from "../entry";
-import { billCategoryForValue, billDirectionForCategory, categoryOptionsForKind, defaultCategoryForKind, type ChronoEonSettings } from "../settings";
+import { billCategoriesForCalendar, billCategoryForValue, billDirectionForCategory, categoryOptionsForKind, defaultCategoryForKind, type ChronoEonSettings } from "../settings";
 import type { CaptureHistoryItem } from "./index";
 import { titleMatchScore } from "./titleMatch";
 import { localDate } from "./time";
@@ -32,15 +32,15 @@ export function inferCategory(
     : amount !== undefined && amount > 0 ? "income" : "expense";
   const canonicalValue = (value: string): string => {
     if (kind !== "bill") return value;
-    const primary = billCategoryForValue(value, settings);
+    const primary = billCategoryForValue(value, settings, calendarId);
     if (!primary) return value;
     const sub = value.split("/").slice(1).join("/");
     return sub ? `${primary.id}/${sub}` : primary.id;
   };
   const valid = new Set(options.map((option) => option.value));
-  if (kind === "bill") for (const primary of settings.bill.categories) valid.add(primary.id);
+  if (kind === "bill") for (const primary of billCategoriesForCalendar(settings, calendarId)) valid.add(primary.id);
   const available = (category: string) => valid.has(canonicalValue(category))
-    && (kind !== "bill" || direction === "any" || billDirectionForCategory(category, settings) === direction);
+    && (kind !== "bill" || direction === "any" || billDirectionForCategory(category, settings, calendarId) === direction);
   const recent = history.filter((item) => item.kind === kind && available(item.category)).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 500);
   const today = Date.parse(localDate(now));
   let best: CaptureHistoryItem | undefined, score = 0;
@@ -59,7 +59,7 @@ export function inferCategory(
   } else {
     for (const [keywords, id, sub] of bills) {
       if (!keywords.test(raw)) continue;
-      const primary = settings.bill.categories.find((category) => category.id === id && category.direction === direction);
+      const primary = billCategoriesForCalendar(settings, calendarId).find((category) => category.id === id && category.direction === direction);
       if (primary) {
         const child = primary.sub.find((name) => sub?.test(name));
         return { value: child ? primary.id + "/" + child : primary.id, confidence: 0.75 };
@@ -67,6 +67,6 @@ export function inferCategory(
     }
   }
   let value = defaultCategoryForKind(kind, settings, calendarId);
-  if (kind === "bill" && !available(value)) value = settings.bill.categories.find((category) => category.direction === direction)?.id ?? value;
+  if (kind === "bill" && !available(value)) value = billCategoriesForCalendar(settings, calendarId).find((category) => category.direction === direction)?.id ?? value;
   return { value, confidence: 0 };
 }

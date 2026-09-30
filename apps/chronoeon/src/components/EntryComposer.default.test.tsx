@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDefaultSettings } from "@chronoeon/domain";
+import { createDefaultSettings, type Entry } from "@chronoeon/domain";
 import type { CaptureHistoryItem } from "@chronoeon/domain";
 import { EntryComposer } from "./EntryComposer";
 
@@ -59,6 +59,34 @@ describe("EntryComposer defaults", () => {
     expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("灵感");
   });
 
+  it("keeps the idea tab selected when editing an existing idea", () => {
+    const idea: Entry = {
+      id: "idea-edit",
+      kind: "idea",
+      title: "Recorded thought",
+      date: "2026-09-09",
+      allDay: true,
+      category: "default",
+      color: "#90d7ec",
+      createdAt: "2026-09-09T10:00:00.000Z",
+    };
+    act(() => {
+      root.render(
+        <EntryComposer
+          locale="zh"
+          selectedDate="2026-09-09"
+          editing={idea}
+          settings={createDefaultSettings("zh")}
+          onClose={vi.fn()}
+          onSave={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+    });
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("灵感");
+    expect(host.querySelector(".composer-pair--note-only")).not.toBeNull();
+  });
+
   it("infers from matching history until the category is chosen manually", async () => {
     const settings = createDefaultSettings();
     settings.calendars[0].categories = [
@@ -94,6 +122,22 @@ describe("EntryComposer defaults", () => {
     });
     await act(async () => { setInputValue(title, "今天健身一小时；临时会议"); });
     expect(host.querySelector(".glass-select-value")?.textContent).toContain("工作");
+  });
+
+  it("updates untouched location after title changes and leaves edited records alone", async () => {
+    const settings = createDefaultSettings();
+    const history: CaptureHistoryItem[] = [
+      { kind: "event", title: "Yoga", category: "default", location: "Gym", date: "2026-09-12" },
+      { kind: "event", title: "Design review", category: "default", location: "Office", date: "2026-09-12" },
+    ];
+    act(() => root.render(<EntryComposer locale="en" selectedDate="2026-09-12" editing={null} settings={settings} history={history} onClose={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} />));
+    const title = host.querySelector<HTMLInputElement>(".field-label--title input")!;
+    const location = host.querySelector<HTMLInputElement>(".location-input-wrap input")!;
+    await act(async () => setInputValue(title, "Yoga")); expect(location.value).toBe("Gym");
+    await act(async () => setInputValue(title, "Design review")); expect(location.value).toBe("Office");
+    await act(async () => setInputValue(title, "")); expect(location.value).toBe("");
+    expect(host.querySelectorAll('[role="tab"] svg')).toHaveLength(5);
+    expect(host.querySelector('.kind-dot')).toBeNull();
   });
 
   it("fills an untouched location, then respects clearing or manual entry", async () => {
@@ -172,6 +216,38 @@ describe("EntryComposer defaults", () => {
       );
     });
     expect(host.querySelector<HTMLButtonElement>('button[aria-label="提醒"]')?.textContent).toContain(label);
+  });
+
+  it("creates one linked asset from the bill composer when a category is chosen", async () => {
+    const saved = {
+      id: "bill-saved", title: "相机", kind: "bill", category: "expense",
+      date: "2026-09-09", amount: 300, currency: "CNY", createdAt: "2026-09-09T00:00:00Z",
+    } as Entry;
+    const onSave = vi.fn(async () => saved);
+    const onCreateItemFromBill = vi.fn(async () => {});
+    act(() => {
+      root.render(
+        <EntryComposer
+          locale="zh"
+          selectedDate="2026-09-09"
+          editing={null}
+          settings={createDefaultSettings("zh")}
+          initialDraft={{ kind: "bill", title: "相机" }}
+          onClose={vi.fn()}
+          onSave={onSave}
+          onDelete={vi.fn()}
+          onCreateItemFromBill={onCreateItemFromBill}
+        />,
+      );
+    });
+    await act(async () => { host.querySelector<HTMLButtonElement>('button[aria-label="添加物品"]')!.click(); });
+    await act(async () => {
+      [...document.querySelectorAll<HTMLButtonElement>(".glass-select-option")]
+        .find((option) => option.textContent?.includes("电子产品"))!.click();
+    });
+    await act(async () => { host.querySelector<HTMLButtonElement>(".composer-footer .primary-action")!.click(); });
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onCreateItemFromBill).toHaveBeenCalledWith(saved, "electronics");
   });
 });
 

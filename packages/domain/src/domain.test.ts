@@ -31,8 +31,8 @@ describe("shared domain", () => {
   });
 
   it("reserves a compact title-only height for edge-clamped timed chips", () => {
-    expect(timedItemMinHeightPx(false, 0.6)).toBe(21);
-    expect(timedItemMinHeightPx(true, 0.6)).toBe(22);
+    expect(timedItemMinHeightPx(false, 0.6)).toBe(19);
+    expect(timedItemMinHeightPx(true, 0.6)).toBe(20);
   });
 
   it("normalizes known type settings without retaining unrelated fields", () => {
@@ -61,7 +61,8 @@ describe("shared domain", () => {
     expect(settings.calendars[0].categories.map((category) => category.id)).toEqual(["Beta"]);
     expect(settings.calendars[0].defaultCategoryId).toBe("Beta");
     expect(settings.bill.currency).toBe("CNY");
-    expect(settings.bill.paymentMethods).toEqual(["支付宝"]);
+    expect(settings.calendars[0].billCategories).toHaveLength(1);
+    expect(settings.calendars[0].paymentMethods).toEqual([{ id: "支付宝", name: "支付宝" }]);
     expect(settings).not.toHaveProperty("remoteLLMApiKey");
   });
 
@@ -70,6 +71,6 @@ describe("shared domain", () => {
     const daily = categoryOptionsForKind("bill", settings).find((option) => option.value === "expense/Daily");
     expect(daily).toMatchObject({ group: "Expense", color: "#c0392b" });
     expect(resolveEntryColor("Expense/Daily", "bill", settings)).toBe("#c0392b");
-    expect(DEFAULT_CHRONOEON_SETTINGS.bill.paymentMethods).toContain("WeChat");
+    expect(DEFAULT_CHRONOEON_SETTINGS.calendars[0].paymentMethods.map(method => method.name)).toEqual(["Bank Card", "Cash"]);
   });
 });

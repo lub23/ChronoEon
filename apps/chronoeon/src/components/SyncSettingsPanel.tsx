@@ -8,7 +8,6 @@ import type { useSyncService } from "../sync/useSyncService";
 import { formatBytes, syncConfigured, type SyncConfig, type SyncMode } from "../sync/types";
 import { localeTag, t, type MessageKey } from "../i18n";
 import { Icon } from "./Icon";
-import { LedgerImportPanel } from "./LedgerImportPanel";
 
 interface Props { locale: Locale; config: SyncConfig; onChange: (config: SyncConfig) => void; service: ReturnType<typeof useSyncService>; entries: Entry[] }
 const errors: Record<string, MessageKey> = {
@@ -97,12 +96,15 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
     </div>
     <MotionPresence>{dialog && createPortal(dialog, document.body)}</MotionPresence>
     {service.status?.lastSuccess && <p className="settings-footnote">{t("syncLastSuccess", locale)}: {new Date(service.status.lastSuccess).toLocaleString(localeTag[locale])}</p>}
-    {service.usage && <dl className="sync-usage" aria-label={t("syncStorageUsage", locale)}>
-      <div><dt>{t(config.mode === "git" ? "syncStorageRepository" : "syncStorageRepositoryWebdav", locale)}</dt><dd>{formatBytes(service.usage.syncCacheBytes, locale)}</dd></div>
-      <div><dt>{t("syncStoragePhotos", locale)}</dt><dd>{formatBytes(service.usage.attachmentBytes, locale)}</dd></div>
-      <div><dt>{t("syncStorageDatabase", locale)}</dt><dd>{formatBytes(service.usage.databaseBytes, locale)}</dd></div>
-      <div className="sync-usage-total"><dt>{t("syncStorageTotal", locale)}</dt><dd>{formatBytes(service.usage.syncCacheBytes + service.usage.attachmentBytes + service.usage.databaseBytes, locale)}</dd></div>
-    </dl>}
+    {service.usage && <>
+      <dl className="sync-usage" aria-label={t("syncStorageUsage", locale)}>
+        <div><dt>{t("syncStorageDatabase", locale)}</dt><dd>{formatBytes(service.usage.databaseBytes, locale)}</dd></div>
+        <div><dt>{t("syncStoragePhotos", locale)}</dt><dd>{formatBytes(service.usage.attachmentBytes, locale)}</dd></div>
+        <div className="sync-usage-total"><dt>{t("syncStorageTotal", locale)}</dt><dd>{formatBytes(service.usage.attachmentBytes + service.usage.databaseBytes, locale)}</dd></div>
+        <div><dt>{t(config.mode === "git" ? "syncStorageRepository" : "syncStorageRepositoryWebdav", locale)}</dt><dd>{formatBytes(service.usage.syncCacheBytes, locale)}</dd></div>
+      </dl>
+      <p className="settings-footnote">{t("syncStorageExplanation", locale)}</p>
+    </>}
     {error && <div role="status" className={error.code === "SYNC_OFFLINE" ? "settings-footnote" : "sync-error"}>
       <p>{t(errors[error.code] ?? "syncFailedSafe", locale)}</p>
       {error.code !== "SYNC_OFFLINE" && <details><summary>{t("syncErrorDetails", locale)}</summary><pre>{error.message}</pre></details>}
@@ -165,7 +167,6 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
         </ul>
       </section>
     )}
-    <LedgerImportPanel locale={locale} service={service} />
     <p className="settings-footnote">{t("syncDataNote", locale)}</p>
     {config.mode === "webdav" && <p className="settings-footnote">{t("syncWebdavRetention", locale)}</p>}
     {service.conflicts.length > 0 && <section className="sync-conflict-list" aria-label={t("syncConflicts", locale)}>

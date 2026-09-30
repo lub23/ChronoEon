@@ -1,4 +1,4 @@
-import type { ChronoEonSettings } from "../settings";
+import { paymentMethodsForCalendar, type ChronoEonSettings } from "../settings";
 import { NUMBER, consume, consumeMatch, parseNumber, remainingText, type CaptureText } from "./text";
 
 const INCOME = /工资|薪资|薪水|奖金|收入|报销|退款|返现|收到|赚|\b(?:salary|income|bonus|reimbursement|refund|received|earned)\b/i;
@@ -15,6 +15,8 @@ export function extractMoney(text: CaptureText, settings: ChronoEonSettings): Ca
   const explicit = new RegExp("(?:" + prefix + ")\\s*([+-]?" + NUMBER + ")(?![\\d.])|(?<![\\d.])([+-]?" + NUMBER + ")\\s*(?:" + suffix + ")", "i").exec(input);
   const match = explicit ?? (INCOME.test(text.input) || BILL_CUE.test(text.input) ? /(?<![\d.:/\-])([+-]?\d+(?:\.\d{1,2})?)(?![\d.:/\-])/.exec(input) : null);
   if (!match) return {};
+  // A bare quantity is not a price: "buy 2 books" must not become a bill.
+  if (!explicit && /^\s*(?:本|个|件|杯|份|张|台|次|人|天|小时|分钟|books?\b|items?\b|cups?\b)/i.test(input.slice(match.index + match[0].length))) return {};
   const number = explicit ? explicit[1] ?? explicit[2] : match[1];
   const value = parseNumber(number.replace(/^[+-]/, ""));
   if (!Number.isFinite(value)) return {};
@@ -28,10 +30,12 @@ export function extractMoney(text: CaptureText, settings: ChronoEonSettings): Ca
   const after = /^\s*的/.exec(input.slice(match.index + match[0].length));
   if (after) consume(text, match.index + match[0].length, after[0].length, "cue");
   let payment: string | undefined;
-  for (const method of settings.bill.paymentMethods) {
-    const pattern = payments.find(([name]) => name.toLowerCase() === method.toLowerCase())?.[1];
-    const found = pattern?.exec(remainingText(text));
-    if (found) { payment = method; consumeMatch(text, found, "cue"); break; }
+  for (const method of paymentMethodsForCalendar(settings)) {
+    const pattern = payments.find(([name, pattern]) => name.toLowerCase() === method.name.toLowerCase() || name.toLowerCase() === method.id.toLowerCase() || pattern.test(method.name))?.[1];
+    const rest = remainingText(text);
+    const escapedName = method.name.replace(/[.*+?^${}()|[\]\\]/g, character => "\\" + character);
+    const found = (method.name.length > 1 ? new RegExp(escapedName, "i").exec(rest) : null) ?? pattern?.exec(rest);
+    if (found) { payment = method.id; consumeMatch(text, found, "cue"); break; }
   }
   return { amount: (income ? 1 : -1) * value, currency, payment };
 }

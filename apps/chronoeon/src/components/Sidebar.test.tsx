@@ -127,6 +127,57 @@ describe("Sidebar", () => {
     expect(host.querySelector(".nav-day-menu")).toBeNull();
   });
 
+  it("switches statistics tabs from the collapsed menu and expanded segmented control", async () => {
+    const onViewChange = vi.fn();
+    const onInsightsTabChange = vi.fn();
+    act(() => {
+      root.render(
+        <Sidebar
+          locale="zh"
+          activeView="insights"
+          collapsed
+          insightsTab="bills"
+          onViewChange={onViewChange}
+          onInsightsTabChange={onInsightsTabChange}
+          onCollapsedChange={vi.fn()}
+          onNew={vi.fn()}
+          onCompact={vi.fn()}
+          onOpenSettings={vi.fn()}
+        />,
+      );
+    });
+    const insightsButton = [...host.querySelectorAll<HTMLButtonElement>(".nav-item")]
+      .find((button) => button.getAttribute("aria-label") === "统计")!;
+    await act(async () => { insightsButton.click(); });
+    const itemsOption = [...host.querySelectorAll<HTMLButtonElement>(".nav-day-menu button")]
+      .find((button) => button.textContent?.includes("物品"))!;
+    await act(async () => { itemsOption.click(); });
+    expect(onInsightsTabChange).toHaveBeenCalledWith("items");
+    expect(onViewChange).toHaveBeenCalledWith("insights");
+
+    act(() => {
+      root.render(
+        <Sidebar
+          locale="zh"
+          activeView="insights"
+          collapsed={false}
+          insightsTab="items"
+          onViewChange={vi.fn()}
+          onInsightsTabChange={onInsightsTabChange}
+          onCollapsedChange={vi.fn()}
+          onNew={vi.fn()}
+          onCompact={vi.fn()}
+          onOpenSettings={vi.fn()}
+        />,
+      );
+    });
+    const controls = [...host.querySelectorAll<HTMLButtonElement>(".sidebar-insights-switch button")];
+    expect(controls).toHaveLength(3);
+    expect(controls.find((button) => button.textContent?.includes("物品"))?.getAttribute("aria-pressed")).toBe("true");
+    await act(async () => { controls[0].click(); });
+    expect(onInsightsTabChange).toHaveBeenCalledWith("bills");
+  });
+
   it("shows the running version with an update check that needs the app shell", async () => {
     act(() => {
       root.render(

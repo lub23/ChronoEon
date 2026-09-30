@@ -553,6 +553,7 @@ describe("day view: drag to reschedule", () => {
 
   it("seeds a composer draft from a selection dragged across midnight", async () => {
     const drafts: Array<Partial<EntryDraft>> = [];
+    const selectDate = vi.fn();
     act(() => {
       root.render(
         <DayView
@@ -566,7 +567,7 @@ describe("day view: drag to reschedule", () => {
           search=""
           weekStartsOn={1}
           timeScale={15}
-          onSelectDate={() => {}}
+          onSelectDate={selectDate}
           onToggle={() => {}}
           onEdit={() => {}}
           onNew={() => {}}
@@ -592,6 +593,7 @@ describe("day view: drag to reschedule", () => {
       endDate: "2026-08-11",
       allDay: false,
     });
+    expect(selectDate).not.toHaveBeenCalled();
   });
 
   it("does not reschedule when the pointer never moves", async () => {

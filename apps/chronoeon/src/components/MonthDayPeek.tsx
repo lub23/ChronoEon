@@ -50,7 +50,7 @@ export function MonthDayPeek({
   onOpenDay,
 }: MonthDayPeekProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState<{ left: number; top: number; width: number } | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
 
   // Own the next Escape through the shared modal bus rather than a private
   // window listener, so a peek opened over an open dialog still closes exactly
@@ -73,23 +73,18 @@ export function MonthDayPeek({
     const node = panelRef.current;
     if (!node) return;
     const width = Math.max(MIN_WIDTH, Math.min(anchor.width + 40, 320));
-    const height = node.getBoundingClientRect().height;
     const centre = anchor.left + anchor.width / 2;
-    // Clamp to the calendar itself: the viewport's left edge includes the
-    // sidebar, so a first-column peek could otherwise cover navigation.
-    const host = node.closest(".month-panel, .month-layout, .day-view, .content-inner--calendar")?.getBoundingClientRect();
-    const left = Math.max(
-      (host?.left ?? 0) + MARGIN,
-      Math.min(centre - width / 2, (host?.right ?? window.innerWidth) - width - MARGIN),
-    );
+    const left = Math.max(8, Math.min(centre - width / 2, window.innerWidth - width - MARGIN));
     const dock = node.closest(".main-shell")?.querySelector(".view-dock")?.getBoundingClientRect();
     const lowerBound = dock ? dock.top - MARGIN : window.innerHeight - MARGIN;
+    const maxHeight = Math.max(160, Math.min(520, lowerBound - MARGIN * 2));
+    const height = Math.min(node.scrollHeight, maxHeight);
     // Prefer covering the cell; flip up, then clamp, so it never opens
     // off-screen or under the persistent dock.
     let top = anchor.top - 6;
     if (top + height + MARGIN > lowerBound) top = anchor.bottom - height + 6;
     top = Math.max(MARGIN, Math.min(top, lowerBound - height));
-    setPosition({ left, top, width });
+    setPosition({ left, top, width, maxHeight });
   }, [anchor.bottom, anchor.height, anchor.left, anchor.top, anchor.width, entries.length]);
 
   // Take focus once, after the click that opened the panel has settled — a
@@ -116,7 +111,7 @@ export function MonthDayPeek({
       aria-label={heading}
       tabIndex={-1}
       style={position
-        ? { left: `${position.left}px`, top: `${position.top}px`, width: `${position.width}px` }
+        ? { left: `${position.left}px`, top: `${position.top}px`, width: `${position.width}px`, maxHeight: `${position.maxHeight}px` }
         // First paint measures the natural height off-screen, so the flip
         // decision above is made against the real size instead of a guess.
         : { left: "-9999px", top: "0px", width: `${MIN_WIDTH}px`, visibility: "hidden" }}

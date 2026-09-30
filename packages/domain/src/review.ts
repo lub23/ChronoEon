@@ -8,7 +8,7 @@ import {
   recurrenceOccurrenceDates,
 } from "./calendar";
 import type { Entry } from "./entry";
-import { DEFAULT_CHRONOEON_SETTINGS, resolveEntryColor, scheduleCategoryOptions, signedBillAmount, type ChronoEonSettings, type EntryCategoryOption } from "./settings";
+import { DEFAULT_CHRONOEON_SETTINGS, allBillCategories, billCategoryForValue, resolveEntryColor, scheduleCategoryOptions, selectedCalendar, signedBillAmount, type ChronoEonSettings, type EntryCategoryOption } from "./settings";
 import {
   aggregateBillStats,
   entriesInRange,
@@ -211,7 +211,7 @@ export function reviewCategoryOptions(
 ): EntryCategoryOption[] {
   const scoped = entries.filter(entry => kind === "bill" ? entry.kind === "bill" : entry.kind === "task" || entry.kind === "event");
   const options: EntryCategoryOption[] = kind === "bill"
-    ? settings.bill.categories.map(category => ({ value: category.id, label: category.name, color: category.color }))
+    ? allBillCategories(settings).map(category => ({ value: category.id, label: category.name, color: category.color }))
     : scheduleCategoryOptions(settings).map(({ value, label, color }) => ({ value, label, color }));
   const aliases = new Set(options.flatMap(option => [option.value.toLocaleLowerCase(), option.label.toLocaleLowerCase()]));
   for (const entry of scoped) {
@@ -259,14 +259,19 @@ export function reviewBuckets(
     for (const entry of byDate.get(date) ?? []) {
       const primary = primaryCategory(entry.category);
       if (entry.kind === "bill") {
-        const amount = signedBillAmount(entry.amount, entry.category, settings) ?? 0;
-        const category = bills.get(primary.toLocaleLowerCase()) ?? primary;
+        const amount = signedBillAmount(entry.amount, entry.category, settings, entry.calendar) ?? 0;
+        const category = billCategoryForValue(entry.category, settings, entry.calendar)?.id
+          ?? bills.get(primary.toLocaleLowerCase())
+          ?? primary;
         group.billTotal += amount;
         if (amount < 0) group.expense -= amount;
         if (amount > 0) group.billIncome += amount;
         group.billCategories[category] = (group.billCategories[category] ?? 0) + amount;
       } else if (entry.kind === "task" || entry.kind === "event") {
-        const category = schedules.get(primary.toLocaleLowerCase()) ?? primary;
+        const category = selectedCalendar(settings, entry.calendar).categories
+          .find(candidate => candidate.id === primary || candidate.name === primary)?.id
+          ?? schedules.get(primary.toLocaleLowerCase())
+          ?? primary;
         group.scheduleTotal += 1;
         group.scheduleCategories[category] = (group.scheduleCategories[category] ?? 0) + 1;
         if (entry.kind === "task") {

@@ -15,15 +15,15 @@ function payload(): LedgerImportPayload {
 }
 
 describe("ledger replacement preparation", () => {
-  it("keeps built-ins byte-for-byte, appends a same-name user category and preserves fields", () => {
+  it("replaces the ledger catalog, maps payment labels to IDs and preserves fields", () => {
     const settings = createDefaultSettings();
     const original = structuredClone(settings);
     const result = prepareLedgerReplacement(settings, payload(), at);
     expect(settings).toEqual(original);
-    expect(result.categories.slice(0, original.bill.categories.length)).toEqual(original.bill.categories);
-    expect(result.categories.at(-1)).toMatchObject({ id: parentId, name: "Income", sub: ["Salary"] });
+    expect(result.categories).toHaveLength(1);
+    expect(result.categories[0]).toMatchObject({ id: parentId, name: "Income", sub: ["Salary"] });
     expect(result.entries[0]).toMatchObject({ kind: "bill", category: `${parentId}/Salary`, amount: 123.45,
-      start: "12:34", allDay: false, currency: "CNY", payment: "Cash", tags: ["one tag"], note: "Line one\nLine two" });
+      start: "12:34", allDay: false, currency: "CNY", payment: "cash", tags: ["one tag"], note: "Line one\nLine two" });
   });
 
   it("keeps expense amounts positive and does not duplicate a repeated import catalog", () => {
@@ -32,7 +32,10 @@ describe("ledger replacement preparation", () => {
     input.summary = { ...input.summary, incomeCount: 0, expenseCount: 1, incomeCents: 0, expenseCents: 12345, netCents: -12345 };
     const settings = createDefaultSettings();
     const first = prepareLedgerReplacement(settings, input, at);
-    const second = prepareLedgerReplacement({ ...settings, bill: { ...settings.bill, categories: first.categories } }, input, at);
+    const second = prepareLedgerReplacement({
+      ...settings,
+      calendars: settings.calendars.map((calendar, index) => index === 0 ? { ...calendar, billCategories: first.categories } : calendar),
+    }, input, at);
     expect(second.categories).toEqual(first.categories);
     expect(second.entries[0].amount).toBe(123.45);
   });
@@ -47,6 +50,7 @@ describe("ledger replacement preparation", () => {
     ["invalid date", (input: LedgerImportPayload) => { input.transactions[0].date = "2026-02-30"; }],
     ["invalid time", (input: LedgerImportPayload) => { input.transactions[0].time = "25:00"; }],
     ["built-in category ID", (input: LedgerImportPayload) => { input.categories[0].id = "income"; }],
+    ["unknown payment method", (input: LedgerImportPayload) => { input.transactions[0].payment = "Not offered"; }],
     ["empty replacement", (input: LedgerImportPayload) => { input.transactions = []; }],
   ] as const)("rejects %s without silently losing data", (_name, mutate) => {
     const input = payload(); mutate(input);
@@ -55,7 +59,7 @@ describe("ledger replacement preparation", () => {
 
   it("refuses to change a pre-existing category with the same stable ID", () => {
     const settings = createDefaultSettings();
-    settings.bill.categories.push({ id: parentId, name: "Previous", direction: "income", sub: ["Salary"], color: "#000000" });
+    settings.calendars[0].billCategories.push({ id: parentId, name: "Previous", direction: "income", sub: ["Salary"], color: "#000000" });
     expect(() => prepareLedgerReplacement(settings, payload(), at)).toThrow("LEDGER_CATEGORY_CONFLICT");
   });
 });

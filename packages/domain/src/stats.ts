@@ -176,11 +176,11 @@ export interface BillStats {
 function billCategoryOf(entry: Entry, settings: ChronoEonSettings) {
   const raw = entry.category || "uncategorized";
   const [primary, sub] = raw.split("/");
-  const known = billCategoryForValue(raw, settings);
+  const known = billCategoryForValue(raw, settings, entry.calendar);
   return {
     id: known?.id ?? primary,
     name: known?.name ?? primary,
-    color: known?.color ?? entry.color ?? resolveEntryColor(raw, "bill", settings),
+    color: known?.color ?? entry.color ?? resolveEntryColor(raw, "bill", settings, entry.calendar),
     sub: sub || undefined
   };
 }
@@ -198,9 +198,9 @@ export function aggregateBillStats(
   const categories = new Map<string, BillCategoryStat & { subMap: Map<string, BillSubCategoryStat> }>();
 
   for (const entry of inRange) {
-    const amount = signedBillAmount(entry.amount, entry.category, settings);
+    const amount = signedBillAmount(entry.amount, entry.category, settings, entry.calendar);
     if (amount === undefined) continue;
-    if (billDirectionForCategory(entry.category, settings) === "income") {
+    if (billDirectionForCategory(entry.category, settings, entry.calendar) === "income") {
       income += amount;
       incomeEntries.push(entry);
     } else {
@@ -383,7 +383,7 @@ export function expenseHeatmap(
   for (const entry of entriesInRange(entries, { start: yearStart, end: yearEnd })) {
     if (entry.kind !== "bill") continue;
     const amount = typeof entry.amount === "number" ? entry.amount : 0;
-    if (billDirectionForCategory(entry.category, settings) !== "expense") continue;
+    if (billDirectionForCategory(entry.category, settings, entry.calendar) !== "expense") continue;
     totals.set(entry.date, (totals.get(entry.date) ?? 0) + Math.abs(amount));
   }
 

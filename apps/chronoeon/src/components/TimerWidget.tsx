@@ -50,9 +50,9 @@ export function TimerWidget({ locale, settings, timer, open, compact = false, on
   useEffect(() => {
     if (!open || categoryTouchedRef.current) return;
     const suggestionTitle = title.trim();
-    if (!suggestionTitle) return;
-    const suggestion = inferCategory(suggestionTitle, title, "event", settings, history, new Date());
-    if (suggestion.confidence > 0 && suggestion.value !== category) setCategory(suggestion.value);
+    const suggestion = inferCategory(suggestionTitle, title, "event", settings, history.filter(entry => !entry.calendar || entry.calendar === settings.defaultCalendarID), new Date());
+    const next = suggestion.confidence > 0 ? suggestion.value : defaultTimerCategory(settings);
+    if (next !== category) setCategory(next);
   }, [category, history, open, settings, title]);
 
   useModalDismiss((event) => {

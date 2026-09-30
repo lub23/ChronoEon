@@ -1,5 +1,5 @@
 import { isStableEntryId, type Entry } from "./entry";
-import type { BillPrimaryCategory, ChronoEonSettings } from "./settings";
+import { billCategoriesForCalendar, paymentMethodsForCalendar, type BillPrimaryCategory, type ChronoEonSettings } from "./settings";
 
 /** Local conversion format. Amounts are integer cents, never signed cash flows. */
 export interface LedgerImportPayload {
@@ -49,6 +49,14 @@ function validDate(value: unknown): value is string {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
+function paymentMethodId(settings: ChronoEonSettings, calendarId: string, value: string): string {
+  const wanted = value.trim().toLocaleLowerCase();
+  const method = paymentMethodsForCalendar(settings, calendarId).find((candidate) =>
+    candidate.id.trim().toLocaleLowerCase() === wanted || candidate.name.trim().toLocaleLowerCase() === wanted);
+  if (!method) reject("INVALID_PAYMENT_METHOD");
+  return method.id;
+}
+
 /** Validate the entire replacement before any write; never silently skip a row.
  * Existing catalogs are preserved, including same-name built-in categories.
  * Entries reference the new parent's ID, not its potentially ambiguous name.
@@ -65,7 +73,9 @@ export function prepareLedgerReplacement(
     || Number.isNaN(Date.parse(importedAt))) reject("INVALID_PAYLOAD");
 
   const imported = new Map<string, BillPrimaryCategory>();
-  const categories = structuredClone(settings.bill.categories);
+  const existingById = new Map(billCategoriesForCalendar(settings, settings.defaultCalendarID)
+    .map((category) => [category.id, category] as const));
+  const categories: BillPrimaryCategory[] = [];
   for (const category of input.categories) {
     if (!category || !/^ledger-[a-f0-9]{24}$/.test(category.id) || imported.has(category.id)
       || !nonempty(category.name) || category.name.includes("/")
@@ -73,7 +83,7 @@ export function prepareLedgerReplacement(
       || !Array.isArray(category.sub) || !category.sub.length
       || category.sub.some((sub) => !nonempty(sub) || sub.includes("/"))
       || new Set(category.sub).size !== category.sub.length) reject("INVALID_CATEGORY");
-    const existing = categories.find((candidate) => candidate.id === category.id);
+    const existing = existingById.get(category.id);
     if (existing && (existing.name !== category.name || existing.direction !== category.direction
       || JSON.stringify(existing.sub) !== JSON.stringify(category.sub))) reject("CATEGORY_CONFLICT");
     const stored = existing ?? {
@@ -82,7 +92,7 @@ export function prepareLedgerReplacement(
         ?? (category.direction === "income" ? "#2f8f5b" : "#c0392b"),
     };
     imported.set(category.id, stored);
-    if (!existing) categories.push(stored);
+    categories.push(stored);
   }
 
   const summary: LedgerImportSummary = { count: 0, incomeCount: 0, expenseCount: 0,
@@ -108,7 +118,7 @@ export function prepareLedgerReplacement(
       id: row.id, kind: "bill", title: row.title, date: row.date, start: row.time,
       allDay: row.time === undefined, amount: row.amountCents / 100, currency: input.currency,
       category: `${category.id}/${row.subcategory}`, color: category.color,
-      calendar: settings.defaultCalendarID, payment: row.payment, note: row.note,
+      calendar: settings.defaultCalendarID, payment: paymentMethodId(settings, settings.defaultCalendarID, row.payment), note: row.note,
       tags: [...row.tags], createdAt: importedAt, recurrence: "none", reminder: "none", source: "local",
     };
   });

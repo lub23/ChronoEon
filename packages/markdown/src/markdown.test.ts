@@ -4,9 +4,9 @@ import { parseMarkdownDocuments, parseMarkdownV2Blocks, previewStableIdMigration
 
 /** A ledger catalog with the legacy group this fixture writes. */
 const billSettings = createDefaultSettings();
-billSettings.bill.categories = [{ id: "food", name: "饮食", color: "#8f4b2e", direction: "expense", sub: ["正餐"] }];
-billSettings.bill.defaultCategoryId = "food";
-billSettings.bill.defaultSubCategoryId = "正餐";
+billSettings.calendars[0].billCategories = [{ id: "food", name: "饮食", color: "#8f4b2e", direction: "expense", sub: ["正餐"] }];
+billSettings.calendars[0].defaultBillCategoryId = "food";
+billSettings.calendars[0].defaultBillSubCategoryId = "正餐";
 
 const weeklyFixture = `# Week 30, 2026-07-20 (Mon) - 2026-07-26 (Sun)
 

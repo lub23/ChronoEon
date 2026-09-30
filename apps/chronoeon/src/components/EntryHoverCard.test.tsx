@@ -66,7 +66,7 @@ describe("entry hover details card", () => {
 
   it("renders imported primary-only bill IDs as human names on rows and hover cards", () => {
     const settings = structuredClone(DEFAULT_CHRONOEON_SETTINGS);
-    settings.bill.categories.push({ id: "ledger-income", name: "其他收入", color: "#aaa", direction: "income", sub: [] });
+    settings.calendars[0].billCategories.push({ id: "ledger-income", name: "其他收入", color: "#aaa", direction: "income", sub: [] });
     act(() => root.render(<EntryRow entry={{ ...entry, kind: "bill", category: "ledger-income", amount: 50 }} locale="zh" settings={settings} onToggle={() => undefined} onEdit={() => undefined} />));
     expect(host.querySelector(".entry-meta")?.textContent).toContain("其他收入");
     const row = host.querySelector("article")!;

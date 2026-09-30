@@ -1,5 +1,6 @@
 import {
   DEFAULT_CHRONOEON_SETTINGS,
+  billCategoriesForCalendar,
   createDeterministicEntryId,
   isStableEntryId,
   narrowEntryPriority,
@@ -270,7 +271,10 @@ function parseEntryRow(values: string[], headers: Map<string, number>, sectionHi
   const id = isStableEntryId(rawId) ? rawId : createDeterministicEntryId(`csv:${sectionHint ?? "auto"}:${values.join("\u001f")}`);
   const amountValue = getValue(values, headers, "amount");
   const amount = amountValue ? Number(amountValue) : undefined;
-  const category = getValue(values, headers, "category") || (kind === "bill" ? settings.bill.categories[0]?.name ?? "消费" : settings.calendars[0]?.defaultCategoryId ?? "生活");
+  const calendarId = getValue(values, headers, "calendar") || settings.defaultCalendarID;
+  const category = getValue(values, headers, "category") || (kind === "bill"
+    ? billCategoriesForCalendar(settings, calendarId)[0]?.name ?? "消费"
+    : settings.calendars[0]?.defaultCategoryId ?? "生活");
   const doneValue = getValue(values, headers, "done");
   const cancelledValue = getValue(values, headers, "cancelled");
   const status = validStatus(getValue(values, headers, "status"), doneValue, cancelledValue, kind);

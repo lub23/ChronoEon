@@ -77,6 +77,18 @@ describe("compact statistics layout", () => {
     const keyword = host.querySelector(".stats-keyword-input")!;
     expect(heatmap.compareDocumentPosition(keyword) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  it("paginates the top expenses five at a time without an inner scrollbar", () => {
+    const entries = Array.from({ length: 6 }, (_, index) => bill(`expense-${index}`, "expense/Daily", -(index + 1) * 10));
+    act(() => root.render(<StatsView entries={entries} locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} today="2026-09-01" />));
+    const list = host.querySelector(".stats-top-bills-list")!;
+    expect(list.querySelectorAll("li")).toHaveLength(5);
+    expect(list.classList.contains("stats-top-bills-list")).toBe(true);
+    const pagination = host.querySelector(".stats-top-bills-pagination")!;
+    expect(pagination.textContent).toContain("2");
+    act(() => pagination.querySelectorAll<HTMLButtonElement>("button")[2].click());
+    expect(list.querySelectorAll("li")).toHaveLength(1);
+  });
 });
 
 describe("bill category split", () => {
@@ -92,7 +104,7 @@ describe("bill category split", () => {
       );
     });
 
-    expect(host.querySelector(".stats-page .page-title-row h2")?.textContent).toContain("A calmer view");
+    expect(host.querySelector(".stats-page .page-title-row h2")?.textContent).toContain("Numbers, with a clear mind");
     expect(host.querySelectorAll(".stats-custom-range .glass-date-picker")).toHaveLength(2);
     expect(host.querySelector(".heatmap-cell.is-today")?.getAttribute("aria-label")).toContain("2026-09-01");
   });
@@ -277,11 +289,14 @@ describe("remembered Insights selections", () => {
 
 describe("weekly and selected category review curves", () => {
   const catalog = { ...DEFAULT_CHRONOEON_SETTINGS,
-    bill: { ...DEFAULT_CHRONOEON_SETTINGS.bill, categories: [
-      { id: "food", name: "Dining", color: "#aabbcc", direction: "expense" as const, sub: ["Meal", "Drink"] },
-      { id: "income", name: "Income", color: "#ccddee", direction: "income" as const, sub: ["Salary"] },
-    ] },
-    calendars: DEFAULT_CHRONOEON_SETTINGS.calendars.map(calendar => ({ ...calendar, categories: [{ id: "work", name: "Work", color: "#448866" }] })),
+    calendars: DEFAULT_CHRONOEON_SETTINGS.calendars.map(calendar => ({
+      ...calendar,
+      categories: [{ id: "work", name: "Work", color: "#448866" }],
+      billCategories: [
+        { id: "food", name: "Dining", color: "#aabbcc", direction: "expense" as const, sub: ["Meal", "Drink"] },
+        { id: "income", name: "Income", color: "#ccddee", direction: "income" as const, sub: ["Salary"] },
+      ],
+    })),
   };
   function renderReview(locale: "en" | "zh" = "en", tab: "bills" | "tasks" = "bills") {
     act(() => root.render(<StatsView entries={[bill("meal", "food/正餐", 120), bill("salary", "income/Salary", 80), task("work", "open")]} locale={locale} settings={catalog} today="2026-09-12" tab={tab} />));
@@ -315,7 +330,7 @@ describe("weekly and selected category review curves", () => {
     const totalLine = host.querySelector<SVGPolylineElement>('.review-chart-line[data-series="total"]')!;
     expect(totalLine.getAttribute("class")).toContain("is-total");
     expect(totalLine.style.stroke).toBe("");
-    const food = catalog.bill.categories.find(category => category.id === "food")!;
+    const food = catalog.calendars[0].billCategories.find(category => category.id === "food")!;
     expect(host.querySelector<SVGPolylineElement>('.review-chart-line[data-series="category:food"]')?.style.stroke).toBe(food.color);
     act(() => trigger.click());
     const options = [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-multiselectable="true"] [role="option"]')];

@@ -179,7 +179,7 @@ export function ReviewLineChart({ buckets, labels, series, ariaLabel, granularit
       </svg>
         {series.map(item => <span key={item.key} data-series={item.key}
           className={"review-chart-end-label" + (item.total ? " is-total" : "") + seriesClasses(item.key)}
-          title={item.label} style={{ color: item.total ? undefined : item.color, left: right + 11, top: endLabels.get(item.key)! - 7, width: labelWidth }}
+          style={{ color: item.total ? undefined : item.color, left: right + 11, top: endLabels.get(item.key)! - 7, width: labelWidth }}
           onMouseEnter={() => { setHoveredSeries(item.key); setActiveIndex(null); }}
           onMouseLeave={() => setHoveredSeries(null)}
           onClick={() => togglePinnedSeries(item.key)}>
@@ -195,7 +195,7 @@ export function ReviewLineChart({ buckets, labels, series, ariaLabel, granularit
           style={{ left: start, width: Math.max(1, end - start) }} onClick={() => activate(index)}
           onMouseEnter={() => setActiveIndex(index)} onMouseLeave={() => { if (!isTouch) setActiveIndex(null); }}
           onFocus={() => setActiveIndex(index)} onBlur={() => setActiveIndex(null)}
-          title={bucket.date + " · " + summary} aria-label={tooltipDate(bucket.date, granularity, locale) + " · " + summary} />;
+          aria-label={tooltipDate(bucket.date, granularity, locale) + " · " + summary} />;
       })}
       {/* Fat invisible strokes above the columns: pointing at a line selects it
           and reads the value at that x, instead of covering it with a column. */}

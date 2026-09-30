@@ -5,15 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppView } from "../domain/entry";
 import { useSwipeNavigation } from "./useSwipeNavigation";
 let host: HTMLDivElement; let root: Root;
-function Harness({ initial = "day" }: { initial?: AppView }) {
+function Harness({ initial = "day", insights = false }: { initial?: AppView; insights?: boolean }) {
   const [view, setView] = useState<AppView>(initial); const [open, setOpen] = useState(false);
   const [date, setDate] = useState(new Date(2026, 8, 12));
-  const nav = useSwipeNavigation({ enabled: true, selectedDate: date, onDateChange: setDate, activeView: view, menuOpen: open, onViewChange: setView, onMenuChange: setOpen });
+  const [tab, setTab] = useState<"bills" | "tasks" | "items">("bills");
+  const nav = useSwipeNavigation({ insightsTab: insights ? tab : undefined, onInsightsTabChange: insights ? setTab : undefined, enabled: true, selectedDate: date, onDateChange: setDate, activeView: view, menuOpen: open, onViewChange: setView, onMenuChange: setOpen });
   return <><div ref={nav.sidebarRef} data-open={open} data-side={nav.sidebarSide} /><div ref={nav.backdropRef} />
-    <div ref={nav.pagerRef} data-view={view} data-month={date.getMonth() + 1} data-axis={nav.preview?.axis ?? "x"} className="view-pager">
+    <div ref={nav.pagerRef} data-view={view} data-tab={tab} data-month={date.getMonth() + 1} data-axis={nav.preview?.axis ?? "x"} className="view-pager">
       <div className="scroller" style={{ overflowX: "auto" }}><div className="touch-target" /></div>
-      {nav.preview && <div className="preview" data-view={nav.preview.view} data-month={nav.preview.date.getMonth() + 1} />}
-    </div><button className="open-menu" onClick={nav.openSidebar} /><button className="choose-month" onClick={() => nav.selectView("month")} /><button className="choose-ideas" onClick={() => nav.selectView("ideas")} /></>;
+      {nav.preview && <div className="preview" data-view={nav.preview.view} data-tab={nav.preview.insightsTab} data-month={nav.preview.date.getMonth() + 1} />}
+    </div><button className="next-month" onClick={() => nav.stepMonth(1)} /><button className="open-menu" onClick={nav.openSidebar} /><button className="choose-month" onClick={() => nav.selectView("month")} /><button className="choose-ideas" onClick={() => nav.selectView("ideas")} /></>;
 }
 function point(type: string, x: number, y = 100) {
   const event = new Event(type, { bubbles: true, cancelable: true });
@@ -36,6 +37,39 @@ function setup(initial: AppView = "day", scroll = false) {
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; vi.useFakeTimers(); host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); });
 describe("interactive mobile navigation", () => {
+  it("animates month arrow clicks and accumulates rapid repeat clicks", () => {
+    const pager = setup("month");
+    act(() => host.querySelector<HTMLButtonElement>(".next-month")!.click());
+    expect(host.querySelector(".preview")?.getAttribute("data-month")).toBe("10");
+    expect(pager.dataset.month).toBe("9");
+    act(() => host.querySelector<HTMLButtonElement>(".next-month")!.click());
+    expect(host.querySelector(".preview")?.getAttribute("data-month")).toBe("11");
+    act(() => vi.advanceTimersByTime(400));
+    expect(pager.dataset.month).toBe("11");
+  });
+  it("pages through bills, tasks and items before opening the sidebar", () => {
+    act(() => root.render(<Harness initial="insights" insights />));
+    const pager = host.querySelector<HTMLElement>(".view-pager")!;
+    Object.defineProperties(pager, { clientWidth: { value: 360 }, clientHeight: { value: 600 } });
+    begin(); point("pointermove", 120);
+    expect(host.querySelector(".preview")?.getAttribute("data-tab")).toBe("tasks");
+    end(120); expect(pager.dataset.tab).toBe("tasks");
+    begin(); point("pointermove", 120); end(120); expect(pager.dataset.tab).toBe("items");
+    begin(); point("pointermove", 30); end(30);
+    expect(host.querySelector("[data-open]")?.getAttribute("data-open")).toBe("true");
+  });
+  it("waits through diagonal jitter before locking month navigation vertically", () => {
+    const pager = setup("month"); begin();
+    point("pointermove", 239, 108);
+    expect(host.querySelector(".preview")).toBeNull();
+    point("pointermove", 231, 122);
+    expect(host.querySelector(".preview")).toBeNull();
+    point("pointermove", 230, 155);
+    expect(pager.dataset.axis).toBe("y");
+    expect(host.querySelector(".preview")?.getAttribute("data-view")).toBe("month");
+    point("pointermove", 120, 158);
+    expect(pager.dataset.axis).toBe("y");
+  });
   it("moves both view surfaces before release and only commits after settling", () => {
     const pager = setup(); begin(); point("pointermove", 150);
     expect(pager.style.getPropertyValue("--page-offset")).toBe("-100px");

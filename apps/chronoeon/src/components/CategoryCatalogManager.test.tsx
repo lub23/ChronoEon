@@ -60,6 +60,8 @@ describe("CategoryCatalogManager", () => {
     render();
     act(() => { host.querySelector<HTMLButtonElement>(".category-add")!.click(); });
     expect(document.querySelector<HTMLInputElement>(".category-editor .category-name-input")?.value).toBe("New category");
+    expect(next).toBeNull();
+    act(() => { document.querySelector<HTMLButtonElement>(".category-editor footer .primary-action")!.click(); });
     expect(next).toHaveLength(3);
     expect(next?.[2].sub).toEqual([]);
     expect(next?.[2].name).toBe("New category");
@@ -70,6 +72,8 @@ describe("CategoryCatalogManager", () => {
     act(() => { host.querySelectorAll<HTMLButtonElement>(".category-edit-button")[0]!.click(); });
     const input = document.querySelector<HTMLInputElement>(".category-editor .category-sub-row input")!;
     act(() => { setInputValue(input, "Bonus"); });
+    expect(next).toBeNull();
+    act(() => { document.querySelector<HTMLButtonElement>(".category-editor footer .primary-action")!.click(); });
     expect(next?.[0].sub).toEqual(["Bonus"]);
     expect(next?.[0].color).toBe("#fab27b");
   });
@@ -97,4 +101,28 @@ describe("CategoryCatalogManager", () => {
     expect(document.querySelector(".category-editor")?.closest("[inert]")).not.toBeNull();
     expect(next?.map((category) => category.id)).toEqual(["income"]);
   });
+
+  it("protects the default category without offering it a redundant action", () => {
+    act(() => root.render(<CategoryCatalogManager locale="en" label="Bill groups" mode="bill"
+      categories={categories} onChange={() => undefined} onDelete={() => undefined}
+      defaultCategoryId="income" onSetDefault={() => undefined} />));
+    act(() => { host.querySelectorAll<HTMLButtonElement>(".category-edit-button")[0]!.click(); });
+    const footerButtons = [...document.querySelectorAll<HTMLButtonElement>(".category-editor footer button")];
+    expect(footerButtons.find(button => button.textContent?.includes("Delete"))?.disabled).toBe(true);
+    expect(footerButtons.some(button => button.textContent?.includes("Set default"))).toBe(false);
+  });
+});
+
+it("offers built-in item icons, saves the choice and displays it beside the name", () => {
+  const change = vi.fn();
+  act(() => root.render(<CategoryCatalogManager locale="en" label="Assets" mode="item" categories={[{ id: "custom", name: "My books", color: "#777777", icon: "book" }]} onChange={change} onDelete={vi.fn()} />));
+  expect(host.querySelector(".category-name svg")).toBeTruthy();
+  act(() => host.querySelector<HTMLButtonElement>(".category-edit-button")!.click());
+  act(() => document.querySelector<HTMLButtonElement>('button[aria-label="Icon"]')!.click());
+  const options = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+  expect(options.length).toBeGreaterThanOrEqual(12);
+  act(() => options.find(option => option.textContent?.includes("Cameras"))!.click());
+  expect(change).not.toHaveBeenCalled();
+  act(() => [...document.querySelectorAll<HTMLButtonElement>(".category-editor button")].find(button => button.textContent?.trim() === "Confirm")!.click());
+  expect(change).toHaveBeenCalledWith([expect.objectContaining({ icon: "camera" })]);
 });

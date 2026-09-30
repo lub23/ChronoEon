@@ -88,13 +88,19 @@ describe("entry and settings transfer", () => {
       paymentMethods: ["Cash", "Card"],
       remoteLLMApiKey: "must-not-survive",
     } }));
-    expect(imported).toMatchObject({ language: "zh", firstDay: 0, timeScale: 15, bill: { currency: "USD", paymentMethods: ["Cash", "Card"] } });
+    expect(imported).toMatchObject({
+      language: "zh",
+      firstDay: 0,
+      timeScale: 15,
+      bill: { currency: "USD" },
+      calendars: [{ paymentMethods: [{ id: "Cash", name: "现金" }, { id: "Card", name: "Card" }] }],
+    });
     expect(JSON.stringify(imported)).not.toContain("must-not-survive");
 
     const exported = exportSettingsJson(createDefaultSettings(), { theme: "dark", dayPhotos: false });
     const envelope = JSON.parse(exported) as { format: string; settings: unknown };
     expect(envelope.format).toBe("chronoeon-settings");
-    expect(importSettingsJson(JSON.stringify(envelope))).toMatchObject({ settingsVersion: 1 });
+    expect(importSettingsJson(JSON.stringify(envelope))).toMatchObject({ settingsVersion: 2 });
     expect(importSettingsBundleJson(exported).preferences).toEqual({ theme: "dark", dayPhotos: false });
   });
 });

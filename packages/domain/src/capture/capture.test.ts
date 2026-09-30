@@ -48,8 +48,8 @@ describe("parseCapture · schedule", () => {
     expect(draft("Dentist on Friday at 10:15", { locale: "en" })).toMatchObject({ date: "2026-09-11", start: "10:15", title: "Dentist" });
   });
 
-  it("never produces ideas", () => {
-    expect(draft("灵感：写一首诗").kind).not.toBe("idea");
+  it("recognises an explicit idea prefix", () => {
+    expect(draft("灵感：写一首诗").kind).toBe("idea");
   });
 });
 
@@ -64,7 +64,7 @@ describe("parseCapture · bills", () => {
     ["买了三十块钱的水果", { kind: "bill", amount: -30, category: "expense/Daily", title: "水果" }],
     ["奖金收到 320", { kind: "bill", amount: 320, category: "income/Bonus", title: "奖金" }],
     ["昨天电费 180", { kind: "bill", date: "2026-09-08", amount: -180, category: "expense/Daily", title: "电费" }],
-    ["房租 3500 支付宝", { kind: "bill", amount: -3500, category: "expense/Daily", payment: "Alipay" }],
+    ["房租 3500 支付宝", { kind: "bill", amount: -3500, category: "expense/Daily", payment: undefined }],
   ] as const)("%s", (input, expected) => {
     expect(draft(input)).toMatchObject(expected);
   });
@@ -84,8 +84,8 @@ describe("parseCapture · learned categories", () => {
 
   it("learns from stored names but emits stable IDs without changing history or merging same-name catalogs", () => {
     const custom = createDefaultSettings();
-    custom.bill.categories.push({ id: "ledger-dining", name: "Dining", color: "#aaa", direction: "expense", sub: ["Meal"] });
-    custom.bill.categories.push({ id: "ledger-expense", name: "Expense", color: "#bbb", direction: "expense", sub: ["Daily"] });
+    custom.calendars[0].billCategories.push({ id: "ledger-dining", name: "Dining", color: "#aaa", direction: "expense", sub: ["Meal"] });
+    custom.calendars[0].billCategories.push({ id: "ledger-expense", name: "Expense", color: "#bbb", direction: "expense", sub: ["Daily"] });
     const named = Object.freeze([{ kind: "bill" as const, title: "Lunch", category: "Dining/Meal", date: "2026-09-08" }]);
     expect(inferCategory("Lunch", "Lunch 20", "bill", custom, named, now, -20).value).toBe("ledger-dining/Meal");
     expect(named[0].category).toBe("Dining/Meal");

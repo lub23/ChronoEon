@@ -169,7 +169,7 @@ export function TopBar(props: TopBarProps) {
             </header>
             <GlassDatePicker
               inline
-              value={format(selectedDate, "yyyy-MM-dd")}
+              value={format(view === "month" ? startOfMonth(selectedDate) : selectedDate, "yyyy-MM-dd")}
               ariaLabel={t("jumpToDate", locale)}
               locale={locale}
               clearable={false}

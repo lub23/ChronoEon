@@ -1,6 +1,6 @@
 import { nextSnapshotAt } from "./snapshotPolicy";
 import { packState, unpackState } from "./stateCodec";
-import { itemImageHash, createEntryId } from "@chronoeon/domain";
+import { itemImageHashes, createEntryId } from "@chronoeon/domain";
 import type { PersistencePort, SqlParam } from "../persistence/PersistencePort";
 import { notifyLocalChange, runDatabaseOperation, subscribeLocalChanges } from "../persistence/coordinator";
 import { ENTITY_TABLES } from "./entitySchema";
@@ -415,10 +415,20 @@ export class SyncStore {
       for await (const row of this.stateRows("WHERE entity IN ('attachment','asset')")) {
         const state = unpackState(JSON.parse(row.state_json));
         if (!(await this.reachable(state))) continue;
-        const versions = state.entity === "asset" ? state.fields.image : state.fields.sha256;
-        for (const version of versions ?? []) {
+        if (state.entity === "asset") {
+          for (const version of state.fields.images_json ?? []) {
+            if (typeof version.value !== "string") continue;
+            try {
+              const images = JSON.parse(version.value) as unknown;
+              if (!Array.isArray(images)) continue;
+              for (const image of itemImageHashes(images.filter((value): value is string => typeof value === "string"))) hashes.add(image);
+            } catch { /* Ignore malformed snapshots. */ }
+          }
+          continue;
+        }
+        for (const version of state.fields.sha256 ?? []) {
           if (typeof version.value !== "string") continue;
-          const hash = state.entity === "asset" ? itemImageHash(version.value) : version.value;
+          const hash = version.value;
           if (hash && /^[a-f0-9]{64}$/.test(hash)) hashes.add(hash);
         }
       }

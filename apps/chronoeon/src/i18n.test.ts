@@ -26,8 +26,8 @@ describe("standalone localization", () => {
 
   it("resolves stable bill IDs without translating same-name imported catalogs", () => {
     const settings = createDefaultSettings();
-    settings.bill.categories.push({ id: "ledger-income", name: "Income", color: "#aaa", direction: "expense", sub: ["Salary"] });
-    settings.bill.categories.push({ id: "ledger-other", name: "其他收入", color: "#bbb", direction: "income", sub: [] });
+    settings.calendars[0].billCategories.push({ id: "ledger-income", name: "Income", color: "#aaa", direction: "expense", sub: ["Salary"] });
+    settings.calendars[0].billCategories.push({ id: "ledger-other", name: "其他收入", color: "#bbb", direction: "income", sub: [] });
     expect(categoryLabel("income", "zh", undefined, settings)).toBe("收入");
     expect(catalogLabel("income", "en", undefined, settings)).toBe("Income");
     expect(categoryLabel("ledger-income", "zh", undefined, settings)).toBe("Income");
@@ -37,10 +37,11 @@ describe("standalone localization", () => {
       expect(categoryLabel("ledger-other", locale, undefined, settings)).toBe("其他收入");
       expect(compositeCategoryLabel("ledger-other", locale, settings)).toBe("其他收入");
     }
+    expect(catalogLabel("ledger-117d8f914d8e211a1b2d73e4e", "zh")).toBe("未分类");
     const chinese = createDefaultSettings("zh");
     expect(categoryLabel("income", "en", undefined, chinese)).toBe("Income");
     expect(compositeCategoryLabel("income/工资", "en", chinese)).toBe("Salary");
-    chinese.bill.categories[0].name = "家用收入";
+    chinese.calendars[0].billCategories[0].name = "家用收入";
     expect(catalogLabel("income", "en", undefined, chinese)).toBe("家用收入");
     expect(compositeCategoryLabel("income/额外收入", "en", chinese)).toBe("额外收入");
   });

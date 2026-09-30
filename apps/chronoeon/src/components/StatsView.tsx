@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { MotionPresence, createMotionPortal as createPortal } from "./MotionPresence";
 import {
   aggregateBillStats,
@@ -14,6 +14,7 @@ import {
   reviewGranularities,
   reviewCategoryOptions,
   reviewBuckets,
+  signedBillAmount,
   type Item,
   type BillCategoryStat,
   type BillSubCategoryStat,
@@ -53,6 +54,7 @@ interface StatsViewProps {
   onAddItem?: () => void;
   onEditItem?: (item: Item) => void;
   onOpenBill?: (entry: Entry) => void;
+  onEditEntry?: (entry: Entry) => void;
 }
 
 type StatsTab = "bills" | "tasks";
@@ -61,7 +63,6 @@ export type InsightsTab = StatsTab | "items";
 export function StatsView({ tab = "bills", onTabChange, ...props }: StatsViewProps & { tab?: InsightsTab; onTabChange?: (tab: InsightsTab) => void }) {
   if (tab !== "items") return <StatsDetailView {...props} tab={tab} onTabChange={value => onTabChange?.(value)} />;
   return <section className="stats-page">
-    <header className="page-title-row view-title-row"><h2 className="view-heading"><span className="headline-leaf">{t("insightsTitle", props.locale)}</span></h2></header>
     <ItemsView items={props.items ?? []} entries={props.allEntries ?? props.entries} locale={props.locale} settings={props.settings} today={props.today} search={props.search} onAdd={props.onAddItem} onEdit={props.onEditItem} onOpenBill={props.onOpenBill} />
   </section>;
 }
@@ -140,6 +141,45 @@ function formatRange(range: StatsRange, locale: Locale): string {
     : `${MONTHS_EN[m1 - 1]} ${d1}, ${y1} – ${MONTHS_EN[m2 - 1]} ${d2}, ${y2}`;
 }
 
+function highlightedText(text: string, query: string): ReactNode {
+  const needle = query.trim().replace(/^#/, "");
+  if (!needle) return text;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escaped})`, "ig"));
+  return parts.map((part, index) => part.toLocaleLowerCase() === needle.toLocaleLowerCase()
+    ? <mark key={index}>{part}</mark>
+    : part);
+}
+
+function StatsEntryRow({ entry, locale, settings, symbol, query = "", onOpen }: {
+  entry: Entry;
+  locale: Locale;
+  settings: ChronoEonSettings;
+  symbol: string;
+  query?: string;
+  onOpen?: (entry: Entry) => void;
+}) {
+  const signedAmount = entry.kind === "bill"
+    ? signedBillAmount(entry.amount, entry.category, settings, entry.calendar)
+    : entry.amount;
+  return <li>
+    <button type="button" className="stats-entry-row" onClick={() => onOpen?.(entry)}>
+      <span className="stats-entry-main">
+        <span className="stats-entry-date">{entry.date} {formatEntryTime(entry, locale)}</span>
+        <strong className="stats-entry-title">{highlightedText(entry.title, query)}</strong>
+        {typeof signedAmount === "number" && (
+          <span className={signedAmount >= 0 ? "stats-entry-amount is-income" : "stats-entry-amount is-expense"}>{money(symbol, signedAmount)}</span>
+        )}
+      </span>
+      <span className="stats-entry-meta">
+        <i style={{ background: entry.color ?? "var(--accent)" }} aria-hidden="true" />
+        <span>{categoryText(entry.category, locale, settings)}</span>
+        {entry.note && <small>{highlightedText(entry.note, query)}</small>}
+      </span>
+    </button>
+  </li>;
+}
+
 function bucketLabels(buckets: ReviewBucket[], granularity: ReviewGranularity, locale: Locale): string[] {
   if (granularity === "year") {
     return buckets.map((b) => b.date.slice(0, 4));
@@ -176,7 +216,7 @@ function bucketLabels(buckets: ReviewBucket[], granularity: ReviewGranularity, l
   });
 }
 
-function StatsDetailView({ entries, locale, settings, today, search = "", onToggle, onStatus, onOpenDate, tab, onTabChange }: StatsViewProps & { tab: StatsTab; onTabChange: (tab: InsightsTab) => void }) {
+function StatsDetailView({ entries, locale, settings, today, search = "", onToggle, onStatus, onOpenDate, onEditEntry, tab, onTabChange }: StatsViewProps & { tab: StatsTab; onTabChange: (tab: InsightsTab) => void }) {
   const [preset, setPreset] = usePersistentPreference<StatsPresetKey>("stats-preset", "this_month");
   const [customRange, setCustomRange] = usePersistentPreference<StatsRange | null>("stats-custom-range", null);
  const [keyword, setKeyword] = usePersistentPreference("stats-keyword", "");
@@ -365,19 +405,7 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
           ) : (
             <ul className="stats-match-list">
               {entries.slice(0, 40).map((entry) => (
-                <li key={`${entry.id}:${entry.date}`}>
-                  <button type="button" onClick={() => onOpenDate?.(entry.date)}>
-                    <span className="stats-match-date">{entry.date}</span>
-                    <span className="stats-match-title">{entry.title}</span>
-                    <span className="stats-match-cat">
-                      <i style={{ background: entry.color ?? "var(--accent)" }} aria-hidden="true" />
-                      {categoryText(entry.category, locale, settings)}
-                    </span>
-                    {entry.kind === "bill" && typeof entry.amount === "number" && (
-                      <span className={entry.amount >= 0 ? "is-income" : "is-expense"}>{money(symbol, Math.abs(entry.amount))}</span>
-                    )}
-                  </button>
-                </li>
+                <StatsEntryRow key={`${entry.id}:${entry.date}`} entry={entry} locale={locale} settings={settings} symbol={symbol} query={search} onOpen={(value) => { if (onEditEntry) onEditEntry(value); else onOpenDate?.(value.date); }} />
               ))}
             </ul>
           )}
@@ -387,7 +415,17 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
       {tab === "bills" ? (
         <BillsPanel bills={bills} locale={locale} symbol={symbol} onOpenDetail={setDetail} />
       ) : (
-        <TasksPanel tasks={tasks} locale={locale} />
+        <TasksPanel
+          tasks={tasks}
+          locale={locale}
+          settings={settings}
+          review={review}
+          overdue={outstanding.overdue}
+          upcoming={outstanding.upcoming}
+          onToggle={onToggle}
+          onStatus={onStatus}
+          onOpenDate={onOpenDate}
+        />
       )}
 
       <section className="stats-card panel stats-review-card">
@@ -419,12 +457,13 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
             series={reviewSeries}
             buckets={buckets}
             labels={reviewLabels}
-           expense={review.expense}
            symbol={symbol}
            locale={locale}
+           settings={settings}
            granularity={effectiveGranularity}
            bills={bills}
            onOpenDate={onOpenDate}
+           onEditEntry={onEditEntry}
          />
        ) : (
           <TasksReview
@@ -433,12 +472,7 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
             buckets={buckets}
             labels={reviewLabels}
             locale={locale}
-            settings={settings}
             granularity={effectiveGranularity}
-            onToggle={onToggle}
-            onStatus={onStatus}
-            overdue={outstanding.overdue}
-            upcoming={outstanding.upcoming}
             onOpenDate={onOpenDate}
           />
        )}
@@ -519,19 +553,7 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
                 </div>
                 <ul className="stats-match-list">
                   {keywords.entries.slice(0, 40).map((entry) => (
-                    <li key={`${entry.id}:${entry.date}`}>
-                      <button type="button" onClick={() => onOpenDate?.(entry.date)}>
-                        <span className="stats-match-date">{entry.date}</span>
-                        <span className="stats-match-title">{entry.title}</span>
-                        <span className="stats-match-cat">
-                          <i style={{ background: entry.color ?? "var(--accent)" }} aria-hidden="true" />
-                          {categoryText(entry.category, locale, settings)}
-                        </span>
-                        {entry.kind === "bill" && typeof entry.amount === "number" && (
-                          <span className={entry.amount >= 0 ? "is-income" : "is-expense"}>{money(symbol, entry.amount)}</span>
-                        )}
-                      </button>
-                    </li>
+                    <StatsEntryRow key={`${entry.id}:${entry.date}`} entry={entry} locale={locale} settings={settings} symbol={symbol} query={keyword} onOpen={(value) => { if (onEditEntry) onEditEntry(value); else onOpenDate?.(value.date); }} />
                   ))}
                 </ul>
               </>
@@ -679,12 +701,11 @@ function CategorySplitCard({
     endY: number,
   ): string {
     const radius = Math.min(10, Math.abs(endX - startX) / 2, Math.abs(endY - startY));
-    const inward = endX >= startX ? 1 : -1;
     const down = endY > startY ? 1 : -1;
     return [
       `M${startX.toFixed(1)} ${startY.toFixed(1)}`,
       `V${(endY - down * radius).toFixed(1)}`,
-      `Q${startX.toFixed(1)} ${endY.toFixed(1)} ${(startX + inward * radius).toFixed(1)} ${endY.toFixed(1)}`,
+      `Q${startX.toFixed(1)} ${endY.toFixed(1)} ${(startX - radius).toFixed(1)} ${endY.toFixed(1)}`,
       `H${endX.toFixed(1)}`,
     ].join(" ");
   }
@@ -710,7 +731,7 @@ function CategorySplitCard({
         return {
           startX: segmentRect.left + segmentRect.width / 2 - hostRect.left,
           startY: segmentRect.top + segmentRect.height / 2 - hostRect.top,
-          endX: targetRect.right - hostRect.left + 6,
+          endX: Math.min(segmentRect.left + segmentRect.width / 2 - hostRect.left - 10, targetRect.right - hostRect.left),
           endY: targetRect.top + targetRect.height / 2 - hostRect.top,
         };
       });
@@ -814,18 +835,18 @@ function CategorySplitCard({
            <g key={index}>
             <path d={connector.d} fill="none" stroke={connector.color} strokeDasharray="3 5" strokeLinecap="round" />
              <circle cx={connector.x} cy={connector.y} r={2} fill={connector.color} />
-             <circle cx={connector.endX} cy={connector.endY} r={2.4} fill={connector.color} />
+             <line x1={connector.endX} y1={connector.endY - 3.5} x2={connector.endX} y2={connector.endY + 3.5} stroke={connector.color} strokeWidth="1.8" strokeLinecap="round" />
            </g>
           ))}
           {connectors.map((connector, index) =>
             connector.label ? (
               <text key={`label-${index}`} className={connector.amountColor === "#2f8f5b" ? "is-income" : "is-expense"}
-                x={connector.endX - 2} y={connector.endY - 3} textAnchor="end">{connector.label}</text>
+                x={(connector.x + connector.endX) / 2} y={connector.endY - 4} textAnchor="middle">{connector.label}</text>
             ) : null,
           )}
           {connectors.map((connector, index) =>
             connector.percent ? (
-              <text key={`percent-${index}`} x={connector.endX - 2} y={connector.endY + 11} textAnchor="end">{connector.percent}</text>
+              <text key={`percent-${index}`} x={(connector.x + connector.endX) / 2} y={connector.endY + 13} textAnchor="middle">{connector.percent}</text>
             ) : null,
           )}
         </svg>
@@ -834,7 +855,27 @@ function CategorySplitCard({
   );
 }
 
-function TasksPanel({ tasks, locale }: { tasks: ReturnType<typeof aggregateTaskStats>; locale: Locale }) {
+function TasksPanel({
+  tasks,
+  locale,
+  settings,
+  review,
+  overdue,
+  upcoming,
+  onToggle,
+  onStatus,
+  onOpenDate,
+}: {
+  tasks: ReturnType<typeof aggregateTaskStats>;
+  locale: Locale;
+  settings: ChronoEonSettings;
+  review: ReturnType<typeof buildReview>;
+  overdue: Entry[];
+  upcoming: Entry[];
+  onToggle?: (id: string, entry?: Entry) => void;
+  onStatus?: (entry: Entry, status: EntryStatus) => void;
+  onOpenDate?: (date: string) => void;
+}) {
   if (tasks.entries.length === 0) return <section className="stats-card panel"><p className="stats-empty">{t("statsNoTasks", locale)}</p></section>;
   const maxMinutes = tasks.categories.reduce((max, category) => Math.max(max, category.totalMinutes), 0);
 
@@ -860,156 +901,6 @@ function TasksPanel({ tasks, locale }: { tasks: ReturnType<typeof aggregateTaskS
         </div>
       </section>
 
-      <section className="stats-card panel">
-        <header className="stats-card-header"><h3><Icon name="clock" size={16} /> {t("statsDurationByCategory", locale)}</h3></header>
-        <ul className="stats-category-list">
-          {tasks.categories.map((category) => (
-            <li key={category.id}>
-              <div className="stats-category-row is-static">
-                <FadeText className="stats-category-name">
-                  <i style={{ background: category.color }} />
-                  {categoryLabel(category.id, locale, catalogLabel(category.id, locale, category.name))} <small>({category.count})</small>
-                </FadeText>
-                <span className="stats-category-bar">
-                  <i style={{ width: `${maxMinutes > 0 ? (category.totalMinutes / maxMinutes) * 100 : 0}%`, background: category.color }} />
-                </span>
-                <span className="stats-category-share">{t("statsLongest", locale)} {formatMinutes(category.longestMinutes)}</span>
-                <strong>{formatMinutes(category.totalMinutes)}</strong>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
-    </>
-  );
-}
-
-function BillsReview({
-  series,
-  buckets,
-  labels,
-  expense,
-  symbol,
-  locale,
-  granularity,
-  bills,
-  onOpenDate,
-}: {
-  series: ReviewChartSeries[];
-  buckets: ReviewBucket[];
-  labels: string[];
-  expense: { current: number; previous: number; delta: number };
-  symbol: string;
-  locale: Locale;
-  granularity: ReviewGranularity;
-  bills: ReturnType<typeof aggregateBillStats>;
-  onOpenDate?: (date: string) => void;
-}) {
-  const topBills = [...bills.expenseEntries].sort((left, right) => Math.abs(right.amount ?? 0) - Math.abs(left.amount ?? 0)).slice(0, 5);
-
-  return (
-    <>
-      <div className="stats-kpi-row">
-        <Kpi label={t("statsExpense", locale)} value={money(symbol, expense.current)} tone="expense" />
-        <DeltaKpi value={expense} locale={locale} invert format={(value) => money(symbol, value)} />
-      </div>
-      {bills.count > 0 ? (
-        <ReviewLineChart
-          key={granularity + ":" + buckets[0]?.date + ":" + buckets.at(-1)?.date}
-          buckets={buckets}
-          labels={labels}
-          series={series}
-          ariaLabel={t("reviewCashFlow", locale)}
-          granularity={granularity}
-          locale={locale}
-          formatValue={(value) => unsignedMoney(symbol, value)}
-          onOpenDate={onOpenDate}
-        />
-      ) : (
-        <p className="stats-empty">{t("statsNoBills", locale)}</p>
-      )}
-      {topBills.length > 0 && (
-        <ul className="stats-match-list">
-          {topBills.map((entry) => {
-            const [primaryCat, subCat] = (entry.category || "uncategorized").split("/");
-            const cat = bills.categories.find((c) => c.id.toLocaleLowerCase() === primaryCat.toLocaleLowerCase() || c.name.toLocaleLowerCase() === primaryCat.toLocaleLowerCase());
-            const catColor = cat?.color ?? entry.color ?? "var(--accent)";
-            const catName = cat ? categoryLabel(cat.id, locale, catalogLabel(cat.id, locale, cat.name)) : primaryCat;
-            const subName = subCat ? catalogLabel(subCat, locale) : null;
-            return (
-            <li key={`${entry.id}:${entry.date}`}>
-              <button type="button" onClick={() => onOpenDate?.(entry.date)}>
-                <span className="stats-match-date">{entry.date}</span>
-                <span className="stats-match-title">{entry.title}</span>
-                <span className="stats-match-cat">
-                  <i style={{ background: catColor }} />
-                  {catName}{subName ? ` / ${subName}` : ""}
-                </span>
-                <span className="is-expense">{money(symbol, Math.abs(entry.amount ?? 0))}</span>
-              </button>
-            </li>
-            );
-          })}
-        </ul>
-      )}
-    </>
-  );
-}
-
-function DeltaKpi({ value, locale, invert = false, format }: { value: { current: number; previous: number; delta: number }; locale: Locale; invert?: boolean; format: (input: number) => string }) {
-  return (
-    <div className="stats-kpi">
-      <small>{t("reviewDelta", locale)}</small>
-      <DeltaBadge value={value} locale={locale} invert={invert} format={format} />
-    </div>
-  );
-}
-
-function TasksReview({
-  series,
-  review,
-  buckets,
-  labels,
-  locale,
-  settings,
-  granularity,
-  onToggle,
-  onStatus,
-  overdue,
-  upcoming,
-  onOpenDate,
-}: {
-  series: ReviewChartSeries[];
-  review: ReturnType<typeof buildReview>;
-  buckets: ReviewBucket[];
-  labels: string[];
-  locale: Locale;
-  settings: ChronoEonSettings;
-  granularity: ReviewGranularity;
-  onToggle?: (id: string, entry?: Entry) => void;
-  onStatus?: (entry: Entry, status: EntryStatus) => void;
-  overdue: Entry[];
-  upcoming: Entry[];
-  onOpenDate?: (date: string) => void;
-}) {
-
-  return (
-    <>
-      <div className="stats-kpi-row">
-        <Kpi label={t("completionRate", locale)} value={`${Math.round(review.tasks.rate.current)}%`} />
-        <DeltaKpi value={review.tasks.rate} locale={locale} format={(value) => `${Math.round(value)}%`} />
-      </div>
-      <ReviewLineChart
-        key={granularity + ":" + buckets[0]?.date + ":" + buckets.at(-1)?.date}
-        buckets={buckets}
-        labels={labels}
-        series={series}
-        ariaLabel={t("reviewScheduleLoad", locale)}
-        granularity={granularity}
-        locale={locale}
-        formatValue={(value) => value.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-        onOpenDate={onOpenDate}
-      />
       <div className="review-columns">
         <section className="stats-card panel">
           <header className="stats-card-header">
@@ -1057,6 +948,147 @@ function TasksReview({
           />
         </section>
       </div>
+
+      <section className="stats-card panel">
+        <header className="stats-card-header"><h3><Icon name="clock" size={16} /> {t("statsDurationByCategory", locale)}</h3></header>
+        <ul className="stats-category-list">
+          {tasks.categories.map((category) => (
+            <li key={category.id}>
+              <div className="stats-category-row is-static">
+                <FadeText className="stats-category-name">
+                  <i style={{ background: category.color }} />
+                  {categoryLabel(category.id, locale, catalogLabel(category.id, locale, category.name))} <small>({category.count})</small>
+                </FadeText>
+                <span className="stats-category-bar">
+                  <i style={{ width: `${maxMinutes > 0 ? (category.totalMinutes / maxMinutes) * 100 : 0}%`, background: category.color }} />
+                </span>
+                <span className="stats-category-share">{t("statsLongest", locale)} {formatMinutes(category.longestMinutes)}</span>
+                <strong>{formatMinutes(category.totalMinutes)}</strong>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </>
+  );
+}
+
+function BillsReview({
+  series,
+  buckets,
+  labels,
+  symbol,
+  locale,
+  settings,
+  granularity,
+  bills,
+  onOpenDate,
+  onEditEntry,
+}: {
+  series: ReviewChartSeries[];
+  buckets: ReviewBucket[];
+  labels: string[];
+  symbol: string;
+  locale: Locale;
+  settings: ChronoEonSettings;
+  granularity: ReviewGranularity;
+  bills: ReturnType<typeof aggregateBillStats>;
+  onOpenDate?: (date: string) => void;
+  onEditEntry?: (entry: Entry) => void;
+}) {
+  const [page, setPage] = useState(0);
+  const topBills = [...bills.expenseEntries]
+    .sort((left, right) => Math.abs(right.amount ?? 0) - Math.abs(left.amount ?? 0))
+    .slice(0, 25);
+  const pageCount = Math.ceil(topBills.length / 5);
+  const visibleBills = topBills.slice(page * 5, page * 5 + 5);
+
+  useEffect(() => setPage(0), [bills.expenseEntries]);
+  useEffect(() => { if (page >= pageCount && page > 0) setPage(Math.max(0, pageCount - 1)); }, [page, pageCount]);
+
+  return (
+    <>
+      {bills.count > 0 ? (
+        <ReviewLineChart
+          key={granularity + ":" + buckets[0]?.date + ":" + buckets.at(-1)?.date}
+          buckets={buckets}
+          labels={labels}
+          series={series}
+          ariaLabel={t("reviewCashFlow", locale)}
+          granularity={granularity}
+          locale={locale}
+          formatValue={(value) => unsignedMoney(symbol, value)}
+          onOpenDate={onOpenDate}
+        />
+      ) : (
+        <p className="stats-empty">{t("statsNoBills", locale)}</p>
+      )}
+      {topBills.length > 0 && (
+        <>
+        <ul className="stats-match-list stats-top-bills-list">
+          {visibleBills.map((entry) => {
+            return <StatsEntryRow key={`${entry.id}:${entry.date}`} entry={entry} locale={locale} settings={settings} symbol={symbol} onOpen={(value) => onEditEntry?.(value)} />;
+          })}
+        </ul>
+        {pageCount > 1 && (
+          <nav className="stats-top-bills-pagination" aria-label={t("reviewTopExpenses", locale)}>
+            <button type="button" disabled={page === 0} onClick={() => setPage(current => Math.max(0, current - 1))} aria-label={t("previous", locale)}><Icon name="chevron-left" size={13} /></button>
+            {Array.from({ length: pageCount }, (_, index) => (
+              <button key={index} type="button" className={index === page ? "is-active" : ""} onClick={() => setPage(index)} aria-current={index === page ? "page" : undefined}>{index + 1}</button>
+            ))}
+            <button type="button" disabled={page === pageCount - 1} onClick={() => setPage(current => Math.min(pageCount - 1, current + 1))} aria-label={t("next", locale)}><Icon name="chevron-right" size={13} /></button>
+          </nav>
+        )}
+        </>
+      )}
+    </>
+  );
+}
+
+function DeltaKpi({ value, locale, invert = false, format }: { value: { current: number; previous: number; delta: number }; locale: Locale; invert?: boolean; format: (input: number) => string }) {
+  return (
+    <div className="stats-kpi">
+      <small>{t("reviewDelta", locale)}</small>
+      <DeltaBadge value={value} locale={locale} invert={invert} format={format} />
+    </div>
+  );
+}
+
+function TasksReview({
+  series,
+  review,
+  buckets,
+  labels,
+  locale,
+  granularity,
+  onOpenDate,
+}: {
+  series: ReviewChartSeries[];
+  review: ReturnType<typeof buildReview>;
+  buckets: ReviewBucket[];
+  labels: string[];
+  locale: Locale;
+  granularity: ReviewGranularity;
+  onOpenDate?: (date: string) => void;
+}) {
+
+  return (
+    <>
+      <div className="stats-kpi-row">
+        <Kpi label={t("completionRate", locale)} value={`${Math.round(review.tasks.rate.current)}%`} />
+        <DeltaKpi value={review.tasks.rate} locale={locale} format={(value) => `${Math.round(value)}%`} />
+      </div>
+      <ReviewLineChart
+        key={granularity + ":" + buckets[0]?.date + ":" + buckets.at(-1)?.date}
+        buckets={buckets}
+        labels={labels}
+        series={series}
+        ariaLabel={t("reviewScheduleLoad", locale)}
+        granularity={granularity}
+        locale={locale}
+        formatValue={(value) => value.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+        onOpenDate={onOpenDate}
+      />
     </>
   );
 }

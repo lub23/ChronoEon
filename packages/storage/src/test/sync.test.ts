@@ -45,7 +45,7 @@ async function device(remote: MemoryBackend, name: string, now?: () => Date) {
 describe("item snapshot and operation sync", () => {
   const settings = DEFAULT_CHRONOEON_SETTINGS;
   function item() {
-    return draftToItem({ name: "Camera", category: "electronics", acquisition: "purchase", acquiredOn: "2026-09-01", acquiredAt: "09:00", cost: 1200, currency: "CNY" });
+    return draftToItem({ name: "Camera", calendarId: "default", category: "electronics", acquisition: "purchase", acquiredOn: "2026-09-01", acquiredAt: "09:00", cost: 1200, currency: "CNY" });
   }
 
   it("restores item history from snapshots, merges independent edits, and preserves deleted bill references", async () => {
@@ -78,23 +78,23 @@ describe("item snapshot and operation sync", () => {
     let now = new Date("2026-09-07T12:00:00Z");
     const remote = new MemoryBackend(); const a = await device(remote, "A", () => now); const b = await device(remote, "B", () => now);
     const original = "a".repeat(64); const left = "b".repeat(64); const right = "c".repeat(64);
-    const first = await a.items.save({ ...item(), acquisition: "gift", cost: 0, image: `attachments/${original}.webp` }, settings);
+    const first = await a.items.save({ ...item(), acquisition: "gift", cost: 0, images: [`attachments/${original}.webp`] }, settings);
     await a.engine.run(); await b.engine.run();
     expect(remote.index!.attachments).toEqual([original]);
     expect(await b.backend.select("SELECT * FROM attachments")).toEqual([]);
-    expect((await b.items.list())[0].image).toBe(first.image);
-    await a.items.save({ ...first, image: `attachments/${left}.webp` }, settings);
-    await b.items.save({ ...first, image: `attachments/${right}.webp`, disposal: "lost", disposedOn: "2026-09-06" }, settings);
+    expect((await b.items.list())[0].images).toEqual(first.images);
+    await a.items.save({ ...first, images: [`attachments/${left}.webp`] }, settings);
+    await b.items.save({ ...first, images: [`attachments/${right}.webp`], disposal: "lost", disposedOn: "2026-09-06" }, settings);
     await a.engine.run(); await b.engine.run(); await a.engine.run();
     expect(await a.sync.attachmentHashes()).toEqual([left, right]);
-    const conflict = (await a.sync.conflicts()).find((item) => item.entity === "asset" && item.field === "image")!;
-    expect(conflict.versions.map((version) => version.value).sort()).toEqual([`attachments/${left}.webp`, `attachments/${right}.webp`]);
+    const conflict = (await a.sync.conflicts()).find((item) => item.entity === "asset" && item.field === "images_json")!;
+    expect(conflict.versions.map((version) => JSON.parse(String(version.value))).sort()).toEqual([[`attachments/${left}.webp`], [`attachments/${right}.webp`]]);
     now = new Date("2026-09-23T12:00:00Z"); await a.engine.run();
     expect(remote.index!.attachments).toEqual([left, right]);
     const c = await device(remote, "C", () => now); await c.engine.run();
     expect(await c.items.list()).toEqual(await a.items.list());
     expect(await c.sync.attachmentHashes()).toEqual([left, right]);
-    await c.sync.resolve("asset", first.id, "image", `attachments/${left}.webp`);
+    await c.sync.resolve("asset", first.id, "images_json", JSON.stringify([`attachments/${left}.webp`]));
     await c.engine.run(); await a.engine.run();
     expect(await a.sync.attachmentHashes()).toEqual([left]);
   });
@@ -113,7 +113,7 @@ describe("item snapshot and operation sync", () => {
 
   it("captures item deletion for sync and no longer retains its image", async () => {
     const remote = new MemoryBackend(); const a = await device(remote, "A"); const b = await device(remote, "B");
-    const first = await a.items.save({ ...item(), image: `attachments/${"d".repeat(64)}.webp` }, settings);
+    const first = await a.items.save({ ...item(), images: [`attachments/${"d".repeat(64)}.webp`] }, settings);
     await a.engine.run(); await b.engine.run();
     await a.backend.execute("DELETE FROM items WHERE id=?", [first.id]);
     await a.engine.run(); await b.engine.run();

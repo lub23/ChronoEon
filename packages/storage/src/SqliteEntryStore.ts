@@ -582,7 +582,7 @@ export class SqliteEntryStore implements EntryStore {
    * links; removed IDs retain the normal Recycle Bin recovery payload.
    */
   async replaceBills(settings: ChronoEonSettings, payload: LedgerImportPayload): Promise<LedgerImportSummary & { replacedCount: number }> {
-    const expectedCategories = stableJson(settings.bill.categories);
+    const expectedCategories = stableJson(settings.calendars.find(calendar => calendar.id === settings.defaultCalendarID)?.billCategories);
     const expectedCalendar = settings.defaultCalendarID;
     const importedAt = new Date().toISOString();
     const prepared = prepareLedgerReplacement(settings, payload, importedAt);
@@ -594,8 +594,11 @@ export class SqliteEntryStore implements EntryStore {
         const settingsRows = await this.backend.select<{ payload_json: string }>("SELECT payload_json FROM sync_settings WHERE id=?", [SETTINGS_ID]);
         if (!settingsRows[0]) throw new Error("LEDGER_SETTINGS_MISSING");
         const persisted = JSON.parse(settingsRows[0].payload_json) as Record<string, unknown>;
-        if (stableJson(persisted["/settings/bill/categories"]) !== expectedCategories
-          || persisted["/settings/defaultCalendarID"] !== expectedCalendar) throw new Error("LEDGER_SETTINGS_CHANGED");
+        const persistedCalendars = Array.isArray(persisted["/settings/calendars"])
+          ? persisted["/settings/calendars"] as Array<Record<string, unknown>>
+          : [];
+        const persistedCalendar = persistedCalendars.find(calendar => calendar.id === expectedCalendar);
+        if (stableJson(persistedCalendar?.billCategories) !== expectedCategories) throw new Error("LEDGER_SETTINGS_CHANGED");
 
         for (const chunk of chunksOf([...importedIds], 400)) {
           const collisions = await this.backend.select(`SELECT id FROM entries WHERE modality <> 'bill' AND id IN (${chunk.map(() => "?").join(",")})`, chunk);
@@ -637,7 +640,9 @@ export class SqliteEntryStore implements EntryStore {
         for (const chunk of chunksOf(prepared.entries.flatMap((entry) => (entry.tags ?? []).map((tag, position) => [entry.id, tag, position])), 400)) {
           await this.backend.execute(`INSERT INTO entry_tags(entry_id,tag,position) VALUES ${chunk.map(() => "(?,?,?)").join(",")}`, chunk.flat());
         }
-        persisted["/settings/bill/categories"] = prepared.categories;
+        persisted["/settings/calendars"] = persistedCalendars.map(calendar => calendar.id === expectedCalendar
+          ? { ...calendar, billCategories: prepared.categories }
+          : calendar);
         await this.backend.execute("UPDATE sync_settings SET payload_json=? WHERE id=?", [stableJson(persisted), SETTINGS_ID]);
 
         const written = await this.backend.select<{ id: string; amount: number; category: string; date: string }>("SELECT id,amount,category,date FROM entries WHERE modality='bill'");

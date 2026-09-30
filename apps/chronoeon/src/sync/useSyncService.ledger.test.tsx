@@ -55,7 +55,7 @@ const store = {
     runtime.log.push("replace");
     expect(settings).toEqual(persisted.settings);
     const prepared = prepareLedgerReplacement(settings, input, "2026-09-29T00:00:00.000Z");
-    persisted.settings.bill.categories = prepared.categories; bills = prepared.entries;
+    persisted.settings.calendars[0].billCategories = prepared.categories; bills = prepared.entries;
     return { ...prepared.summary, replacedCount: 2 };
   }),
   list: vi.fn(async () => structuredClone(bills)),
@@ -80,7 +80,7 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 it("pulls, verifies a backup, uses fresh persisted catalogs and publishes a verified forced snapshot", async () => {
-  runtime.pull.mockImplementation(async () => { persisted.settings.bill.categories.push({ id: "remote-custom", name: "Remote", direction: "expense", color: "#777777", sub: [] }); });
+  runtime.pull.mockImplementation(async () => { persisted.settings.calendars[0].billCategories.push({ id: "remote-custom", name: "Remote", direction: "expense", color: "#777777", sub: [] }); });
   let result!: Awaited<ReturnType<typeof current.replaceLedger>>;
   await act(async () => { result = await current.replaceLedger(payload); });
   expect(runtime.log).toEqual(["pull", "backup", "replace", "snapshot", "published"]);

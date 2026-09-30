@@ -26,7 +26,7 @@ describe("sqlite boot", () => {
       createdAt: new Date().toISOString(),
     });
     expect((await session!.store.get(created.id))?.title).toBe("SQLite wired");
-    const item = await session!.items.save(draftToItem({ name: "Gift", category: "other", acquisition: "gift", acquiredOn: "2026-08-10", acquiredAt: "09:00", cost: 0, currency: "CNY" }), createDefaultSettings("en"));
+    const item = await session!.items.save(draftToItem({ name: "Gift", calendarId: "default", category: "other", acquisition: "gift", acquiredOn: "2026-08-10", acquiredAt: "09:00", cost: 0, currency: "CNY" }), createDefaultSettings("en"));
     expect(await session!.items.list()).toEqual([item]);
     const snapshot = await session!.sync.snapshot(createEntryId());
     expect(snapshot).toContain('"entity":"asset"');

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { refineCapture, type EditableCapture } from "../domain/captureRefinement";
 import { format, parseISO } from "date-fns";
 import {
   ALL_DAY_REMINDERS,
@@ -6,7 +7,9 @@ import {
   TIMED_REMINDERS,
   categoryOptionsForKind,
   defaultCategoryForKind,
+  defaultPaymentMethodForCalendar,
   entriesInRange,
+  paymentMethodsForCalendar,
   parseCapture,
   parseClockMinutes,
   splitCaptureItems,
@@ -96,7 +99,7 @@ const captureIssueMessages: Record<AIValidationIssue["code"], MessageKey> = {
 
 type ChatMode = "capture" | "ask";
 
-interface CaptureDraftItem {
+interface CaptureDraftItem extends EditableCapture {
   key: string;
   draft: EntryDraft;
   warnings: AIValidationIssue[];
@@ -207,6 +210,7 @@ function captureHistory(entries: readonly Entry[]) {
     kind: entry.kind,
     title: entry.title,
     category: entry.category,
+    calendar: entry.calendar,
     location: entry.location,
     note: entry.note,
     start: entry.start,
@@ -772,7 +776,7 @@ export function ChatDialog({
       ...current,
       edited: true,
       countdown: 0,
-      drafts: current.drafts.map((item) => item.key === key ? { ...item, draft: { ...item.draft, ...patch } } : item),
+      drafts: current.drafts.map((item) => item.key === key ? refineCapture(item, patch, { now: new Date(), settings, locale, history: captureHistory(entries) }) : item),
     } : current);
   };
 
@@ -877,7 +881,7 @@ export function ChatDialog({
       location: kind === "idea" ? undefined : item.draft.location,
       amount: kind === "bill" ? item.draft.amount ?? 0 : undefined,
       currency: kind === "bill" ? item.draft.currency ?? settings.bill.currency : undefined,
-      payment: kind === "bill" ? item.draft.payment ?? settings.bill.paymentMethods[0] : undefined,
+      payment: kind === "bill" ? item.draft.payment ?? defaultPaymentMethodForCalendar(settings, item.draft.calendar) : undefined,
       priority: kind === "task" || kind === "event" ? item.draft.priority : undefined,
       urgency: kind === "task" || kind === "event" ? item.draft.urgency : undefined,
       recurrence: kind === "idea" ? "none" : item.draft.recurrence,
@@ -1344,7 +1348,7 @@ export function ChatDialog({
                                   ariaLabel={t("payment", locale)}
                                   options={[
                                     { value: "", label: t("paymentNone", locale) },
-                                    ...settings.bill.paymentMethods.map((method) => ({ value: method, label: paymentMethodLabel(method, locale) })),
+                                    ...paymentMethodsForCalendar(settings, item.draft.calendar).map((method) => ({ value: method.id, label: paymentMethodLabel(method.name, locale) })),
                                   ]}
                                   onChange={(value) => patchCaptureDraft(item.key, { payment: value || undefined })}
                                 />

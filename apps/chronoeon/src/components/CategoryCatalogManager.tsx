@@ -4,6 +4,7 @@ import { PRESET_COLORS } from "@chronoeon/domain";
 import type { Locale } from "../domain/entry";
 import { t } from "../i18n";
 import { GlassSelect, type GlassSelectOption } from "./GlassSelect";
+import { itemIconChoices, resolveItemIcon } from "./ItemsView";
 import { Icon } from "./Icon";
 import { registerModalDismiss } from "./modalLayer";
 
@@ -11,6 +12,10 @@ export interface EditableCategory {
   id: string;
   name: string;
   color: string;
+  icon?: string;
+  builtin?: boolean;
+  builtinKey?: string;
+  builtinSubKeys?: string[];
   direction?: "income" | "expense";
   sub?: string[];
 }
@@ -18,7 +23,7 @@ export interface EditableCategory {
 interface CategoryCatalogManagerProps {
   locale: Locale;
   label: string;
-  mode: "calendar" | "bill";
+  mode: "calendar" | "bill" | "payment" | "item";
   categories: EditableCategory[];
   onChange: (categories: EditableCategory[]) => void;
   onDelete: (id: string) => void;
@@ -40,18 +45,34 @@ function uniqueName(categories: EditableCategory[], locale: Locale): string {
   return name;
 }
 
-function ColorMenu({ locale, category, onColor }: {
+export function ColorMenu({ locale, category, onColor, mode }: {
   locale: Locale;
   category: EditableCategory;
   onColor: (color: string) => void;
+  mode: "calendar" | "bill" | "payment" | "item";
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [position, setPosition] = useState({ left: 8, top: 8 });
 
   useEffect(() => {
     if (!open) return;
+    const place = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = 238;
+      const height = 270;
+      const left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
+      const top = rect.bottom + height <= window.innerHeight - 8
+        ? rect.bottom + 6
+        : Math.max(8, rect.top - height - 6);
+      setPosition({ left, top });
+    };
+    place();
     const close = (event: PointerEvent) => {
-      if (rootRef.current?.contains(event.target as Node)) return;
+      if (rootRef.current?.contains(event.target as Node) || sheetRef.current?.contains(event.target as Node)) return;
       setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
@@ -60,13 +81,18 @@ function ColorMenu({ locale, category, onColor }: {
       setOpen(false);
     };
     window.addEventListener("pointerdown", close);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
     const unregisterKey = registerModalDismiss(onKey);
     return () => {
       window.removeEventListener("pointerdown", close);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
       unregisterKey();
     };
   }, [open]);
 
+  const usesColor = mode === "calendar" || mode === "bill" || mode === "item";
   const presetGroups = [
     { key: "light", colors: PRESET_COLORS.filter((color) => color.group === "light") },
     { key: "dark", colors: PRESET_COLORS.filter((color) => color.group === "dark") },
@@ -75,8 +101,9 @@ function ColorMenu({ locale, category, onColor }: {
   return (
     <div className="category-color-menu" ref={rootRef}>
       <button
+        ref={buttonRef}
         type="button"
-        className={open ? "category-swatch is-open" : "category-swatch"}
+        className={!usesColor ? "category-swatch is-static" : open ? "category-swatch is-open" : "category-swatch"}
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -85,8 +112,9 @@ function ColorMenu({ locale, category, onColor }: {
         <i style={{ background: category.color }} />
         <Icon name="chevron-down" size={11} />
       </button>
-      {open && (
-        <div className="category-color-sheet" role="dialog" aria-label={`${t("categoryColorCustom", locale)} · ${category.name}`}>
+      {mode === "payment" && <div className="category-neutral-mark" aria-hidden="true"><Icon name="coins" size={13} /></div>}
+      {usesColor && open && createPortal(
+        <div ref={sheetRef} className="category-color-sheet" role="dialog" aria-label={`${t("categoryColorCustom", locale)} · ${category.name}`} style={{ left: position.left, top: position.top }}>
           {presetGroups.map((group) => (
             <div key={group.key} className="category-color-group" role="radiogroup" aria-label={t(group.key === "light" ? "categoryColorLight" : "categoryColorDark", locale)}>
               <small>{t(group.key === "light" ? "categoryColorLight" : "categoryColorDark", locale)}</small>
@@ -120,7 +148,8 @@ function ColorMenu({ locale, category, onColor }: {
               aria-label={`${t("categoryColorCustom", locale)} · ${category.name}`}
             />
           </label>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -141,38 +170,50 @@ export function CategoryCatalogManager({
   onSetDefault,
   onReassignDelete,
 }: CategoryCatalogManagerProps) {
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<EditableCategory | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; target: string } | null>(null);
   const [reassignBusy, setReassignBusy] = useState(false);
   const editingRef = useRef<HTMLInputElement>(null);
-  const editing = categories.find((category) => category.id === editingId) ?? null;
+  const editing = draft;
+  const isCreating = Boolean(draft && !categories.some(category => category.id === draft.id));
 
   useEffect(() => {
     if (!editing) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      setEditingId(null);
+      setDraft(null);
     };
     return registerModalDismiss(onKey);
   }, [editing]);
 
   useEffect(() => { if (editing) editingRef.current?.focus(); }, [editing?.id]);
-  useEffect(() => { setPendingDelete(null); }, [editingId]);
+  useEffect(() => { setPendingDelete(null); }, [draft?.id]);
 
   const patch = (id: string, change: (category: EditableCategory) => EditableCategory) => {
-    onChange(categories.map((category) => category.id === id ? change(category) : category));
+    setDraft((current) => current?.id === id ? change(current) : current);
   };
 
   function add() {
     const id = `catalog-${crypto.randomUUID()}`;
-    onChange([...categories, {
+    setDraft({
       id,
       name: uniqueName(categories, locale),
       color: PRESET_COLORS[9].hex,
       ...(mode === "bill" ? { direction: "expense" as const, sub: [] } : {})
-    }]);
-    setEditingId(id);
+    });
+  }
+
+  function confirmEdit() {
+    if (!draft) return;
+    onChange(categories.some(category => category.id === draft.id)
+      ? categories.map(category => category.id === draft.id ? draft : category)
+      : [...categories, draft]);
+    setDraft(null);
+  }
+
+  function closeEditor() {
+    setDraft(null);
   }
 
   function addSub(id: string) {
@@ -198,6 +239,7 @@ export function CategoryCatalogManager({
     });
     if (!count || !targets.length || !onReassignDelete) {
       onDelete(id);
+      setDraft(null);
       return;
     }
     setPendingDelete({ id, target: reassignTarget || targets[0]?.value || "" });
@@ -210,7 +252,7 @@ export function CategoryCatalogManager({
       await onReassignDelete(pendingDelete.id, pendingDelete.target);
       onDelete(pendingDelete.id);
       setPendingDelete(null);
-      setEditingId(null);
+      setDraft(null);
     } finally {
       setReassignBusy(false);
     }
@@ -218,17 +260,25 @@ export function CategoryCatalogManager({
 
   return (
     <section className="category-catalog" aria-label={label}>
+      <header className="category-catalog-header">
+        <h5>{label}</h5>
+        <button type="button" className="category-add" onClick={add}>
+          <Icon name="plus" size={13} />{t("categoryAdd", locale)}
+        </button>
+      </header>
       <ul className="category-catalog-list">
         {categories.map((category) => (
-          <li key={category.id} className="category-row">
+          <li key={category.id} className={`category-row is-${mode}${category.id === defaultCategoryId ? " is-default" : ""}`}>
             <div className="category-main">
               <i className="category-overview-swatch" style={{ "--swatch": category.color, background: category.color } as React.CSSProperties} aria-hidden="true" />
               <div className="category-copy">
-                <span className="category-name" title={category.name}>{category.name}</span>
+                <span className="category-name" title={category.name}>{mode === "item" && <Icon name={resolveItemIcon(category.icon)} size={15} />} {category.name}</span>
                 {category.id === defaultCategoryId && (
                   <small className="category-default-badge">{t("defaultCategoryBadge", locale)}</small>
                 )}
-                {mode === "bill" && (
+
+
+            {mode === "bill" && (
                   <small className="category-sub-summary">
                     {(category.sub ?? []).filter(Boolean).join(" · ") || t("categoryNoSubcategories", locale)}
                   </small>
@@ -237,7 +287,7 @@ export function CategoryCatalogManager({
               <button
                 type="button"
                 className="category-edit-button"
-                onClick={() => setEditingId(category.id)}
+                onClick={() => setDraft(structuredClone(category))}
                 aria-label={`${t("categoryEdit", locale)} · ${category.name}`}
                 title={t("categoryEdit", locale)}
               >
@@ -247,16 +297,13 @@ export function CategoryCatalogManager({
           </li>
         ))}
       </ul>
-      <button type="button" className="category-add" onClick={add}>
-        <Icon name="plus" size={13} />{t("categoryAdd", locale)}
-      </button>
       <MotionPresence>{editing && createPortal(
-        <div className="category-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditingId(null); }}>
+        <div className="category-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEditor(); }}>
           <section className="category-editor" role="dialog" aria-modal="true" aria-label={`${t("categoryEdit", locale)} · ${editing.name}`}>
             <header>
-              <ColorMenu locale={locale} category={editing} onColor={(color) => patch(editing.id, (current) => ({ ...current, color }))} />
+              {(mode === "calendar" || mode === "bill" || mode === "item") && <ColorMenu locale={locale} category={editing} mode={mode} onColor={(color) => patch(editing.id, (current) => ({ ...current, color }))} />}
               <strong>{editing.name}</strong>
-              <button type="button" className="icon-button" onClick={() => setEditingId(null)} aria-label={t("close", locale)}>
+              <button type="button" className="icon-button" onClick={closeEditor} aria-label={t("close", locale)}>
                 <Icon name="close" size={15} />
               </button>
             </header>
@@ -268,14 +315,21 @@ export function CategoryCatalogManager({
                 className="category-name-input"
                 value={editing.name}
                 aria-label={`${t("categoryEdit", locale)} · ${editing.name}`}
-                onChange={(event) => patch(editing.id, (current) => ({ ...current, name: event.target.value }))}
+                onChange={(event) => patch(editing.id, (current) => ({ ...current, name: event.target.value, builtin: false }))}
                 onBlur={(event) => {
                   const value = event.target.value.trim();
                   if (!value) patch(editing.id, (current) => ({ ...current, name: t("categoryUntitled", locale) }));
                 }}
-                onKeyDown={(event) => { if (event.key === "Enter") setEditingId(null); }}
+                onKeyDown={(event) => { if (event.key === "Enter") confirmEdit(); }}
               />
             </label>
+
+            {mode === "item" && <label className="field-label">
+              <span>{locale === "zh" ? "图标" : "Icon"}</span>
+              <GlassSelect value={editing.icon ?? "other"} ariaLabel={locale === "zh" ? "图标" : "Icon"}
+                options={itemIconChoices.map(option => ({ value: option.value, label: option[locale], mark: <Icon name={option.icon} size={16} /> }))}
+                onChange={icon => patch(editing.id, current => ({ ...current, icon }))} />
+            </label>}
 
             {mode === "bill" && (
               <label className="field-label category-direction">
@@ -307,6 +361,7 @@ export function CategoryCatalogManager({
                       aria-label={`${t("categorySubcategories", locale)} · ${editing.name} ${index + 1}`}
                       onChange={(event) => patch(editing.id, (current) => ({
                         ...current,
+                        builtin: false,
                         sub: (current.sub ?? []).map((value, subIndex) => subIndex === index ? event.target.value : value),
                       }))}
                     />
@@ -347,9 +402,12 @@ export function CategoryCatalogManager({
             )}
 
             <footer>
-              {pendingDelete ? (
+              {isCreating ? (
                 <>
-                  <button type="button" className="secondary-button" disabled={reassignBusy} onClick={() => setPendingDelete(null)}>{t("cancel", locale)}</button>
+                  <button type="button" className="primary-action" onClick={confirmEdit}><Icon name="check" size={14} />{t("confirmAction", locale)}</button>
+                </>
+              ) : pendingDelete ? (
+                <>
                   <button type="button" className="danger-button" disabled={reassignBusy} onClick={() => void confirmReassignDelete()}>
                     {reassignBusy ? t("saving", locale) : t("categoryDeleteAndReassign", locale)}
                   </button>
@@ -365,12 +423,12 @@ export function CategoryCatalogManager({
                   >
                     <Icon name="trash" size={14} />{t("categoryDelete", locale)}
                   </button>
-                  {onSetDefault && (
-                    <button type="button" className="secondary-button" disabled={editing.id === defaultCategoryId} onClick={() => onSetDefault(editing.id)}>
+                  {onSetDefault && editing.id !== defaultCategoryId && (
+                    <button type="button" className="secondary-button" onClick={() => onSetDefault(editing.id)}>
                       <Icon name="check" size={14} />{t("setDefaultCategory", locale)}
                     </button>
                   )}
-                  <button type="button" className="primary-action" onClick={() => setEditingId(null)}>{t("close", locale)}</button>
+                  <button type="button" className="primary-action" onClick={confirmEdit}><Icon name="check" size={14} />{t("confirmAction", locale)}</button>
                 </>
               )}
             </footer>

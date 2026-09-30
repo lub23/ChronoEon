@@ -199,11 +199,14 @@ describe("buildReview", () => {
 
 describe("weekly and category review trends", () => {
   const catalog = { ...settings,
-    bill: { ...settings.bill, categories: [
-      { id: "food", name: "Dining", color: "#aabbcc", direction: "expense" as const, sub: ["Meal", "Drink"] },
-      { id: "income", name: "Income", color: "#ccddee", direction: "income" as const, sub: ["Salary"] },
-    ] },
-    calendars: settings.calendars.map(calendar => ({ ...calendar, categories: [{ id: "work", name: "Work", color: "#448866" }] })),
+    calendars: settings.calendars.map(calendar => ({
+      ...calendar,
+      categories: [{ id: "work", name: "Work", color: "#448866" }],
+      billCategories: [
+        { id: "food", name: "Dining", color: "#aabbcc", direction: "expense" as const, sub: ["Meal", "Drink"] },
+        { id: "income", name: "Income", color: "#ccddee", direction: "income" as const, sub: ["Salary"] },
+      ],
+    })),
   };
   it.each([["2026-09-13", false], ["2026-09-14", true]] as const)("requires fourteen inclusive days for weekly curves (%s)", (end, available) => {
     expect(reviewGranularities({ start: "2026-09-01", end }).includes("week")).toBe(available);
@@ -226,8 +229,8 @@ describe("weekly and category review trends", () => {
     expect(reviewBuckets([], { start: "2026-09-07", end: "2026-09-20" }, "week")).toHaveLength(2);
   });
   it("folds subcategories/name aliases into primary curves and keeps bill direction", () => {
-    const food = catalog.bill.categories.find(category => category.id === "food")!;
-    const income = catalog.bill.categories.find(category => category.direction === "income")!;
+    const food = catalog.calendars[0].billCategories.find(category => category.id === "food")!;
+    const income = catalog.calendars[0].billCategories.find(category => category.direction === "income")!;
     const data = [bill("meal", "2026-08-10", 25, "food/Meal"), bill("drink", "2026-08-10", 15, food.name + "/Drink"), bill("salary", "2026-08-10", 100, income.name + "/Salary")];
     const bucket = reviewBuckets(data, { start: "2026-08-10", end: "2026-08-10" }, "day", catalog)[0];
     expect(bucket.billCategories[food.id]).toBe(-40); expect(bucket.billCategories[income.id]).toBe(100);

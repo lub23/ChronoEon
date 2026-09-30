@@ -1,7 +1,7 @@
 import type { useSyncService } from "../sync/useSyncService";
 import { useTouchDevice } from "../hooks/useTouchDevice";
 import { useEffect, useRef, useState } from "react";
-import { billCategoryForValue, titleFor, type CalendarConfig, type ChronoEonSettings } from "@chronoeon/domain";
+import { billCategoryForValue, titleFor, type CalendarConfig, type ChronoEonSettings, type Item } from "@chronoeon/domain";
 import type { DeletedEntrySummary } from "@chronoeon/storage";
 import type { AIProviderConfig } from "@chronoeon/domain";
 import type { AICustomHeader, AIProviderPreferences } from "../ai/provider";
@@ -9,7 +9,7 @@ import type { Locale, ThemeMode } from "../domain/entry";
 import type { LunarPreference } from "../domain/lunar";
 import { DEFAULT_CAPTURE_SHORTCUT, DEFAULT_MINI_SHORTCUT, formatAccelerator, isValidAccelerator } from "../platform/globalShortcut";
 import type { NotificationPermissionState } from "../platform/notifications";
-import { compositeCategoryLabel, t, type MessageKey } from "../i18n";
+import { calendarDisplayName, categoryLabel, compositeCategoryLabel, t, type MessageKey } from "../i18n";
 import { AISettingsPanel } from "./AISettingsPanel";
 import { CalendarCatalogManager } from "./CalendarCatalogManager";
 import { CategoryCatalogManager } from "./CategoryCatalogManager";
@@ -21,7 +21,7 @@ import { backgroundTimingSupported } from "../platform/background";
 import { BackgroundTimingSettings } from "./BackgroundTimingSettings";
 import { registerModalDismiss } from "./modalLayer";
 
-export type SettingsSection = "general" | "calendar" | "reminders" | "ai" | "data";
+export type SettingsSection = "general" | "calendar" | "catalogs" | "ai" | "data";
 
 export type AccentTheme = "terracotta" | "jade" | "ocean" | "violet";
 
@@ -42,6 +42,7 @@ interface SettingsDialogProps {
   theme: ThemeMode;
   settings: ChronoEonSettings;
   entries: import("../domain/entry").Entry[];
+  items: Item[];
   preferences: AppPreferences;
   transferBusy: boolean;
   notificationPermission: NotificationPermissionState;
@@ -64,6 +65,7 @@ interface SettingsDialogProps {
   onThemeChange: (theme: ThemeMode) => void;
   onSettingsChange: (settings: ChronoEonSettings) => void;
   onReassignCategories: (sourceCategory: string, targetCategory: string) => Promise<void>;
+  onReassignItemCategories: (sourceCategory: string, targetCategory: string) => Promise<void>;
   onPreferencesChange: (patch: Partial<AppPreferences>) => void;
   onRequestNotifications: () => void;
   onTestNotification: () => void;
@@ -104,7 +106,6 @@ const shortcutReference: Array<{ key: MessageKey; combo: string }> = [
   { key: "shortcutSearch", combo: "Control+F" },
   { key: "shortcutSettings", combo: "CommandOrControl+," },
   { key: "shortcutClose", combo: "Esc" },
-  { key: "shortcutMiniWindow", combo: "CommandOrControl+Shift+M" },
   { key: "shortcutMiniPresets", combo: "CommandOrControl+1–4" },
 ];
 
@@ -119,6 +120,7 @@ export function SettingsDialog({
   theme,
   settings,
   entries,
+  items,
   preferences,
   transferBusy,
   notificationPermission,
@@ -141,6 +143,7 @@ export function SettingsDialog({
   onThemeChange,
   onSettingsChange,
   onReassignCategories,
+  onReassignItemCategories,
   onPreferencesChange,
   onRequestNotifications,
   onTestNotification,
@@ -158,8 +161,16 @@ export function SettingsDialog({
   const isTouchDevice = useTouchDevice();
   const [shortcutDraft, setShortcutDraft] = useState(preferences.captureShortcut);
   const [miniShortcutDraft, setMiniShortcutDraft] = useState(preferences.miniShortcut);
+  const [catalogCalendarID, setCatalogCalendarID] = useState(settings.defaultCalendarID);
   const patch = (change: (current: ChronoEonSettings) => ChronoEonSettings) => onSettingsChange(change(settings));
-  const activeCalendar = settings.calendars.find((calendar) => calendar.id === settings.defaultCalendarID) ?? settings.calendars[0];
+  const activeCalendar = settings.calendars.find((calendar) => calendar.id === catalogCalendarID)
+    ?? settings.calendars.find((calendar) => calendar.id === settings.defaultCalendarID)
+    ?? settings.calendars[0];
+  useEffect(() => {
+    if (!settings.calendars.some(calendar => calendar.id === catalogCalendarID)) {
+      setCatalogCalendarID(settings.defaultCalendarID);
+    }
+  }, [catalogCalendarID, settings.calendars, settings.defaultCalendarID]);
   const updateCalendar = (id: string, change: (calendar: CalendarConfig) => CalendarConfig) => {
     patch((current) => ({
       ...current,
@@ -199,35 +210,103 @@ export function SettingsDialog({
     color: category.color,
   }));
   const updateBillCategories = (categories: import("./CategoryCatalogManager").EditableCategory[]) => {
-    patch((current) => ({
-      ...current,
-      bill: {
-        ...current.bill,
-        categories: categories.map((category) => ({
+    if (!activeCalendar) return;
+    updateCalendar(activeCalendar.id, (calendar) => ({
+      ...calendar,
+      billCategories: categories.map((category) => ({
           id: category.id,
           name: category.name,
           color: category.color,
           direction: category.direction ?? "expense",
           sub: category.sub ?? [],
-        })),
-      },
+          builtin: category.builtin,
+          builtinKey: category.builtinKey,
+          builtinSubKeys: category.builtinSubKeys,
+      })),
     }));
   };
   const setDefaultBillCategory = (id: string) => {
-    const primary = settings.bill.categories.find((category) => category.id === id);
+    const primary = activeCalendar?.billCategories.find((category) => category.id === id);
     if (!primary) return;
-    const sub = primary.sub.includes(settings.bill.defaultSubCategoryId)
-      ? settings.bill.defaultSubCategoryId
+    const sub = primary.sub.includes(activeCalendar.defaultBillSubCategoryId)
+      ? activeCalendar.defaultBillSubCategoryId
       : primary.sub[0];
-    patch((current) => ({ ...current, bill: { ...current.bill, defaultCategoryId: id, defaultSubCategoryId: sub ?? "" } }));
+    updateCalendar(activeCalendar.id, (calendar) => ({
+      ...calendar,
+      defaultBillCategoryId: id,
+      defaultBillSubCategoryId: sub ?? "",
+    }));
   };
-  const billCategoryCounts = Object.fromEntries(settings.bill.categories.map((category) => [
+  const updatePaymentMethods = (categories: import("./CategoryCatalogManager").EditableCategory[]) => {
+    if (!activeCalendar) return;
+    updateCalendar(activeCalendar.id, (calendar) => {
+      const methods = categories.map(category => category.name).filter(Boolean);
+      const stored = categories.map(category => ({
+        id: category.id,
+        name: category.name,
+        builtin: category.builtin,
+        builtinKey: category.builtinKey,
+      }));
+      const defaultPaymentMethodId = stored.some(method => method.id === calendar.defaultPaymentMethodId)
+        ? calendar.defaultPaymentMethodId
+        : stored[0]?.id ?? calendar.defaultPaymentMethodId;
+      return { ...calendar, paymentMethods: stored, defaultPaymentMethodId };
+    });
+  };
+  const setDefaultPaymentMethod = (id: string) => {
+    if (!activeCalendar) return;
+    updateCalendar(activeCalendar.id, (calendar) => ({ ...calendar, defaultPaymentMethodId: id }));
+  };
+  const updateItemCategories = (categories: import("./CategoryCatalogManager").EditableCategory[]) => {
+    if (!activeCalendar) return;
+    updateCalendar(activeCalendar.id, (calendar) => {
+      const next = categories.map(category => ({
+        id: category.id,
+        name: category.name,
+        color: category.color,
+        icon: category.icon ?? category.id,
+        builtin: category.builtin,
+        builtinKey: category.builtinKey,
+      }));
+      const defaultItemCategoryId = next.some(category => category.id === calendar.defaultItemCategoryId)
+        ? calendar.defaultItemCategoryId
+        : next[0]?.id ?? calendar.defaultItemCategoryId;
+      return { ...calendar, itemCategories: next, defaultItemCategoryId };
+    });
+  };
+  const setDefaultItemCategory = (id: string) => {
+    if (!activeCalendar) return;
+    updateCalendar(activeCalendar.id, (calendar) => ({ ...calendar, defaultItemCategoryId: id }));
+  };
+  const deleteItemCategory = (id: string) => {
+    if (!activeCalendar) return;
+    updateCalendar(activeCalendar.id, (calendar) => {
+      if (calendar.itemCategories.length < 2) return calendar;
+      const itemCategories = calendar.itemCategories.filter(category => category.id !== id);
+      return {
+        ...calendar,
+        itemCategories,
+        defaultItemCategoryId: calendar.defaultItemCategoryId === id
+          ? itemCategories[0]?.id ?? calendar.defaultItemCategoryId
+          : calendar.defaultItemCategoryId,
+      };
+    });
+  };
+  const itemCategoryCounts = Object.fromEntries((activeCalendar?.itemCategories ?? []).map(category => [
     category.id,
-    entries.filter((entry) => entry.kind === "bill" && billCategoryForValue(entry.category, settings)?.id === category.id).length,
+    items.filter(item => item.calendarId === activeCalendar?.id && item.category === category.id).length,
   ]));
-  const billReassignOptions = settings.bill.categories.map((category) => {
-    const sub = category.sub.includes(settings.bill.defaultSubCategoryId)
-      ? settings.bill.defaultSubCategoryId
+  const itemReassignOptions = (activeCalendar?.itemCategories ?? []).map(category => ({
+    value: category.id,
+    label: category.name,
+  }));
+  const billCategoryCounts = Object.fromEntries((activeCalendar?.billCategories ?? []).map((category) => [
+    category.id,
+    entries.filter((entry) => entry.kind === "bill" && entry.calendar === activeCalendar?.id && billCategoryForValue(entry.category, settings, entry.calendar)?.id === category.id).length,
+  ]));
+  const billReassignOptions = (activeCalendar?.billCategories ?? []).map((category) => {
+    const sub = category.sub.includes(activeCalendar?.defaultBillSubCategoryId ?? "")
+      ? activeCalendar?.defaultBillSubCategoryId
       : category.sub[0];
     return {
       value: sub ? `${category.id}/${sub}` : category.id,
@@ -239,18 +318,16 @@ export function SettingsDialog({
     await onReassignCategories(id, target);
   };
   const deleteBillCategory = (id: string) => {
-    patch((current) => {
-      if (current.bill.categories.length < 2) return current;
-      const categories = current.bill.categories.filter((category) => category.id !== id);
-      const primary = categories.find((category) => category.id === current.bill.defaultCategoryId) ?? categories[0];
+    if (!activeCalendar) return;
+    updateCalendar(activeCalendar.id, (calendar) => {
+      if (calendar.billCategories.length < 2) return calendar;
+      const categories = calendar.billCategories.filter((category) => category.id !== id);
+      const primary = categories.find((category) => category.id === calendar.defaultBillCategoryId) ?? categories[0];
       return {
-        ...current,
-        bill: {
-          ...current.bill,
-          categories,
-          defaultCategoryId: primary.id,
-          defaultSubCategoryId: primary.sub.includes(current.bill.defaultSubCategoryId) ? current.bill.defaultSubCategoryId : primary.sub[0] ?? "",
-        },
+        ...calendar,
+        billCategories: categories,
+        defaultBillCategoryId: primary.id,
+        defaultBillSubCategoryId: primary.sub.includes(calendar.defaultBillSubCategoryId) ? calendar.defaultBillSubCategoryId : primary.sub[0] ?? "",
       };
     });
   };
@@ -264,10 +341,10 @@ export function SettingsDialog({
     closeRef.current();
   }), []);
 
-  const sectionItems: Array<{ id: SettingsSection; icon: "settings" | "calendar" | "bell" | "sparkle" | "download" | "refresh"; label: MessageKey }> = [
+  const sectionItems: Array<{ id: SettingsSection; icon: "settings" | "calendar" | "tag" | "bell" | "sparkle" | "download" | "refresh"; label: MessageKey }> = [
     { id: "general", icon: "settings", label: "settingsGeneral" },
     { id: "calendar", icon: "calendar", label: "settingsCalendar" },
-    { id: "reminders", icon: "bell", label: "remindersSetting" },
+    { id: "catalogs", icon: "tag", label: "settingsCatalogs" },
     { id: "ai", icon: "sparkle", label: "settingsAI" },
     { id: "data", icon: "refresh", label: "settingsData" },
   ];
@@ -282,7 +359,7 @@ export function SettingsDialog({
     <div className="settings-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header className="settings-header">
-          <div><span className="settings-eyebrow">{t("productName", locale)} · {t("settings", locale)}</span><h2 id="settings-title">{t("settingsTitle", locale)}</h2><p>{t("settingsDetail", locale)}</p></div>
+          <div><h2 id="settings-title">{t("settingsTitle", locale)}</h2><p>{t("settingsDetail", locale)}</p></div>
           <button type="button" className="icon-button" onClick={onClose} aria-label={t("close", locale)} autoFocus><Icon name="close" /></button>
         </header>
         <div className="settings-body">
@@ -299,6 +376,29 @@ export function SettingsDialog({
                 <div className="settings-option settings-accent-option"><div className="settings-option-copy"><strong>{t("accentTheme", locale)}</strong><small>{t("accentThemeDetail", locale)}</small></div><div className="accent-theme-options" role="radiogroup" aria-label={t("accentTheme", locale)}>{(["terracotta", "jade", "ocean", "violet"] as AccentTheme[]).map((accent) => <button key={accent} type="button" role="radio" aria-checked={preferences.accentTheme === accent} className={preferences.accentTheme === accent ? `accent-swatch accent-swatch--${accent} is-active` : `accent-swatch accent-swatch--${accent}`} onClick={() => onPreferencesChange({ accentTheme: accent })}><i />{t(`accent${accent[0].toUpperCase()}${accent.slice(1)}` as MessageKey, locale)}</button>)}</div></div>
               </div>
 
+              <SectionHeading title={t("remindersSetting", locale)} detail={t("remindersSettingDetail", locale)} />
+              <div className="settings-card">
+                <Toggle
+                  checked={preferences.remindersEnabled}
+                  onChange={(value) => { onPreferencesChange({ remindersEnabled: value }); if (value) onRequestNotifications(); }}
+                  label={t("remindersSetting", locale)}
+                  detail={t("remindersSettingDetail", locale)}
+                />
+                <div className="settings-option">
+                  <div className="settings-option-copy"><strong>{t("systemNotifications", locale)}</strong><small>{t("systemNotificationsDetail", locale)} · {t(permissionLabel, locale)}</small></div>
+                  <div className="settings-inline-actions">
+                    <button type="button" className="secondary-button" disabled={notificationPermission === "granted" || notificationPermission === "unsupported"} onClick={onRequestNotifications}>
+                      <Icon name="bell" size={15} />{t("enableNotifications", locale)}
+                    </button>
+                    <button type="button" className="secondary-button" onClick={onTestNotification}>
+                      <Icon name="sparkle" size={15} />{t("testNotification", locale)}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {backgroundTimingSupported() && <BackgroundTimingSettings locale={locale} />}
+
               {!isTouchDevice && (
                 <>
                   <SectionHeading title={t("shortcutsTitle", locale)} detail={t("shortcutsDetail", locale)} />
@@ -307,7 +407,64 @@ export function SettingsDialog({
                       {shortcutReference.map((item) => (
                         <li key={item.key}><span>{t(item.key, locale)}</span><kbd>{formatAccelerator(item.combo)}</kbd></li>
                       ))}
-                      <li><span>{t("globalCapture", locale)}</span><kbd>{formatAccelerator(preferences.captureShortcut)}</kbd></li>
+                      <li className="settings-shortcut-configurable">
+                        <span>{t("globalCapture", locale)}</span>
+                        <div className="settings-shortcut-control">
+                          <label className="settings-shortcut-switch">
+                            <span className={preferences.captureShortcutEnabled ? "settings-switch is-on" : "settings-switch"} aria-hidden="true"><i /></span>
+                            <input
+                              type="checkbox"
+                              checked={preferences.captureShortcutEnabled}
+                              onChange={(event) => onPreferencesChange({ captureShortcutEnabled: event.target.checked })}
+                              aria-label={`${t("globalCapture", locale)} · ${t("shortcutEnable", locale)}`}
+                            />
+                          </label>
+                          <div className="settings-shortcut-edit">
+                            <input
+                              className="settings-shortcut-input"
+                              value={shortcutDraft}
+                              aria-label={t("globalCaptureEdit", locale)}
+                              aria-invalid={!shortcutValid}
+                              title={shortcutStatus === "unsupported" ? t("globalCaptureUnavailable", locale) : shortcutStatus === "conflict" ? t("globalCaptureConflict", locale) : t("globalCaptureRegistered", locale)}
+                              onChange={(event) => setShortcutDraft(event.target.value)}
+                              onBlur={() => { if (shortcutValid) onPreferencesChange({ captureShortcut: shortcutDraft }); else setShortcutDraft(preferences.captureShortcut); }}
+                              disabled={!preferences.captureShortcutEnabled || shortcutStatus === "unsupported"}
+                            />
+                            <button type="button" className="icon-button subtle" title={t("filterReset", locale)} aria-label={t("filterReset", locale)} onClick={() => { setShortcutDraft(DEFAULT_CAPTURE_SHORTCUT); onPreferencesChange({ captureShortcut: DEFAULT_CAPTURE_SHORTCUT }); }}>
+                              <Icon name="refresh" size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                      <li className="settings-shortcut-configurable">
+                        <span>{t("globalMini", locale)}</span>
+                        <div className="settings-shortcut-control">
+                          <label className="settings-shortcut-switch">
+                            <span className={preferences.miniShortcutEnabled ? "settings-switch is-on" : "settings-switch"} aria-hidden="true"><i /></span>
+                            <input
+                              type="checkbox"
+                              checked={preferences.miniShortcutEnabled}
+                              onChange={(event) => onPreferencesChange({ miniShortcutEnabled: event.target.checked })}
+                              aria-label={`${t("globalMini", locale)} · ${t("shortcutEnable", locale)}`}
+                            />
+                          </label>
+                          <div className="settings-shortcut-edit">
+                            <input
+                              className="settings-shortcut-input"
+                              value={miniShortcutDraft}
+                              aria-label={t("globalMiniEdit", locale)}
+                              aria-invalid={!miniShortcutValid}
+                              title={miniShortcutStatus === "unsupported" ? t("globalCaptureUnavailable", locale) : miniShortcutStatus === "conflict" ? t("globalCaptureConflict", locale) : t("globalCaptureRegistered", locale)}
+                              onChange={(event) => setMiniShortcutDraft(event.target.value)}
+                              onBlur={() => { if (miniShortcutValid) onPreferencesChange({ miniShortcut: miniShortcutDraft }); else setMiniShortcutDraft(preferences.miniShortcut); }}
+                              disabled={!preferences.miniShortcutEnabled || miniShortcutStatus === "unsupported"}
+                            />
+                            <button type="button" className="icon-button subtle" title={t("filterReset", locale)} aria-label={t("filterReset", locale)} onClick={() => { setMiniShortcutDraft(DEFAULT_MINI_SHORTCUT); onPreferencesChange({ miniShortcut: DEFAULT_MINI_SHORTCUT }); }}>
+                              <Icon name="refresh" size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </li>
                     </ul>
                   </div>
                 </>
@@ -359,7 +516,26 @@ export function SettingsDialog({
                 </label>
               </div>
 
-              <SectionHeading title={t("calendarManagement", locale)} detail={t("calendarManagementDetail", locale)} />
+            </>}
+
+            {section === "catalogs" && activeCalendar && <>
+              <SectionHeading title={t("settingsCatalogs", locale)} detail={t("categoryCatalogDetail", locale)} />
+              <label className="settings-catalog-selector">
+                <span>{t("catalogCalendarManage", locale)}</span>
+                <GlassSelect
+                  value={catalogCalendarID}
+                  ariaLabel={t("catalogCalendarManage", locale)}
+                  options={settings.calendars.map(calendar => ({
+                    value: calendar.id,
+                    label: calendarDisplayName(calendar.name, locale),
+                  }))}
+                  onChange={setCatalogCalendarID}
+                />
+              </label>
+              <div className="settings-catalog-scope">
+                <i style={{ background: activeCalendar.color }} aria-hidden="true" />
+                <span>{t("catalogScopeCalendar", locale).replace("{calendar}", calendarDisplayName(activeCalendar.name, locale))}</span>
+              </div>
               <div className="settings-card settings-color-card">
                 <CalendarCatalogManager
                   locale={locale}
@@ -367,134 +543,77 @@ export function SettingsDialog({
                   calendars={settings.calendars}
                   defaultCalendarId={settings.defaultCalendarID}
                   onChange={(calendars) => patch((current) => ({ ...current, calendars }))}
-                  onDelete={(id) => patch((current) => ({
-                    ...current,
-                    calendars: current.calendars.filter((calendar) => calendar.id !== id),
-                  }))}
+                  onDelete={(id) => patch((current) => ({ ...current, calendars: current.calendars.filter((calendar) => calendar.id !== id) }))}
                   onSetDefault={(id) => patch((current) => ({ ...current, defaultCalendarID: id }))}
+                  onSelect={setCatalogCalendarID}
                 />
               </div>
-
-              {activeCalendar && (
-                <>
-                  <SectionHeading title={t("categoryColors", locale)} detail={t("categoryCatalogDetail", locale)} />
               <div className="settings-card settings-color-card">
-                  <h4 className="settings-color-subheading">{t("categoryColorCalendar", locale)}</h4>
-                  <CategoryCatalogManager
-                      locale={locale}
-                      label={t("categoryColorCalendar", locale)}
-                      mode="calendar"
-                      categories={activeCalendar.categories}
-                      onChange={updateCalendarCategories}
-                      onDelete={deleteCalendarCategory}
-                      entryCounts={calendarCategoryCounts}
-                      defaultCategoryId={activeCalendar.defaultCategoryId}
-                      reassignOptions={calendarReassignOptions}
-                      reassignTarget={activeCalendar.defaultCategoryId}
-                      onSetDefault={setDefaultCalendarCategory}
-                      onReassignDelete={(id, target) => onReassignCategories(id, target)}
-                    />
-                    <div className="settings-color-divider" role="presentation" />
-                    <h4 className="settings-color-subheading">{t("categoryColorBill", locale)}</h4>
-                    <CategoryCatalogManager
-                      locale={locale}
-                      label={t("categoryColorBill", locale)}
-                      mode="bill"
-                      categories={settings.bill.categories}
-                      onChange={updateBillCategories}
-                      onDelete={deleteBillCategory}
-                      entryCounts={billCategoryCounts}
-                      defaultCategoryId={settings.bill.defaultCategoryId}
-                      defaultSubCategoryId={settings.bill.defaultSubCategoryId}
-                      reassignOptions={billReassignOptions}
-                      reassignTarget={billReassignOptions.find((option) => option.value.startsWith(
-                        settings.bill.categories.find((category) => category.id === settings.bill.defaultCategoryId)?.name ?? ""
-                      ))?.value ?? billReassignOptions[0]?.value ?? ""}
-                      onSetDefault={setDefaultBillCategory}
-                      onReassignDelete={(id, target) => reassignBillCategory(id, target)}
-                    />
-                  </div>
-                </>
-              )}
-            </>}
-
-            {section === "reminders" && <>
-              <SectionHeading title={t("remindersSetting", locale)} detail={t("remindersSettingDetail", locale)} />
-              <div className="settings-card">
-                <Toggle
-                  checked={preferences.remindersEnabled}
-                  onChange={(value) => { onPreferencesChange({ remindersEnabled: value }); if (value) onRequestNotifications(); }}
-                  label={t("remindersSetting", locale)}
-                  detail={t("remindersSettingDetail", locale)}
+                <CategoryCatalogManager
+                  locale={locale}
+                  label={t("categoryColorCalendar", locale)}
+                  mode="calendar"
+                  categories={activeCalendar.categories}
+                  onChange={updateCalendarCategories}
+                  onDelete={deleteCalendarCategory}
+                  entryCounts={calendarCategoryCounts}
+                  defaultCategoryId={activeCalendar.defaultCategoryId}
+                  reassignOptions={calendarReassignOptions}
+                  reassignTarget={activeCalendar.defaultCategoryId}
+                  onSetDefault={setDefaultCalendarCategory}
+                  onReassignDelete={(id, target) => onReassignCategories(id, target)}
                 />
-                <div className="settings-option">
-                  <div className="settings-option-copy"><strong>{t("systemNotifications", locale)}</strong><small>{t("systemNotificationsDetail", locale)} · {t(permissionLabel, locale)}</small></div>
-                  <div className="settings-inline-actions">
-                    <button type="button" className="secondary-button" disabled={notificationPermission === "granted" || notificationPermission === "unsupported"} onClick={onRequestNotifications}>
-                      <Icon name="bell" size={15} />{t("enableNotifications", locale)}
-                    </button>
-                    <button type="button" className="secondary-button" onClick={onTestNotification}>
-                      <Icon name="sparkle" size={15} />{t("testNotification", locale)}
-                    </button>
-                  </div>
-                </div>
               </div>
-
-              {backgroundTimingSupported() && <BackgroundTimingSettings locale={locale} />}
-
-              {!isTouchDevice && (
-                <>
-              <SectionHeading title={t("globalCapture", locale)} detail={t("globalCaptureDetail", locale)} />
-              <div className="settings-card">
-                <Toggle checked={preferences.captureShortcutEnabled} onChange={(value) => onPreferencesChange({ captureShortcutEnabled: value })} label={t("globalCapture", locale)} detail={shortcutStatus === "unsupported" ? t("globalCaptureUnavailable", locale) : shortcutStatus === "conflict" ? t("globalCaptureConflict", locale) : t("globalCaptureRegistered", locale)} />
-                <div className="settings-option">
-                  <div className="settings-option-copy">
-                    <strong>{t("globalCaptureEdit", locale)}</strong>
-                    <small><kbd>{formatAccelerator(preferences.captureShortcut)}</kbd></small>
-                  </div>
-                  <div className="settings-inline-actions">
-                    <input
-                      className="settings-shortcut-input"
-                      value={shortcutDraft}
-                      aria-label={t("globalCaptureEdit", locale)}
-                      aria-invalid={!shortcutValid}
-                      onChange={(event) => setShortcutDraft(event.target.value)}
-                      onBlur={() => { if (shortcutValid) onPreferencesChange({ captureShortcut: shortcutDraft }); else setShortcutDraft(preferences.captureShortcut); }}
-                      disabled={!preferences.captureShortcutEnabled || shortcutStatus === "unsupported"}
-                    />
-                    <button type="button" className="icon-button" title={t("filterReset", locale)} aria-label={t("filterReset", locale)} onClick={() => { setShortcutDraft(DEFAULT_CAPTURE_SHORTCUT); onPreferencesChange({ captureShortcut: DEFAULT_CAPTURE_SHORTCUT }); }}>
-                      <Icon name="refresh" size={16} />
-                    </button>
-                  </div>
-                </div>
+              <div className="settings-card settings-color-card">
+                <CategoryCatalogManager
+                  locale={locale}
+                  label={`${t("categoryColorBill", locale)} · ${calendarDisplayName(activeCalendar.name, locale)}`}
+                  mode="bill"
+                  categories={activeCalendar.billCategories}
+                  onChange={updateBillCategories}
+                  onDelete={deleteBillCategory}
+                  entryCounts={billCategoryCounts}
+                  defaultCategoryId={activeCalendar.defaultBillCategoryId}
+                  defaultSubCategoryId={activeCalendar.defaultBillSubCategoryId}
+                  reassignOptions={billReassignOptions}
+                  reassignTarget={billReassignOptions.find((option) => option.value.startsWith(
+                    activeCalendar.billCategories.find((category) => category.id === activeCalendar.defaultBillCategoryId)?.name ?? ""
+                  ))?.value ?? billReassignOptions[0]?.value ?? ""}
+                  onSetDefault={setDefaultBillCategory}
+                  onReassignDelete={(id, target) => reassignBillCategory(id, target)}
+                />
               </div>
-
-              <SectionHeading title={t("globalMini", locale)} detail={t("globalMiniDetail", locale)} />
-              <div className="settings-card">
-                <Toggle checked={preferences.miniShortcutEnabled} onChange={(value) => onPreferencesChange({ miniShortcutEnabled: value })} label={t("globalMini", locale)} detail={miniShortcutStatus === "unsupported" ? t("globalCaptureUnavailable", locale) : miniShortcutStatus === "conflict" ? t("globalCaptureConflict", locale) : t("globalCaptureRegistered", locale)} />
-                <div className="settings-option">
-                  <div className="settings-option-copy">
-                    <strong>{t("globalMiniEdit", locale)}</strong>
-                    <small><kbd>{formatAccelerator(preferences.miniShortcut)}</kbd></small>
-                  </div>
-                  <div className="settings-inline-actions">
-                    <input
-                      className="settings-shortcut-input"
-                      value={miniShortcutDraft}
-                      aria-label={t("globalMiniEdit", locale)}
-                      aria-invalid={!miniShortcutValid}
-                      onChange={(event) => setMiniShortcutDraft(event.target.value)}
-                      onBlur={() => { if (miniShortcutValid) onPreferencesChange({ miniShortcut: miniShortcutDraft }); else setMiniShortcutDraft(preferences.miniShortcut); }}
-                      disabled={!preferences.miniShortcutEnabled || miniShortcutStatus === "unsupported"}
-                    />
-                    <button type="button" className="icon-button" title={t("filterReset", locale)} aria-label={t("filterReset", locale)} onClick={() => { setMiniShortcutDraft(DEFAULT_MINI_SHORTCUT); onPreferencesChange({ miniShortcut: DEFAULT_MINI_SHORTCUT }); }}>
-                      <Icon name="refresh" size={16} />
-                    </button>
-                  </div>
-                </div>
+              <div className="settings-card settings-color-card">
+                <CategoryCatalogManager
+                  locale={locale}
+                  label={`${t("paymentCatalog", locale)} · ${calendarDisplayName(activeCalendar.name, locale)}`}
+                  mode="payment"
+                  categories={activeCalendar.paymentMethods.map(method => ({ id: method.id, name: method.name, color: "#77787b", builtin: method.builtin, builtinKey: method.builtinKey }))}
+                  onChange={updatePaymentMethods}
+                  onDelete={(id) => {
+                    const methods = activeCalendar.paymentMethods.filter(method => method.id !== id);
+                    updatePaymentMethods(methods.map(method => ({ id: method.id, name: method.name, color: "#77787b", builtin: method.builtin, builtinKey: method.builtinKey })));
+                  }}
+                  defaultCategoryId={activeCalendar.defaultPaymentMethodId}
+                  onSetDefault={setDefaultPaymentMethod}
+                />
               </div>
-                </>
-              )}
+              <div className="settings-card settings-color-card">
+                <CategoryCatalogManager
+                  locale={locale}
+                  label={`${t("itemCatalog", locale)} · ${calendarDisplayName(activeCalendar.name, locale)}`}
+                  mode="item"
+                  categories={activeCalendar.itemCategories.map(category => ({ id: category.id, name: category.name, color: category.color, icon: category.icon, builtin: category.builtin, builtinKey: category.builtinKey }))}
+                  onChange={updateItemCategories}
+                  onDelete={deleteItemCategory}
+                  entryCounts={itemCategoryCounts}
+                  defaultCategoryId={activeCalendar.defaultItemCategoryId}
+                  reassignOptions={itemReassignOptions}
+                  reassignTarget={activeCalendar.defaultItemCategoryId}
+                  onSetDefault={setDefaultItemCategory}
+                  onReassignDelete={onReassignItemCategories}
+                />
+              </div>
             </>}
 
             {section === "ai" && (
@@ -530,7 +649,10 @@ export function SettingsDialog({
                         <li key={item.id}>
                           <span>
                             <strong>{titleFor(item.entry, locale)}</strong>
-                            <small>{item.entry.date} · {new Date(item.deletedAt).toLocaleString(locale === "zh" ? "zh-CN" : "en-US")}</small>
+                            <small className="recycle-bin-meta">
+                              {item.entry.date}{item.entry.start ? ` ${item.entry.start}` : ""} · {categoryLabel(item.entry.category, locale, undefined, settings)} · {new Date(item.deletedAt).toLocaleString(locale === "zh" ? "zh-CN" : "en-US")}
+                            </small>
+                            {item.entry.note && <small className="recycle-bin-note">{item.entry.note}</small>}
                           </span>
                           <button
                             type="button"

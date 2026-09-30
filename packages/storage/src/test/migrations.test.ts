@@ -10,7 +10,7 @@ describe("migrations", () => {
     await ensureMigrated(backend);
     const version = await backend.select<{ user_version: number }>("PRAGMA user_version");
     expect(version[0].user_version).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe(12);
+    expect(SCHEMA_VERSION).toBe(14);
 
     const tables = await backend.select<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('timer_session', 'timer_segments')"
@@ -24,6 +24,8 @@ describe("migrations", () => {
 
     const entryColumns = await backend.select<{ name: string }>("PRAGMA table_info(entries)");
     expect(entryColumns.map((row) => row.name)).not.toContain("body");
+    const itemColumns = await backend.select<{ name: string }>("PRAGMA table_info(items)");
+    expect(itemColumns.map((row) => row.name)).toEqual(expect.arrayContaining(["calendar", "acquired_at", "images_json"]));
     await backend.close();
   });
 
@@ -57,7 +59,7 @@ describe("migrations", () => {
     await ensureMigrated(backend, [{ version: 1, sql: SCHEMA_SQL }]);
     expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(1);
     await ensureMigrated(backend);
-    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(12);
+    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(14);
     await backend.close();
   });
 
@@ -76,7 +78,7 @@ describe("migrations", () => {
        VALUES ('x2', 'task', 'T2', NULL, 'body only', '2026-08-01', 1, '2026-08-01 00:00')`
     );
     await ensureMigrated(backend);
-    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(12);
+    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(14);
     const rows = await backend.select<{ id: string; note: string | null }>("SELECT id, note FROM entries ORDER BY id");
     expect(rows[0].note).toBe("short note\n\nlong\nbody");
     expect(rows[1].note).toBe("body only");

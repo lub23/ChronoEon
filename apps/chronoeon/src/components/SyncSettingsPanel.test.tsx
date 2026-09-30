@@ -85,10 +85,11 @@ describe("storage usage", () => {
     await act(async () => render(sync, "zh"));
     expect(refreshUsage).toHaveBeenCalledTimes(1);
     const usage = host.querySelector(".sync-usage")!;
-    expect(usage.textContent).toContain("同步仓库（本地镜像）");
+    expect(usage.textContent).toContain("同步缓存（远端压缩副本）");
     expect(usage.textContent).toContain("12 MB");
     expect(usage.textContent).toContain("2 KB");
-    expect(usage.querySelector(".sync-usage-total")?.textContent).toContain("13 MB");
+    expect(usage.querySelector(".sync-usage-total")?.textContent).toContain("1 MB");
+    expect(host.textContent).toContain("不计入本地总占用");
   });
   it("does not measure or render figures while sync is unconfigured", async () => {
     const refreshUsage = vi.fn(async () => {});

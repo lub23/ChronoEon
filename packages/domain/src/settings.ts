@@ -11,6 +11,24 @@ export interface CalendarCategory {
   id: string;
   name: string;
   color: string;
+  builtin?: boolean;
+  builtinKey?: string;
+}
+
+export interface PaymentMethodConfig {
+  id: string;
+  name: string;
+  builtin?: boolean;
+  builtinKey?: string;
+}
+
+export interface ItemCategoryConfig {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+  builtin?: boolean;
+  builtinKey?: string;
 }
 
 export interface BillPrimaryCategory {
@@ -20,6 +38,9 @@ export interface BillPrimaryCategory {
   /** Canonical cash-flow direction; the stored bill amount is a magnitude. */
   direction: "income" | "expense";
   sub: string[];
+  builtin?: boolean;
+  builtinKey?: string;
+  builtinSubKeys?: string[];
 }
 
 export interface CalendarConfig {
@@ -30,24 +51,26 @@ export interface CalendarConfig {
   folder: string;
   categories: CalendarCategory[];
   defaultCategoryId: string;
-  billCategories?: BillPrimaryCategory[];
+  billCategories: BillPrimaryCategory[];
+  defaultBillCategoryId: string;
+  defaultBillSubCategoryId: string;
+  paymentMethods: PaymentMethodConfig[];
+  defaultPaymentMethodId: string;
+  itemCategories: ItemCategoryConfig[];
+  defaultItemCategoryId: string;
   provider?: string;
   externalId?: string;
 }
 
 export interface BillConfig {
-  categories: BillPrimaryCategory[];
-  defaultCategoryId: string;
-  defaultSubCategoryId: string;
   currency: string;
   customCurrencies: Record<string, string>;
-  paymentMethods: string[];
 }
 
 export type PhotoDisplayMode = "first" | "stable-random" | "slideshow";
 
 export interface ChronoEonSettings {
-  settingsVersion: 1;
+  settingsVersion: 2;
   language: Locale;
   firstDay: 0 | 1 | 2 | 3 | 4 | 5 | 6;
   headingName: string;
@@ -117,7 +140,7 @@ export const DEFAULT_CATEGORY_NAME: Record<Locale, string> = { en: "Default", zh
 export const DEFAULT_BILL_CATEGORY_ID = "income";
 
 export function defaultTaskCategory(locale: Locale = "en"): CalendarCategory {
-  return { id: DEFAULT_CATEGORY_ID, name: DEFAULT_CATEGORY_NAME[locale], color: "#90d7ec" };
+  return { id: DEFAULT_CATEGORY_ID, name: DEFAULT_CATEGORY_NAME[locale], color: "#90d7ec", builtin: true, builtinKey: "default" };
 }
 
 export function defaultTaskCategories(locale: Locale = "en"): CalendarCategory[] {
@@ -131,8 +154,8 @@ export function defaultBillCategories(locale: Locale = "en"): BillPrimaryCategor
     ? { salary: "工资", bonus: "奖金", daily: "日常", medical: "医疗" }
     : { salary: "Salary", bonus: "Bonus", daily: "Daily", medical: "Medical" };
   return [
-    { id: "income", name: income, color: "#2f8f5b", direction: "income", sub: [labels.salary, labels.bonus] },
-    { id: "expense", name: expense, color: "#c0392b", direction: "expense", sub: [labels.daily, labels.medical] },
+    { id: "income", name: income, color: "#2f8f5b", direction: "income", sub: [labels.salary, labels.bonus], builtin: true, builtinKey: "income", builtinSubKeys: ["salary", "bonus"] },
+    { id: "expense", name: expense, color: "#c0392b", direction: "expense", sub: [labels.daily, labels.medical], builtin: true, builtinKey: "expense", builtinSubKeys: ["daily", "medical"] },
   ];
 }
 
@@ -144,10 +167,59 @@ export const BUILTIN_CURRENCIES: Record<string, CurrencyDefinition> = {
   JPY: { symbol: "¥", name: "日元", nameEn: "Japanese yen" }
 };
 
-export const DEFAULT_PAYMENT_METHODS = ["Cash", "Alipay", "WeChat", "Credit Card", "Debit Card"];
+export const DEFAULT_PAYMENT_METHODS = ["Bank Card", "Cash"];
+export const ITEM_CATEGORY_IDS = ["electronics", "clothing", "home", "transport", "hobby", "other"] as const;
+export const DEFAULT_ITEM_CATEGORY_IDS = ["electronics", "other"] as const;
+export type ItemCategoryId = string;
+
+const ITEM_CATEGORY_NAMES: Partial<Record<typeof ITEM_CATEGORY_IDS[number], Record<Locale, string>>> = {
+  electronics: { en: "Electronics", zh: "电子产品" },
+  clothing: { en: "Clothing", zh: "衣物" },
+  home: { en: "Home", zh: "家居用品" },
+  transport: { en: "Transport", zh: "交通工具" },
+  hobby: { en: "Hobbies", zh: "兴趣爱好" },
+  other: { en: "Other", zh: "其他物品" },
+};
+
+function defaultItemCategoryName(id: ItemCategoryId, locale: Locale): string {
+  return ITEM_CATEGORY_NAMES[id as typeof ITEM_CATEGORY_IDS[number]]?.[locale] ?? id;
+}
+
+export function defaultPaymentMethods(locale: Locale = "en"): PaymentMethodConfig[] {
+  return locale === "zh"
+    ? [{ id: "bank-card", name: "银行卡", builtin: true, builtinKey: "bank-card" }, { id: "cash", name: "现金", builtin: true, builtinKey: "cash" }]
+    : [{ id: "bank-card", name: "Bank Card", builtin: true, builtinKey: "bank-card" }, { id: "cash", name: "Cash", builtin: true, builtinKey: "cash" }];
+}
+
+export function defaultItemCategories(locale: Locale = "en"): ItemCategoryConfig[] {
+  return [
+    { id: "electronics", name: defaultItemCategoryName("electronics", locale), color: "#5b8fb9", icon: "electronics", builtin: true, builtinKey: "electronics" },
+    { id: "other", name: defaultItemCategoryName("other", locale), color: "#8b8b83", icon: "other", builtin: true, builtinKey: "other" },
+  ];
+}
+
+export function newCalendarCatalogs(locale: Locale, suffix: string = crypto.randomUUID()) {
+  const taskCategories = defaultTaskCategories(locale).map((category) => ({ ...category, id: `task-${suffix}` }));
+  const billCategories = defaultBillCategories(locale).map((category, index) => ({
+    ...category,
+    id: `bill-${suffix}-${index}`,
+    sub: [...category.sub],
+  }));
+  const paymentMethods = defaultPaymentMethods(locale).map((method, index) => ({
+    ...method,
+    id: `payment-${suffix}-${index}`,
+    builtin: true,
+  }));
+  const itemCategories = defaultItemCategories(locale).map((category, index) => ({
+    ...category,
+    id: `item-${suffix}-${index}`,
+    builtin: true,
+  }));
+  return { taskCategories, billCategories, paymentMethods, itemCategories };
+}
 
 export const DEFAULT_CHRONOEON_SETTINGS: ChronoEonSettings = {
-  settingsVersion: 1,
+  settingsVersion: 2,
   language: "en",
   firstDay: 1,
   headingName: "Entries",
@@ -161,7 +233,13 @@ export const DEFAULT_CHRONOEON_SETTINGS: ChronoEonSettings = {
       folder: "Diary",
       categories: defaultTaskCategories(),
       defaultCategoryId: DEFAULT_CATEGORY_ID,
-      billCategories: defaultBillCategories()
+      billCategories: defaultBillCategories(),
+      defaultBillCategoryId: DEFAULT_BILL_CATEGORY_ID,
+      defaultBillSubCategoryId: defaultBillCategories()[0].sub[0] ?? "",
+      paymentMethods: defaultPaymentMethods(),
+      defaultPaymentMethodId: "bank-card",
+      itemCategories: defaultItemCategories(),
+      defaultItemCategoryId: "other",
     }
   ],
   defaultCalendarID: "default",
@@ -174,13 +252,9 @@ export const DEFAULT_CHRONOEON_SETTINGS: ChronoEonSettings = {
   dayViewMaxOverlapColumns: 3,
   photoDisplayMode: "first",
   bill: {
-    categories: defaultBillCategories(),
-    defaultCategoryId: DEFAULT_BILL_CATEGORY_ID,
-    defaultSubCategoryId: "Salary",
     currency: "CNY",
     customCurrencies: {},
-    paymentMethods: DEFAULT_PAYMENT_METHODS
-  }
+  },
 };
 
 /** First-run settings, with the shipped default categories named in `locale`. */
@@ -192,14 +266,60 @@ export function createDefaultSettings(locale: Locale = "en"): ChronoEonSettings 
     categories: defaultTaskCategories(locale),
     defaultCategoryId: DEFAULT_CATEGORY_ID,
     billCategories: defaultBillCategories(locale),
+    defaultBillCategoryId: DEFAULT_BILL_CATEGORY_ID,
+    defaultBillSubCategoryId: defaultBillCategories(locale)[0].sub[0] ?? "",
+    paymentMethods: defaultPaymentMethods(locale),
+    defaultPaymentMethodId: "bank-card",
+    itemCategories: defaultItemCategories(locale),
+    defaultItemCategoryId: "other",
   }));
-  settings.bill = {
-    ...settings.bill,
-    categories: defaultBillCategories(locale),
-    defaultCategoryId: DEFAULT_BILL_CATEGORY_ID,
-    defaultSubCategoryId: defaultBillCategories(locale)[0].sub[0] ?? "",
-  };
   return settings;
+}
+
+/** Translate untouched shipped catalog rows; renamed rows keep their stored text. */
+export function localizeBuiltinSettings(settings: ChronoEonSettings, locale: Locale): ChronoEonSettings {
+  const billDefaults = defaultBillCategories(locale);
+  const paymentDefaults = defaultPaymentMethods(locale);
+  const itemDefaults = defaultItemCategories(locale);
+  const itemTargets = ITEM_CATEGORY_IDS.map((id) => ({
+    id,
+    name: defaultItemCategoryName(id, locale),
+    icon: id,
+  }));
+  return {
+    ...settings,
+    language: locale,
+    calendars: settings.calendars.map((calendar) => ({
+      ...calendar,
+      categories: calendar.categories.map((category) => category.builtin && category.builtinKey === "default"
+        ? { ...category, name: DEFAULT_CATEGORY_NAME[locale] }
+        : category),
+      billCategories: calendar.billCategories.map((category) => {
+        if (!category.builtin || !category.builtinKey) return category;
+        const target = billDefaults.find((candidate) => candidate.builtinKey === category.builtinKey);
+        if (!target) return category;
+        return {
+          ...category,
+          name: target.name,
+          sub: category.builtinSubKeys?.length
+            ? category.sub.map((name, index) => target.sub[index] ?? name)
+            : category.sub,
+        };
+      }),
+      paymentMethods: calendar.paymentMethods.map((method) => {
+        if (!method.builtin || !method.builtinKey) return method;
+        const name = BUILTIN_PAYMENT_NAMES[method.builtinKey]?.[locale]
+          ?? paymentDefaults.find((candidate) => candidate.builtinKey === method.builtinKey)?.name;
+        return name ? { ...method, name } : method;
+      }),
+      itemCategories: calendar.itemCategories.map((category) => {
+        if (!category.builtin || !category.builtinKey) return category;
+        const target = itemTargets.find((candidate) => candidate.id === category.builtinKey)
+          ?? itemDefaults.find((candidate) => candidate.builtinKey === category.builtinKey);
+        return target ? { ...category, name: target.name, icon: target.icon } : category;
+      }),
+    })),
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -215,7 +335,13 @@ function normalizeCategories(value: unknown, fallback: CalendarCategory[]): Cale
   const categories = value.flatMap((candidate) => {
     const item = asRecord(candidate);
     if (typeof item.id !== "string" || typeof item.name !== "string") return [];
-    return [{ id: item.id, name: item.name, color: stringValue(item.color, CATEGORY_COLORS.uncategorized) }];
+    return [{
+      id: item.id,
+      name: item.name,
+      color: stringValue(item.color, CATEGORY_COLORS.uncategorized),
+      ...(item.builtin === true ? { builtin: true } : {}),
+      ...(typeof item.builtinKey === "string" ? { builtinKey: item.builtinKey } : {}),
+    }];
   });
   return categories.length ? categories : structuredClone(fallback);
 }
@@ -230,10 +356,79 @@ function normalizeBillCategories(value: unknown, fallback: BillPrimaryCategory[]
       name: item.name,
       color: stringValue(item.color, CATEGORY_COLORS.uncategorized),
       direction: item.direction === "income" ? "income" as const : "expense" as const,
-      sub: Array.isArray(item.sub) ? item.sub.filter((entry): entry is string => typeof entry === "string") : []
+      sub: Array.isArray(item.sub) ? item.sub.filter((entry): entry is string => typeof entry === "string") : [],
+      ...(item.builtin === true ? { builtin: true } : {}),
+      ...(typeof item.builtinKey === "string" ? { builtinKey: item.builtinKey } : {}),
+      ...(Array.isArray(item.builtinSubKeys)
+        ? { builtinSubKeys: item.builtinSubKeys.filter((entry): entry is string => typeof entry === "string") }
+        : {}),
     }];
   });
   return categories.length ? categories : structuredClone(fallback);
+}
+
+function builtinPaymentKey(name: string): string | undefined {
+  const normalized = name.trim().toLocaleLowerCase();
+  if (normalized === "bank card" || normalized === "bank-card") return "bank-card";
+  if (normalized === "cash") return "cash";
+  if (normalized === "alipay") return "alipay";
+  if (normalized === "wechat") return "wechat";
+  if (normalized === "credit card" || normalized === "credit-card") return "credit-card";
+  if (normalized === "debit card" || normalized === "debit-card") return "debit-card";
+  return undefined;
+}
+
+const BUILTIN_PAYMENT_NAMES: Record<string, Record<Locale, string>> = {
+  "bank-card": { en: "Bank Card", zh: "银行卡" },
+  cash: { en: "Cash", zh: "现金" },
+  alipay: { en: "Alipay", zh: "支付宝" },
+  wechat: { en: "WeChat", zh: "微信" },
+  "credit-card": { en: "Credit Card", zh: "信用卡" },
+  "debit-card": { en: "Debit Card", zh: "借记卡" },
+};
+
+function normalizePaymentMethods(value: unknown, fallback: PaymentMethodConfig[]): PaymentMethodConfig[] {
+  if (!Array.isArray(value)) return structuredClone(fallback);
+  const methods = value.flatMap((candidate) => {
+    if (typeof candidate === "string" && candidate.trim()) {
+      const name = candidate.trim();
+      const builtinKey = builtinPaymentKey(name);
+      return [{ id: name, name, ...(builtinKey ? { builtin: true, builtinKey } : {}) }];
+    }
+    const item = asRecord(candidate);
+    if (typeof item.id !== "string" || !item.id.trim() || typeof item.name !== "string" || !item.name.trim()) return [];
+    const id = item.id.trim();
+    const name = item.name.trim();
+    const builtinKey = item.builtin !== false ? builtinPaymentKey(name) ?? builtinPaymentKey(id) : undefined;
+    return [{
+      id,
+      name,
+      ...(item.builtin === true || builtinKey ? { builtin: true } : {}),
+      ...(typeof item.builtinKey === "string" ? { builtinKey: item.builtinKey } : builtinKey ? { builtinKey } : {}),
+    }];
+  });
+  return methods.length ? [...new Map(methods.map(method => [method.id, method])).values()] : structuredClone(fallback);
+}
+
+function normalizeItemCategories(value: unknown, fallback: ItemCategoryConfig[]): ItemCategoryConfig[] {
+  if (!Array.isArray(value)) return structuredClone(fallback);
+  const categories = value.flatMap((candidate) => {
+    const item = asRecord(candidate);
+    if (typeof item.id !== "string" || !item.id.trim() || typeof item.name !== "string" || !item.name.trim()) return [];
+    const id = item.id.trim();
+    const name = item.name.trim();
+    const defaultNames = ITEM_CATEGORY_NAMES[id as typeof ITEM_CATEGORY_IDS[number]];
+    const builtinKey = item.builtin !== false && defaultNames && name === defaultNames.en ? id : undefined;
+    return [{
+      id,
+      name,
+      color: stringValue(item.color, PRESET_COLORS[9].hex),
+      icon: stringValue(item.icon, id),
+      ...(item.builtin === true || builtinKey ? { builtin: true } : {}),
+      ...(typeof item.builtinKey === "string" ? { builtinKey: item.builtinKey } : builtinKey ? { builtinKey } : {}),
+    }];
+  });
+  return categories.length ? [...new Map(categories.map(category => [category.id, category])).values()] : structuredClone(fallback);
 }
 
 /**
@@ -243,7 +438,21 @@ function normalizeBillCategories(value: unknown, fallback: BillPrimaryCategory[]
 export function normalizeChronoEonSettings(value: unknown): ChronoEonSettings {
   const defaults = createDefaultSettings();
   const input = asRecord(value);
-  const calendarsInput = Array.isArray(input.calendars) ? input.calendars : [];
+  const language = input.language === "zh" ? "zh" : "en";
+  const billInput = asRecord(input.bill);
+  const legacyBillCategories = normalizeBillCategories(billInput.categories, []);
+  const legacyPaymentMethods = normalizePaymentMethods(billInput.paymentMethods ?? input.paymentMethods, defaultPaymentMethods(language));
+  const legacyItemCategoriesValue = input.itemCategories;
+  const legacyItemCategories = normalizeItemCategories(legacyItemCategoriesValue, defaultItemCategories(language));
+  const calendarsInput = Array.isArray(input.calendars) && input.calendars.length
+    ? input.calendars
+    : [{
+      id: stringValue(input.defaultCalendarID, defaults.defaultCalendarID),
+      name: defaults.calendars[0].name,
+      color: defaults.calendars[0].color,
+      textColor: defaults.calendars[0].textColor,
+      folder: defaults.calendars[0].folder,
+    }];
   const calendars = calendarsInput.flatMap((candidate) => {
     const calendar = asRecord(candidate);
     if (typeof calendar.id !== "string") return [];
@@ -253,6 +462,26 @@ export function normalizeChronoEonSettings(value: unknown): ChronoEonSettings {
     const defaultCategoryId = categories.some((category) => category.id === persistedDefault)
       ? persistedDefault
       : categories[0]?.id ?? fallback.defaultCategoryId;
+    const billCategories = normalizeBillCategories(calendar.billCategories, legacyBillCategories.length ? legacyBillCategories : fallback.billCategories);
+    const persistedBillCategoryId = stringValue(calendar.defaultBillCategoryId ?? billInput.defaultCategoryId, billCategories[0]?.id ?? fallback.defaultBillCategoryId);
+    const defaultBillCategoryId = billCategories.some((category) => category.id === persistedBillCategoryId)
+      ? persistedBillCategoryId
+      : billCategories[0]?.id ?? fallback.defaultBillCategoryId;
+    const billPrimary = billCategories.find((category) => category.id === defaultBillCategoryId);
+    const persistedBillSubCategoryId = stringValue(calendar.defaultBillSubCategoryId ?? billInput.defaultSubCategoryId, billPrimary?.sub[0] ?? "");
+    const defaultBillSubCategoryId = billPrimary?.sub.includes(persistedBillSubCategoryId)
+      ? persistedBillSubCategoryId
+      : billPrimary?.sub[0] ?? "";
+    const paymentMethods = normalizePaymentMethods(calendar.paymentMethods, legacyPaymentMethods.length ? legacyPaymentMethods : fallback.paymentMethods);
+    const persistedPaymentMethod = stringValue(calendar.defaultPaymentMethodId ?? billInput.defaultPaymentMethod, paymentMethods[0]?.id ?? "");
+    const defaultPaymentMethodId = paymentMethods.some((method) => method.id === persistedPaymentMethod)
+      ? persistedPaymentMethod
+      : paymentMethods[0]?.id ?? "";
+    const itemCategories = normalizeItemCategories(calendar.itemCategories, legacyItemCategories.length ? legacyItemCategories : fallback.itemCategories);
+    const persistedItemCategoryId = stringValue(calendar.defaultItemCategoryId ?? input.defaultItemCategoryId, itemCategories[0]?.id ?? "");
+    const defaultItemCategoryId = itemCategories.some((category) => category.id === persistedItemCategoryId)
+      ? persistedItemCategoryId
+      : itemCategories[0]?.id ?? "";
     return [{
       id: calendar.id,
       name: stringValue(calendar.name, calendar.id),
@@ -261,14 +490,18 @@ export function normalizeChronoEonSettings(value: unknown): ChronoEonSettings {
       folder: stringValue(calendar.folder, fallback.folder),
       categories,
       defaultCategoryId,
-      billCategories: normalizeBillCategories(calendar.billCategories, defaults.bill.categories),
+      billCategories,
+      defaultBillCategoryId,
+      defaultBillSubCategoryId,
+      paymentMethods,
+      defaultPaymentMethodId,
+      itemCategories,
+      defaultItemCategoryId,
       provider: typeof calendar.provider === "string" ? calendar.provider : undefined,
       externalId: typeof calendar.externalId === "string" ? calendar.externalId : undefined
     }];
   });
 
-  const billInput = asRecord(input.bill);
-  const language = input.language === "zh" ? "zh" : "en";
   const firstDay = typeof input.firstDay === "number" && Number.isInteger(input.firstDay) && input.firstDay >= 0 && input.firstDay <= 6
     ? input.firstDay as ChronoEonSettings["firstDay"]
     : defaults.firstDay;
@@ -280,25 +513,12 @@ export function normalizeChronoEonSettings(value: unknown): ChronoEonSettings {
   const timeScale = allowedScale.includes(input.timeScale as typeof allowedScale[number])
     ? input.timeScale as typeof allowedScale[number]
     : defaults.timeScale;
-  const paymentMethodsValue = billInput.paymentMethods ?? input.paymentMethods;
-  const paymentMethods = Array.isArray(paymentMethodsValue)
-    ? paymentMethodsValue.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
-    : defaults.bill.paymentMethods;
-  const billCategories = normalizeBillCategories(billInput.categories, defaults.bill.categories);
-  const persistedBillCategoryId = stringValue(billInput.defaultCategoryId, defaults.bill.defaultCategoryId);
-  const billCategoryId = billCategories.some((category) => category.id === persistedBillCategoryId)
-    ? persistedBillCategoryId
-    : billCategories[0]?.id ?? defaults.bill.defaultCategoryId;
-  const billPrimary = billCategories.find((category) => category.id === billCategoryId);
-  const billSubCategoryId = billPrimary?.sub.includes(stringValue(billInput.defaultSubCategoryId, defaults.bill.defaultSubCategoryId))
-    ? stringValue(billInput.defaultSubCategoryId, defaults.bill.defaultSubCategoryId)
-    : billPrimary?.sub[0] ?? "";
   const allowedColumns = [2, 3, 4, 5] as const;
   const dayViewMaxOverlapColumns = allowedColumns.includes(input.dayViewMaxOverlapColumns as typeof allowedColumns[number])
     ? input.dayViewMaxOverlapColumns as typeof allowedColumns[number]
     : defaults.dayViewMaxOverlapColumns;
 
-  return {
+  const normalized: ChronoEonSettings = {
     ...defaults,
     language,
     firstDay,
@@ -315,20 +535,47 @@ export function normalizeChronoEonSettings(value: unknown): ChronoEonSettings {
     dayViewMaxOverlapColumns,
     photoDisplayMode,
     bill: {
-      categories: billCategories,
-      defaultCategoryId: billCategoryId,
-      defaultSubCategoryId: billSubCategoryId,
       currency: stringValue(billInput.currency ?? input.currency, defaults.bill.currency).toUpperCase(),
       customCurrencies: Object.fromEntries(Object.entries(asRecord(billInput.customCurrencies ?? input.customCurrencies)).filter((entry): entry is [string, string] => typeof entry[1] === "string")),
-      paymentMethods
     }
   };
+  return localizeBuiltinSettings(normalized, language);
 }
 
-function selectedCalendar(settings: ChronoEonSettings, calendarId?: string): CalendarConfig {
+export function selectedCalendar(settings: ChronoEonSettings, calendarId?: string): CalendarConfig {
   return settings.calendars.find((calendar) => calendar.id === (calendarId ?? settings.defaultCalendarID))
     ?? settings.calendars[0]
     ?? createDefaultSettings().calendars[0];
+}
+
+export function billCategoriesForCalendar(settings: ChronoEonSettings, calendarId?: string): BillPrimaryCategory[] {
+  return selectedCalendar(settings, calendarId).billCategories;
+}
+
+export function paymentMethodsForCalendar(settings: ChronoEonSettings, calendarId?: string): PaymentMethodConfig[] {
+  return selectedCalendar(settings, calendarId).paymentMethods;
+}
+
+export function defaultPaymentMethodForCalendar(settings: ChronoEonSettings, calendarId?: string): string {
+  const calendar = selectedCalendar(settings, calendarId);
+  return calendar.defaultPaymentMethodId || calendar.paymentMethods[0]?.id || "";
+}
+
+export function itemCategoriesForCalendar(settings: ChronoEonSettings, calendarId?: string): ItemCategoryConfig[] {
+  return selectedCalendar(settings, calendarId).itemCategories;
+}
+
+export function defaultItemCategoryForCalendar(settings: ChronoEonSettings, calendarId?: string): string {
+  const calendar = selectedCalendar(settings, calendarId);
+  return calendar.defaultItemCategoryId || calendar.itemCategories[0]?.id || "";
+}
+
+export function allBillCategories(settings: ChronoEonSettings): BillPrimaryCategory[] {
+  return [...new Map(settings.calendars.flatMap(calendar => calendar.billCategories).map(category => [category.id, category])).values()];
+}
+
+export function allItemCategories(settings: ChronoEonSettings): ItemCategoryConfig[] {
+  return [...new Map(settings.calendars.flatMap(calendar => calendar.itemCategories).map(category => [category.id, category])).values()];
 }
 
 /** Canonical default category value stored for a newly-created entry. */
@@ -338,11 +585,12 @@ export function defaultCategoryForKind(
   calendarId?: string,
 ): string {
   if (kind === "bill") {
-    const primary = settings.bill.categories.find((category) => category.id === settings.bill.defaultCategoryId)
-      ?? settings.bill.categories[0];
+    const calendar = selectedCalendar(settings, calendarId);
+    const primary = calendar.billCategories.find((category) => category.id === calendar.defaultBillCategoryId)
+      ?? calendar.billCategories[0];
     if (!primary) return "uncategorized";
-    const sub = primary.sub.includes(settings.bill.defaultSubCategoryId)
-      ? settings.bill.defaultSubCategoryId
+    const sub = primary.sub.includes(calendar.defaultBillSubCategoryId)
+      ? calendar.defaultBillSubCategoryId
       : primary.sub[0];
     return sub ? `${primary.id}/${sub}` : primary.id;
   }
@@ -355,7 +603,7 @@ export function categoryOptionsForKind(
   settings: ChronoEonSettings = DEFAULT_CHRONOEON_SETTINGS,
   calendarId?: string
 ): EntryCategoryOption[] {
-  if (kind === "bill") return billCategoryOptions(settings);
+  if (kind === "bill") return billCategoryOptions(settings, [], calendarId);
   return selectedCalendar(settings, calendarId).categories.map((category) => ({
     value: category.id,
     label: category.name,
@@ -396,20 +644,24 @@ export function scheduleCategoryOptions(
 export function billCategoryForValue(
   value: string,
   settings: ChronoEonSettings = DEFAULT_CHRONOEON_SETTINGS,
+  calendarId?: string,
 ): BillPrimaryCategory | undefined {
   const primary = value.split("/")[0].toLocaleLowerCase();
-  return settings.bill.categories.find((category) => category.id.toLocaleLowerCase() === primary)
-    ?? settings.bill.categories.find((category) => category.name.toLocaleLowerCase() === primary);
+  const categories = billCategoriesForCalendar(settings, calendarId);
+  return categories.find((category) => category.id.toLocaleLowerCase() === primary)
+    ?? categories.find((category) => category.name.toLocaleLowerCase() === primary);
 }
 
 /** Filter options use stable parent IDs, grouped by user-owned display names. */
 export function billCategoryOptions(
   settings: ChronoEonSettings = DEFAULT_CHRONOEON_SETTINGS,
-  stored: string[] = []
+  stored: string[] = [],
+  calendarId?: string,
 ): EntryCategoryOption[] {
+  const categories = billCategoriesForCalendar(settings, calendarId);
   const options: EntryCategoryOption[] = [];
   const seen = new Set<string>();
-  for (const category of settings.bill.categories) {
+  for (const category of categories) {
     if (!category.sub.length) {
       if (seen.has(category.id)) continue;
       seen.add(category.id);
@@ -427,7 +679,7 @@ export function billCategoryOptions(
     if (seen.has(value)) continue;
     seen.add(value);
     const [primary, secondary] = value.split("/");
-    const owner = billCategoryForValue(value, settings);
+    const owner = billCategoryForValue(value, settings, calendarId);
     options.push({
       value,
       label: secondary || owner?.name || value,
@@ -441,8 +693,9 @@ export function billCategoryOptions(
 export function billDirectionForCategory(
   category: string,
   settings: ChronoEonSettings = DEFAULT_CHRONOEON_SETTINGS,
+  calendarId?: string,
 ): "income" | "expense" {
-  return billCategoryForValue(category, settings)?.direction ?? "expense";
+  return billCategoryForValue(category, settings, calendarId)?.direction ?? "expense";
 }
 
 /** Bills store magnitudes; category direction is the single sign source. */
@@ -450,9 +703,10 @@ export function signedBillAmount(
   amount: number | undefined,
   category: string,
   settings: ChronoEonSettings = DEFAULT_CHRONOEON_SETTINGS,
+  calendarId?: string,
 ): number | undefined {
   if (typeof amount !== "number" || !Number.isFinite(amount)) return undefined;
-  return billDirectionForCategory(category, settings) === "income" ? Math.abs(amount) : -Math.abs(amount);
+  return billDirectionForCategory(category, settings, calendarId) === "income" ? Math.abs(amount) : -Math.abs(amount);
 }
 
 export function resolveEntryColor(
@@ -462,7 +716,7 @@ export function resolveEntryColor(
   calendarId?: string
 ): string {
   if (kind === "bill") {
-    const billCategory = billCategoryForValue(category, settings);
+    const billCategory = billCategoryForValue(category, settings, calendarId);
     if (billCategory) return billCategory.color;
   }
 

@@ -5,6 +5,7 @@ export interface ItemStore {
   list(): Promise<Item[]>;
   /** Full upsert; current category settings validate new bill bindings. */
   save(item: Item, settings: ChronoEonSettings): Promise<Item>;
+  delete(id: string): Promise<void>;
   subscribe?(listener: () => void): () => void;
 }
 

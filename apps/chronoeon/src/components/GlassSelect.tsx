@@ -6,6 +6,8 @@ import { Icon } from "./Icon";
 export interface GlassSelectOption {
   value: string;
   label: string;
+  /** Optional second line for rich list choices; the trigger stays compact. */
+  description?: string;
   color?: string;
   group?: string;
   /** Custom marker before the label; falls back to `color`'s dot. */
@@ -32,6 +34,18 @@ function flatIndex(options: GlassSelectOption[], value: string) {
   return index >= 0 ? index : 0;
 }
 
+function labelTextWidth(label: string, trigger: HTMLButtonElement): number {
+  const font = getComputedStyle(trigger).font;
+  try {
+    const context = document.createElement("canvas").getContext("2d");
+    if (context && font) {
+      context.font = font;
+      return context.measureText(label).width;
+    }
+  } catch { /* Tests do not provide canvas. */ }
+  return [...label].reduce((width, char) => width + (char.charCodeAt(0) > 255 ? 11 : 6), 0);
+}
+
 /**
  * A replacement for native popups, whose menu surface cannot share the app's
  * glass/accent system. The trigger remains a normal form control: labels,
@@ -44,6 +58,7 @@ export function GlassSelect(props: GlassSelectProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(() => flatIndex(options, firstValue));
   const [position, setPosition] = useState({ left: 0, top: 0, width: 220, above: false });
+  const [fitWidth, setFitWidth] = useState<number | null>(null);
   const [placed, setPlaced] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -57,8 +72,7 @@ export function GlassSelect(props: GlassSelectProps) {
     const rect = trigger.getBoundingClientRect();
     const belowSpace = window.innerHeight - rect.bottom - 12;
     const above = belowSpace < 216 && rect.top > window.innerHeight * 0.55;
-    const textWidth = Math.max(0, ...options.map(option => [...option.label]
-      .reduce((width, char) => width + (char.charCodeAt(0) > 255 ? 11 : 6), 0)));
+    const textWidth = Math.max(0, ...options.map(option => labelTextWidth(option.label, trigger)));
     const contentWidth = Math.ceil(textWidth + (props.multiple ? 62 : 50));
     const width = props.multiple
       ? Math.min(260, Math.max(contentWidth, 128), window.innerWidth - 16)
@@ -70,6 +84,16 @@ export function GlassSelect(props: GlassSelectProps) {
     setPosition({ left, top, width, above });
     setPlaced(true);
   };
+
+  useLayoutEffect(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const summaryLabel = (props as { summaryLabel?: string }).summaryLabel;
+    const labelWidth = props.multiple
+      ? labelTextWidth(summaryLabel ?? "", trigger)
+      : Math.max(0, ...options.map(option => labelTextWidth(option.label, trigger)));
+    setFitWidth(Math.min(window.innerWidth - 16, Math.max(72, Math.ceil(labelWidth) + (props.multiple ? 94 : 58))));
+  }, [options, props.multiple]);
 
   useLayoutEffect(() => {
     if (open) place();
@@ -186,14 +210,20 @@ export function GlassSelect(props: GlassSelectProps) {
           <i className="glass-select-mark">
             {option.mark ?? (option.color ? <b style={{ background: option.color }} /> : isSelected ? <b /> : null)}
           </i>
-          <span>{option.label}</span>
+          <span className="glass-select-option-copy">
+            <span>{option.label}</span>
+            {option.description && <small>{option.description}</small>}
+          </span>
         </button>
       </div>
     );
   });
 
   return (
-    <div ref={rootRef} className={["glass-select", props.multiple ? "is-multiple" : "", open ? "is-open" : "", className ?? ""].filter(Boolean).join(" ")}>
+    <div ref={rootRef}
+      className={["glass-select", props.multiple ? "is-multiple" : "", open ? "is-open" : "", className ?? ""].filter(Boolean).join(" ")}
+      style={fitWidth ? { "--glass-select-fit": `${fitWidth}px` } as CSSProperties : undefined}
+    >
       <button
         ref={triggerRef}
         type="button"

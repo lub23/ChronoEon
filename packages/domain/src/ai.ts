@@ -16,6 +16,7 @@ import { narrowEntryPriority } from "./entry";
 import {
   categoryOptionsForKind,
   defaultCategoryForKind,
+  defaultPaymentMethodForCalendar,
   type ChronoEonSettings,
 } from "./settings";
 
@@ -306,7 +307,7 @@ function normalizeCandidate(
       note: text(value.note ?? value.description) || undefined,
       amount: safeKind === "bill" ? amount : undefined,
       currency: safeKind === "bill" ? (text(value.currency) || settings.bill.currency).toUpperCase() : undefined,
-      payment: safeKind === "bill" ? text(value.payment) || settings.bill.paymentMethods[0] : undefined,
+      payment: safeKind === "bill" ? text(value.payment) || defaultPaymentMethodForCalendar(settings, calendar) : undefined,
       location: text(value.location) || undefined,
       tags: stringArray(value.tags),
       priority: LEGACY_PRIORITIES.has(priorityValue) ? (narrowEntryPriority(priorityValue) ?? undefined) : undefined,

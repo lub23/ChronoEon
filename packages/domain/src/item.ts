@@ -2,7 +2,8 @@ import { differenceInIsoDays, isIsoDate } from "./calendar";
 import { createEntryId } from "./entry";
 
 export const ITEM_CATEGORIES = ["electronics", "clothing", "home", "transport", "hobby", "other"] as const;
-export type ItemCategory = typeof ITEM_CATEGORIES[number];
+/** Built-in ids seed the shipped catalog; user-defined ids are equally valid. */
+export type ItemCategory = string;
 export type ItemAcquisition = "purchase" | "gift" | "windfall";
 export type ItemDisposal = "sold" | "lost" | "discarded";
 
@@ -10,6 +11,7 @@ export type ItemDisposal = "sold" | "lost" | "discarded";
 export interface Item {
   id: string;
   name: string;
+  calendarId: string;
   category: ItemCategory;
   acquisition: ItemAcquisition;
   acquiredOn: string;
@@ -18,14 +20,16 @@ export interface Item {
   /** Acquisition snapshot, never recomputed from a linked bill. Zero is valid. */
   cost: number;
   currency: string;
+  location?: string;
+  payment?: string;
   purchaseEntryId?: string;
   disposal?: ItemDisposal;
   disposedOn?: string;
   /** Sale proceeds in the asset's currency, independent of the linked bill. */
   saleAmount?: number;
   saleEntryId?: string;
-  /** Persisted images must be canonical attachments/<sha256>.webp references. */
-  image?: string;
+  /** Ordered photos; the first is the cover. */
+  images?: string[];
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -36,7 +40,8 @@ export type ItemDraft = Omit<Item, "id" | "createdAt" | "updatedAt">;
 /** Local edits enforce lifecycle consistency; sync retains concurrent fields. */
 export function validateItemDraft(draft: ItemDraft): void {
   if (!draft.name.trim()) throw new Error("ITEM_INVALID_NAME");
-  if (!ITEM_CATEGORIES.includes(draft.category)) throw new Error("ITEM_INVALID_CATEGORY");
+  if (!draft.calendarId.trim()) throw new Error("ITEM_INVALID_CALENDAR");
+  if (!draft.category.trim()) throw new Error("ITEM_INVALID_CATEGORY");
   if (!["purchase", "gift", "windfall"].includes(draft.acquisition)) throw new Error("ASSET_INVALID_ACQUISITION");
   if (!isIsoDate(draft.acquiredOn)) throw new Error("ASSET_INVALID_ACQUIRED_ON");
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(draft.acquiredAt)) throw new Error("ASSET_INVALID_ACQUIRED_AT");
@@ -55,12 +60,14 @@ export function validateItemDraft(draft: ItemDraft): void {
 export function draftToItem(draft: ItemDraft): Item {
   validateItemDraft(draft);
   const now = new Date().toISOString();
-  return { ...draft, name: draft.name.trim(), currency: draft.currency.trim(), notes: draft.notes?.trim() || undefined,
+  return { ...draft, name: draft.name.trim(), currency: draft.currency.trim(), location: draft.location?.trim() || undefined,
+    notes: draft.notes?.trim() || undefined, images: draft.images?.filter(Boolean),
     id: createEntryId(), createdAt: now, updatedAt: now };
 }
 
-export function itemImageHash(image: string | undefined): string | null {
-  return image?.match(/^attachments\/([0-9a-f]{64})\.webp$/)?.[1] ?? null;
+export function itemImageHashes(images: string[] | undefined): string[] {
+  return images?.map(image => image.match(/^attachments\/([0-9a-f]{64})\.webp$/)?.[1] ?? null)
+    .filter((hash): hash is string => Boolean(hash)) ?? [];
 }
 
 function today(): string {

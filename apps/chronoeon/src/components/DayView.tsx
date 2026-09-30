@@ -762,7 +762,6 @@ export function DayView({
       const draft = current;
       setTimeSelection(null);
       if (!draft || !onNewAt) return;
-      onSelectDate(parseISO(draft.startDate));
       onNewAt({
         date: draft.startDate,
         start: draft.start,

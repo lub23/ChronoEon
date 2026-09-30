@@ -54,9 +54,11 @@ class ConverterTests(unittest.TestCase):
             self.assertEqual(payload["summary"], {"count": 2, "incomeCount": 1, "expenseCount": 1, "incomeCents": 12345,
                                                  "expenseCents": 2345, "netCents": 10000, "firstDate": "2026-09-01", "lastDate": "2026-09-02"})
             self.assertEqual(payload["transactions"][0]["time"], "12:34")
-            self.assertEqual(payload["transactions"][0]["tags"], ["one tag"])
+            self.assertEqual(payload["transactions"][1]["time"], "01:00")
+            self.assertEqual(payload["transactions"][0]["tags"], ["one", "tag"])
             self.assertEqual(payload["transactions"][0]["note"], "Keep\nlines")
-            self.assertEqual(report["timedTransactions"], 1)
+            self.assertEqual(report["timedTransactions"], 2)
+            self.assertEqual(report["normalizedMidnight"], 1)
             self.assertNotIn("Synthetic", json.dumps(report))
 
     def test_content_ids_survive_row_insertion_and_duplicates_are_not_dropped(self):
@@ -74,7 +76,7 @@ class ConverterTests(unittest.TestCase):
             self.assertEqual(second["summary"]["count"], 3)
 
     def test_stale_cache_invalid_category_and_fractional_cents_are_rejected(self):
-        for column, value in [(8, 2025), (3, "Unknown"), (4, 1.001), (4, -1), (0, 46267.00001157407)]:
+        for column, value in [(3, "Unknown"), (4, 1.001), (4, -1), (0, 46267.00001157407)]:
             with self.subTest(column=column, value=value), TemporaryDirectory() as folder:
                 source = Path(folder) / "synthetic.xlsm"
                 bill = [46267, "Synthetic confidential text", "饮食", "正餐", 23.45, "Cash", None, None, 2026, 9]
@@ -83,6 +85,14 @@ class ConverterTests(unittest.TestCase):
                 with self.assertRaises(converter.LedgerError) as error:
                     converter.convert(source)
                 self.assertNotIn("Synthetic confidential text", str(error.exception))
+
+    def test_stale_year_month_formula_cache_uses_transaction_date(self):
+        with TemporaryDirectory() as folder:
+            source = Path(folder) / "synthetic.xlsm"
+            workbook(source, [[46267, "Synthetic stale cache", "饮食", "正餐", 23.45, "Cash", None, None, 2025, 1]])
+            payload, report = converter.convert(source)
+            self.assertEqual(payload["transactions"][0]["date"], "2026-09-02")
+            self.assertEqual(report["staleDateCaches"], 1)
 
     def test_private_output_is_exclusive_and_stdout_contains_only_aggregates(self):
         with TemporaryDirectory() as folder:
