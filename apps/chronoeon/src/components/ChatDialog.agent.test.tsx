@@ -43,6 +43,8 @@ vi.mock("../ai/provider", () => ({
 }));
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 8, 19, 12));
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -53,6 +55,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   vi.clearAllMocks();
+  vi.useRealTimers();
   requests = [];
 });
 

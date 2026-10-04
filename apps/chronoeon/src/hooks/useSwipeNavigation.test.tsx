@@ -101,6 +101,33 @@ describe("interactive mobile navigation", () => {
     begin(); point("pointermove", 120); end(120);
     expect(host.querySelector(".view-pager")?.getAttribute("data-view")).toBe("week");
   });
+  it("leaves the week at its right edge even when an outer container also overflows", () => {
+    const scroller = setup("week", true);
+    scroller.classList.add("calendar-scroll");
+    scroller.scrollLeft = 299;
+    const outer = document.createElement("div");
+    outer.style.overflowX = "auto";
+    Object.defineProperties(outer, { clientWidth: { value: 300 }, scrollWidth: { value: 680 } });
+    scroller.replaceWith(outer);
+    outer.append(scroller);
+    begin(); point("pointermove", 120); end(120);
+    expect(host.querySelector(".view-pager")?.getAttribute("data-view")).toBe("month");
+    expect(outer.scrollLeft).toBe(0);
+  });
+  it("keeps an early horizontal touchmove available for edge paging but permits vertical scrolling", () => {
+    setup("week", true).scrollLeft = 300;
+    begin();
+    const touch = (x: number, y: number) => {
+      const event = new Event("touchmove", { bubbles: true, cancelable: true });
+      Object.assign(event, { touches: [{ clientX: x, clientY: y }] });
+      act(() => document.dispatchEvent(event));
+      return event;
+    };
+    expect(touch(240, 100).defaultPrevented).toBe(true);
+    expect(touch(250, 120).defaultPrevented).toBe(false);
+    point("pointermove", 120); end(120);
+    expect(host.querySelector(".view-pager")?.getAttribute("data-view")).toBe("month");
+  });
   it("switches from the wide calendar header without requiring a trip to its scroll edge", () => {
     const scroller = setup("day", true); scroller.scrollLeft = 100;
     host.querySelector(".touch-target")!.setAttribute("data-view-swipe", "");

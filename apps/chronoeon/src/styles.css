@@ -2240,7 +2240,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
    long periods, tiny angles, and no opacity strobe. */
 @keyframes aerial-root-sway { 0%,100% { transform: rotate(0deg) translateY(0); } 38% { transform: rotate(.5deg) translateY(.3px); } 72% { transform: rotate(-.4deg) translateY(-.3px); } }
 @keyframes leaf-bud-sway { 0%,100% { transform: rotate(0deg); } 43% { transform: rotate(2.5deg); } 76% { transform: rotate(-2deg); } }
-.calendar-resize-handle { touch-action: none; position: absolute; z-index: 2; right: 2px; left: 2px; height: 8px; cursor: ns-resize; }
+.calendar-resize-handle { touch-action: pan-y; position: absolute; z-index: 2; right: 2px; left: 2px; height: 8px; cursor: ns-resize; }
 .calendar-resize-handle--start { top: 0; }
 .calendar-resize-handle--end { bottom: 0; }
 .calendar-resize-handle:hover { background: rgba(255, 255, 255, .28); }
@@ -2968,8 +2968,36 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
   background-color: color-mix(in srgb, var(--accent-wash) 24%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
 }
+.capture-completions { display: flex; flex-wrap: wrap; min-width: 0; gap: 5px; }
+.capture-completions.is-floating { position: absolute; left: 12px; right: 12px; bottom: calc(100% + 7px); z-index: 25; flex-wrap: nowrap; margin: 0; padding: 6px; overflow: auto; max-height: calc(5 * 31px + 12px); border: 1px solid var(--line-strong); border-radius: 11px; background: var(--surface-solid); box-shadow: var(--shadow); }
+.capture-completions button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.capture-syntax-help { min-width: 0; margin-block: 6px; color: var(--ink-faint); font-size: 11px; }
+.capture-syntax-help summary { cursor: pointer; }
+.capture-syntax-help small { display: block; margin-top: 5px; overflow-wrap: anywhere; line-height: 1.6; }
+.linked-field-heading { min-width: 0; overflow-wrap: anywhere; }
+.operation-history { padding: 14px; }
+.operation-history-heading, .operation-history-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.operation-history-heading > div, .operation-history-row > div { flex: 1; min-width: 0; }
+.operation-history h4 { margin: 0; color: var(--ink); }
+.operation-history-list { list-style: none; margin: 0; padding: 0; }
+.operation-history-list > li { padding: 14px 0; border-top: 1px solid var(--line); }
+.operation-history-row strong { display: block; margin-top: 5px; overflow-wrap: anywhere; }
+.operation-history small, .operation-history summary { color: var(--ink-faint); font-size: 11px; }
+.operation-history summary { margin-top: 9px; cursor: pointer; }
+.operation-history-diff { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; align-items: baseline; margin-top: 8px; font-size: 11px; }
+.operation-history-diff span { min-width: 0; overflow-wrap: anywhere; }
+.operation-history-diff em { color: var(--ink-faint); font-style: normal; }
+.operation-history button { flex-shrink: 0; white-space: normal; max-width: 45%; }
+.settings-field > *, .settings-segmented button { min-width: 0; overflow-wrap: anywhere; }
+.settings-segmented { max-width: 100%; flex-wrap: wrap; }
+.settings-segmented button { white-space: normal; height: auto; padding-block: 6px; }
+.settings-option-copy, .settings-section-heading, .settings-footnote, .confirm-sheet h2, .confirm-sheet p { overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .operation-history-diff { grid-template-columns: minmax(0, 1fr); }
+}
+
 .calendar-span-handle {
-  touch-action: none;
+  touch-action: pan-y;
   position: absolute;
   z-index: 5;
   top: 1px;
@@ -2977,7 +3005,6 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
   width: 8px;
   border-radius: 4px;
   cursor: ew-resize;
-  touch-action: none;
 }
 .calendar-span-handle--start { left: 0; }
 .calendar-span-handle--end { right: 0; }
@@ -3348,6 +3375,7 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
 }
 .chat-rail-action:hover:not(:disabled) { background: color-mix(in srgb, var(--surface-solid) 72%, transparent); color: var(--accent-dark); }
 .chat-rail-action:disabled { opacity: .5; }
+.chat-rail-action.is-active { background: var(--accent-wash); color: var(--accent-dark); }
 .chat-rail-actions.is-collapsed { width: 33px; }
 .chat-rail-actions.is-collapsed .chat-rail-action { justify-content: center; padding: 0; }
 /* Collapsed, the rail is a hairline: a frameless chevron on top and the two
@@ -3580,7 +3608,7 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
 .chat-carried-panel > footer button { min-height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--ink-soft); font-size: 9.5px; }
 .chat-carried-panel > footer button:hover { background: var(--accent-wash); color: var(--accent-dark); }
 .chat-composer {
-  display: flex; align-items: flex-end; gap: 8px; margin: 0 16px 16px; padding: 8px 8px 8px 12px;
+  position: relative; display: flex; align-items: flex-end; gap: 8px; margin: 0 16px 16px; padding: 8px 8px 8px 12px;
   border: 1px solid var(--line-strong); border-radius: 16px;
   background: color-mix(in srgb, var(--surface-solid) 88%, transparent);
   box-shadow: 0 10px 26px color-mix(in srgb, var(--ink) 8%, transparent);
@@ -3950,6 +3978,10 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
 .field-suggestions { display: flex; flex-wrap: wrap; gap: 4px; }
 .field-suggestions button { min-height: 25px; padding: 0 7px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--ink-soft); font-size: 10px; }
 .field-suggestions button:hover, .field-suggestions button.is-active { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: var(--accent-wash); color: var(--accent-dark); }
+.field-suggestion-anchor { position: absolute; left: 0; right: 0; top: calc(100% + 5px); z-index: 40; }
+.field-suggestion-menu { max-height: calc(5 * 31px + 12px); overflow-y: auto; padding: 5px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-solid); box-shadow: var(--shadow); }
+.field-suggestion-menu button { display: block; width: 100%; min-height: 31px; padding: 6px 8px; overflow: hidden; border-radius: 7px; background: transparent; color: var(--ink); font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.field-suggestion-menu button:hover, .field-suggestion-menu button.is-active { background: var(--accent-wash); color: var(--accent-dark); }
 .filter-category-groups section {
   padding: 8px; border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--line));
   border-radius: 12px; background: color-mix(in srgb, var(--accent-glass) 35%, transparent);

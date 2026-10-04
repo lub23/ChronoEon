@@ -59,7 +59,7 @@ describe("atomic ledger replacement", () => {
     expect(await backend.select("SELECT * FROM ledger_test_bindings")).toEqual([{ id: "asset", purchase_entry_id: oldId }]);
     const saved = await sync.getSettings() as { settings: ChronoEonSettings; preferences: { theme: string } };
     expect(saved.settings.calendars[0].billCategories.map(category => category.id)).toEqual([incomeId, expenseId]);
-    expect(saved.preferences).toEqual({ theme: "dark" });
+    expect(saved.preferences).toBeUndefined();
     expect(await sync.deviceId()).toBe(deviceId);
     expect(await sync.bindDataset()).toBe(datasetId);
     expect(notifications).toEqual(["rebuilt"]);

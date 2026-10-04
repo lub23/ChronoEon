@@ -41,6 +41,7 @@ function render(override: Partial<AIProviderPreferences> = {}) {
         onClearRemoteKey={vi.fn(async () => undefined)}
         onSaveLocalHeaders={onSaveLocalHeaders}
         onTest={vi.fn(async () => undefined)}
+        onOpenArchived={() => undefined}
       />,
     );
   });
@@ -71,6 +72,7 @@ describe("AI provider credentials", () => {
           onClearRemoteKey={vi.fn(async () => undefined)}
           onSaveLocalHeaders={onSaveLocalHeaders}
           onTest={vi.fn(async () => undefined)}
+          onOpenArchived={() => undefined}
         />,
       );
     });
@@ -111,6 +113,7 @@ describe("AI provider credentials", () => {
           onClearRemoteKey={vi.fn(async () => undefined)}
           onSaveLocalHeaders={vi.fn(async (headers) => headers)}
           onTest={vi.fn(async () => undefined)}
+          onOpenArchived={() => undefined}
         />,
       );
     });

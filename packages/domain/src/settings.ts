@@ -88,6 +88,19 @@ export interface ChronoEonSettings {
   bill: BillConfig;
 }
 
+export const SHARED_SETTINGS_KEYS = ["calendars", "defaultCalendarID", "bill"] as const;
+export type SharedSettings = Pick<ChronoEonSettings, typeof SHARED_SETTINGS_KEYS[number]>;
+
+/** User catalogs travel with data; presentation, input and device behavior do not. */
+export function sharedSettings(settings: Partial<ChronoEonSettings>): Partial<SharedSettings> {
+  return Object.fromEntries(SHARED_SETTINGS_KEYS.filter(key => settings[key] !== undefined)
+    .map(key => [key, settings[key]])) as Partial<SharedSettings>;
+}
+
+export function mergeSharedSettings(local: ChronoEonSettings, remote: Partial<ChronoEonSettings>): ChronoEonSettings {
+  return normalizeChronoEonSettings({ ...local, ...sharedSettings(remote) });
+}
+
 export interface CurrencyDefinition {
   symbol: string;
   name: string;

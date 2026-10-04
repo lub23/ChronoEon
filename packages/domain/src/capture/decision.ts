@@ -32,6 +32,7 @@ interface DecisionRecord {
   item: CaptureHistoryItem;
   tokens: Set<string>;
   signature: string;
+  matchScore?: number;
 }
 
 interface CandidateRecord {
@@ -63,6 +64,7 @@ function titleTokens(title: string): Set<string> {
 function itemSignature(item: CaptureHistoryItem): string {
   return JSON.stringify([
     item.kind,
+    item.calendar,
     item.title,
     item.category,
     item.date,
@@ -111,23 +113,23 @@ export class CaptureDecisionIndex {
 
   decide(
     title: string,
-    options: { kind?: EntryKind; availableCategories?: ReadonlySet<string> } = {},
+    options: { kind?: EntryKind; availableCategories?: ReadonlySet<string>; calendar?: string } = {},
   ): CaptureFieldDecisions {
     const queryTokens = titleTokens(title);
-    const records = queryTokens.size ? this.matches(title, queryTokens) : [];
+    const records = (queryTokens.size ? this.matches(title, queryTokens) : []).filter(record => !options.calendar || !record.item.calendar || record.item.calendar === options.calendar);
     const kindCandidates = this.rank(records, (item) => item.kind, undefined, title)
       .map((candidate) => ({ ...candidate, value: candidate.value as EntryKind }));
     const selectedKind = options.kind ?? chooseKind(kindCandidates);
-    const scoped = records.filter((item) => item.item.kind === selectedKind);
+    const scoped = records.filter((item) => !selectedKind || item.item.kind === selectedKind);
     const category = this.rank(scoped, (item) => item.category, options.availableCategories, title);
     const location = this.rank(scoped, (item) => item.location, undefined, title);
     const note = this.rank(scoped, (item) => item.note?.trim(), undefined, title);
     return {
-      kind: { options: kindCandidates, selected: selectedKind },
+      kind: { options: kindCandidates, selected: chooseKind(kindCandidates) },
       category: { options: category, selected: significant(category)?.value },
       location: { options: location, selected: significant(location)?.value },
-      note: { options: note, selected: significant(note)?.value },
-      defaultDuration: this.duration(scoped),
+      note: { options: note },
+      defaultDuration: this.duration(scoped.filter(record => (record.matchScore ?? 0) >= 0.9)),
     };
   }
 
@@ -138,9 +140,8 @@ export class CaptureDecisionIndex {
     }
     const matched = [...matchedIds]
       .map((id) => this.records.get(id)!)
-      .filter((record) => [...queryTokens].some((token) => record.tokens.has(token)));
-    matched.sort((left, right) =>
-      titleMatchScore(title, right.item.title) - titleMatchScore(title, left.item.title)
+      .map(record => ({ ...record, matchScore: titleMatchScore(title, record.item.title) }));
+    matched.sort((left, right) => right.matchScore - left.matchScore
       || right.item.date.localeCompare(left.item.date)
       || right.id.localeCompare(left.id));
     return matched;
@@ -160,7 +161,7 @@ export class CaptureDecisionIndex {
       const group = groups.get(value) ?? { count: 0, lastSeen: 0, match: 0 };
       group.count += 1;
       group.lastSeen = Math.max(group.lastSeen, Date.parse(record.item.date) || 0);
-      group.match = Math.max(group.match, query ? titleMatchScore(query, record.item.title) : 1);
+      group.match = Math.max(group.match, record.matchScore ?? (query ? titleMatchScore(query, record.item.title) : 1));
       groups.set(value, group);
       total += 1;
     }
@@ -216,13 +217,8 @@ function chooseKind(candidates: readonly CaptureKindCandidate[]): EntryKind | un
 }
 
 
-/** A narrow win, or a repeated top choice, is strong enough to prefill. */
-function significant<T extends CaptureFieldCandidate | CaptureKindCandidate>(
-  candidates: readonly T[],
-  minimumCount = 1,
-): T | undefined {
-  const top = candidates[0];
-  if (!top || top.count < minimumCount) return undefined;
-  const total = candidates.reduce((sum, candidate) => sum + candidate.count, 0);
-  return top.count / total >= 0.4 || top.count >= 2 ? top : undefined;
+/** Frequency ranks suggestions, but never substitutes for strong textual evidence. */
+function significant<T extends CaptureFieldCandidate | CaptureKindCandidate>(candidates: readonly T[]): T | undefined {
+  const [top, second] = candidates;
+  return top && top.match >= 0.85 && (!second || top.match - second.match >= 0.2) ? top : undefined;
 }

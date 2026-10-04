@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDefaultSettings } from "@chronoeon/domain";
@@ -30,7 +30,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function render(onConfirm = vi.fn(async () => true), onManualAdd = vi.fn()) {
+function render(onConfirm = vi.fn(async () => true), onManualAdd = vi.fn(), props: Partial<ComponentProps<typeof ChatDialog>> = {}) {
   act(() => {
     root.render(
       <ChatDialog
@@ -49,6 +49,7 @@ function render(onConfirm = vi.fn(async () => true), onManualAdd = vi.fn()) {
         onOpenManualCapture={onManualAdd}
         onOpenSettings={() => undefined}
         onClose={() => undefined}
+        {...props}
       />,
     );
   });
@@ -79,6 +80,70 @@ function renderWith(store: ReturnType<typeof createMemoryConversationStore>, ini
 }
 
 describe("unified capture and ask dialog", () => {
+  async function enterCapture(text: string) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+    const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
+    act(() => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, text); textarea.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => { host.querySelector<HTMLButtonElement>(".chat-send")!.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+    return textarea;
+  }
+
+  it("hands a parsed asset to the item composer without creating an entry", async () => {
+    const onConfirm = vi.fn(async () => true);
+    const onOpenAssetCapture = vi.fn();
+    render(onConfirm, vi.fn(), { onOpenAssetCapture });
+    await enterCapture("/asset tomorrow 15:00 Laptop $900 @Home");
+    expect(onOpenAssetCapture).toHaveBeenCalledWith(expect.objectContaining({ name: "Laptop", cost: 900, currency: "USD", acquiredAt: "15:00", location: "Home" }));
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(host.querySelector(".chat-capture-review")).toBeNull();
+  });
+
+  it("requires a concrete eligible asset before handing off a bill link", async () => {
+    const settings = createDefaultSettings();
+    const onConfirm = vi.fn(async () => true);
+    const onOpenLinkedCapture = vi.fn();
+    const asset = { id: "laptop-id", name: "Laptop", calendarId: settings.defaultCalendarID, category: "default", acquisition: "purchase" as const, acquiredOn: "2026-10-04", acquiredAt: "00:00", cost: 0, currency: "USD", createdAt: "2026-10-04T00:00:00Z", updatedAt: "2026-10-04T00:00:00Z" };
+    render(onConfirm, vi.fn(), { settings, availableAssets: [asset, { ...asset, id: "linked", purchaseEntryId: "existing" }], onOpenLinkedCapture });
+    await enterCapture("/bill Laptop $900 &Laptop");
+    expect(host.querySelector<HTMLButtonElement>(".capture-review-confirm")!.disabled).toBe(true);
+    const links = [...host.querySelectorAll<HTMLButtonElement>('[aria-label="关联物品"] button')].filter(button => button.textContent === "Laptop");
+    expect(links).toHaveLength(1);
+    act(() => links[0].click());
+    expect(onOpenLinkedCapture).toHaveBeenCalledWith(expect.objectContaining({ kind: "bill", amount: -900 }), "laptop-id");
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("requires confirmation for conflicting explicit fields", async () => {
+    const onConfirm = vi.fn(async () => true);
+    render(onConfirm);
+    await enterCapture("/task Review @Home @Office");
+    expect(host.querySelector<HTMLButtonElement>(".capture-review-confirm")!.disabled).toBe(true);
+    expect(host.textContent).toContain("请确认");
+    const accept = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "使用当前字段")!;
+    act(() => accept.click());
+    expect(host.querySelector<HTMLButtonElement>(".capture-review-confirm")!.disabled).toBe(false);
+    await act(async () => { host.querySelector<HTMLButtonElement>(".capture-review-confirm")!.click(); });
+    expect(onConfirm).toHaveBeenCalledWith([expect.objectContaining({ location: "Home" })]);
+  });
+
+  it("restores source text when local parsing persistence fails", async () => {
+    const store = createMemoryConversationStore();
+    vi.spyOn(store, "appendMessage").mockRejectedValue(new Error("disk full"));
+    render(vi.fn(async () => true), vi.fn(), { conversations: store });
+    const textarea = await enterCapture("/task important original text");
+    expect(textarea.value).toBe("/task important original text");
+  });
+
+  it("offers matching syntax completions", async () => {
+    render(vi.fn(async () => true), vi.fn(), { availableTags: ["project-a", "garden"] });
+    const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
+    act(() => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "/task Review #pro"); textarea.dispatchEvent(new Event("input", { bubbles: true })); });
+    const completion = host.querySelector<HTMLButtonElement>(".capture-completions button")!;
+    expect(completion.textContent).toBe("project-a");
+    act(() => completion.click());
+    expect(textarea.value).toBe("/task Review #project-a ");
+  });
+
   it("parses capture text offline and requires manual confirmation after an edit", async () => {
     const onConfirm = vi.fn(async () => true);
     const onManualAdd = vi.fn();

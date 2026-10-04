@@ -1,4 +1,4 @@
-export type CaptureSpanKind = "date" | "time" | "duration" | "place" | "amount" | "cue";
+export type CaptureSpanKind = "date" | "time" | "duration" | "place" | "amount" | "cue" | "field";
 export interface CaptureSpan { kind: CaptureSpanKind; text: string; }
 interface LocatedSpan extends CaptureSpan { start: number; end: number; }
 export interface CaptureText { input: string; spans: LocatedSpan[]; }

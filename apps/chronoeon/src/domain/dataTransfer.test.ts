@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { createDefaultSettings } from "@chronoeon/domain";
+import { createDefaultSettings, mergeSharedSettings } from "@chronoeon/domain";
 import { parseMarkdownDocuments, serializeEntry } from "@chronoeon/markdown";
-import { exportEntriesCsv, exportSettingsJson, importSettingsBundleJson, importSettingsJson, parseCsvRows, parseEntriesCsv } from "./dataTransfer";
+import { settingsSyncPayload, exportEntriesCsv, exportSettingsJson, importSettingsBundleJson, importSettingsJson, parseCsvRows, parseEntriesCsv } from "./dataTransfer";
 
 const entry = {
   id: "4b903092-c1a5-4f7f-8397-953ff69345d1",
@@ -22,6 +22,19 @@ const entry = {
 };
 
 describe("entry and settings transfer", () => {
+  it("syncs catalogs without importing another device's preferences", () => {
+    const local = { ...createDefaultSettings("zh"), firstDay: 1 as const, timeScale: 10 as const };
+    const remote = { ...createDefaultSettings("en"), firstDay: 0 as const, timeScale: 60 as const };
+    remote.calendars[0].name = "Shared calendar";
+    const payload = settingsSyncPayload(remote);
+    expect(Object.keys(payload.settings as object).sort()).toEqual(["bill", "calendars", "defaultCalendarID"]);
+    expect(payload).not.toHaveProperty("preferences");
+    const merged = mergeSharedSettings(local, remote);
+    expect(merged).toMatchObject({ language: "zh", firstDay: 1, timeScale: 10 });
+    expect(merged.calendars[0].name).toBe("Shared calendar");
+    expect(settingsSyncPayload({ ...local, language: "en", timeScale: 60 })).toEqual(settingsSyncPayload(local));
+  });
+
   it("parses quoted CSV fields including embedded newlines", () => {
     expect(parseCsvRows('title,description\n"Hello, world","line 1\nline 2"\n')).toEqual([
       ["title", "description"],

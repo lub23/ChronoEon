@@ -10,9 +10,10 @@ import { Icon } from "./Icon";
 import { AttachmentThumb } from "./AttachmentThumb";
 import { openImagePreview } from "./photoPreviewBus";
 import { clearChipDrag, markChipDragActive } from "./dragGesture";
+import { FieldSuggestions } from "./FieldSuggestions";
 
 export interface ItemFieldsProps {
-  locationSuggestions?: Array<{ value: string; score: number }>;
+  locationSuggestions?: Array<{ value: string }>;
   draft: ItemDraft;
   patch: (value: Partial<ItemDraft>) => void;
   items: Item[];
@@ -167,6 +168,7 @@ export function ItemFields({
   editing = false, itemId, onOpenBill, showDate = true, showPhotos = true, onError,
 }: ItemFieldsProps) {
   const [locating, setLocating] = useState(false);
+  const locationInput = useRef<HTMLInputElement | null>(null);
   const acquiredTime = draft.acquiredAt.match(/(\d{2}:\d{2})$/)?.[1] ?? "12:00";
   function linkBill(entry: Entry | undefined, sale = false) {
     if (sale) patch({ saleEntryId: entry?.id, ...(entry ? { disposedOn: entry.date, saleAmount: Math.abs(entry.amount ?? 0) } : {}) });
@@ -206,7 +208,8 @@ export function ItemFields({
             </button>
           </span>
           <div className="location-input-wrap">
-            <input value={draft.location ?? ""} onChange={event => patch({ location: event.target.value })} placeholder={t("locationPlaceholder", locale)} />
+            <input ref={locationInput} value={draft.location ?? ""} onChange={event => patch({ location: event.target.value })} placeholder={t("locationPlaceholder", locale)} />
+            <FieldSuggestions inputRef={locationInput} locale={locale} suggestions={locationSuggestions} onSelect={value => patch({ location: value })} />
             {Boolean(draft.location) && (
               <button type="button" className="icon-button location-clear" disabled={busy} onClick={() => patch({ location: undefined })} aria-label={t("clearLocation", locale)}>
                 <Icon name="close" size={11} />
@@ -216,7 +219,6 @@ export function ItemFields({
         </label>
       </div>
 
-      {locationSuggestions.length > 0 && <div className="field-suggestions" role="group" aria-label={t("location", locale)}>{locationSuggestions.map(suggestion => <button key={suggestion.value} type="button" className={draft.location === suggestion.value ? "is-active" : ""} onClick={() => patch({ location: suggestion.value })}>{suggestion.value}</button>)}</div>}
       <div className="when-groups when-groups--single">
         <div className="when-group">
           <span>{t("itemTime", locale)}</span>

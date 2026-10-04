@@ -76,6 +76,7 @@ describe("item snapshot and operation sync", () => {
 
   it("publishes item-only images and retains all unresolved image versions through snapshots", async () => {
     let now = new Date("2026-09-07T12:00:00Z");
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now);
     const remote = new MemoryBackend(); const a = await device(remote, "A", () => now); const b = await device(remote, "B", () => now);
     const original = "a".repeat(64); const left = "b".repeat(64); const right = "c".repeat(64);
     const first = await a.items.save({ ...item(), acquisition: "gift", cost: 0, images: [`attachments/${original}.webp`] }, settings);
@@ -86,10 +87,10 @@ describe("item snapshot and operation sync", () => {
     await a.items.save({ ...first, images: [`attachments/${left}.webp`] }, settings);
     await b.items.save({ ...first, images: [`attachments/${right}.webp`], disposal: "lost", disposedOn: "2026-09-06" }, settings);
     await a.engine.run(); await b.engine.run(); await a.engine.run();
-    expect(await a.sync.attachmentHashes()).toEqual([left, right]);
+    expect(await a.sync.attachmentHashes()).toEqual([original, left, right]);
     const conflict = (await a.sync.conflicts()).find((item) => item.entity === "asset" && item.field === "images_json")!;
     expect(conflict.versions.map((version) => JSON.parse(String(version.value))).sort()).toEqual([[`attachments/${left}.webp`], [`attachments/${right}.webp`]]);
-    now = new Date("2026-09-23T12:00:00Z"); await a.engine.run();
+    now = new Date("2026-09-23T12:00:00Z"); vi.setSystemTime(now); await a.engine.run();
     expect(remote.index!.attachments).toEqual([left, right]);
     const c = await device(remote, "C", () => now); await c.engine.run();
     expect(await c.items.list()).toEqual(await a.items.list());
@@ -169,7 +170,7 @@ describe("logical operation-log sync", () => {
   it("bootstraps a new device from a logical snapshot and later JSONL batches without copying SQLite", async () => {
     const remote = new MemoryBackend(); const a = await device(remote, "A");
     const first = await a.store.create(entry({ kind: "idea", status: undefined, note: "第一行\n第二行\n\n日记" }));
-    await a.sync.setSettings({ preferences: { locale: "zh", theme: "dark" } });
+    await a.sync.setSettings({ settings: { defaultCalendarID: "default" }, preferences: { locale: "zh", theme: "dark" } });
     await a.engine.run();
     expect(remote.index?.snapshot?.path).toMatch(/snapshot\/.+\.jsonl\.zst$/);
     expect([...remote.objects.keys()].some((path) => path.includes(".db"))).toBe(false);
@@ -178,19 +179,22 @@ describe("logical operation-log sync", () => {
     const b = await device(remote, "B"); await b.engine.run();
     expect((await b.store.get(first.id))?.title).toBe("Edited after snapshot");
     expect((await b.store.get(first.id))?.note).toBe("第一行\n第二行\n\n日记");
-    expect(await b.sync.getSettings()).toEqual({ preferences: { locale: "zh", theme: "dark" } });
+    expect(await b.sync.getSettings()).toEqual({ settings: { defaultCalendarID: "default" } });
     expect((await b.sync.status()).pending).toBe(0);
     const commits = remote.commits; await b.engine.run(); expect(remote.commits).toBe(commits);
   });
-  it("clears recoverable deletes once a logical snapshot compacts the history", async () => {
+  it("expires recoverable deletes by elapsed local time independently of snapshot compaction", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
     const remote = new MemoryBackend();
     let clock = new Date("2026-09-07T08:00:00.000Z");
+    vi.setSystemTime(clock);
     const a = await device(remote, "A", () => clock);
     const first = await a.store.create(entry());
     await a.engine.run();
     await a.store.delete(first.id);
     expect(await a.store.deletedEntries()).toHaveLength(1);
     clock = new Date(clock.getTime() + 15 * 24 * 60 * 60_000);
+    vi.setSystemTime(clock);
     await a.engine.run();
     expect(await a.store.deletedEntries()).toHaveLength(0);
   });
@@ -257,6 +261,7 @@ describe("logical operation-log sync", () => {
   });
   it("compacts periodically, waits for every registered device ack, and still bootstraps a late device", async () => {
     let now = new Date("2026-09-07T12:00:00Z");
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now);
     const remote = new MemoryBackend(); const a = await device(remote, "A", () => now); const b = await device(remote, "B", () => now);
     const first = await a.store.create(entry()); await a.engine.run(); await b.engine.run();
     const oldSnapshot = remote.index!.snapshot!.path;
@@ -328,12 +333,13 @@ describe("semantic parent conflicts and attachment retention", () => {
   });
   it("retires removed photos only in a new snapshot and waits for every device ack", async () => {
     let now = new Date("2026-09-07T12:00:00Z");
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now);
     const remote = new MemoryBackend(); const a = await device(remote,"A",()=>now); const b = await device(remote,"B",()=>now);
     const hash="b".repeat(64); const first=await a.store.create(entry({images:[`attachments/${hash}.webp`]}));
     await a.engine.run(); await b.engine.run();
     await a.store.update({...first,images:[]}); await a.engine.run();
     expect(remote.index!.attachments).toContain(hash);
-    now = new Date("2026-09-23T12:00:00Z"); await a.engine.run();
+    now = new Date("2026-09-23T12:00:00Z"); vi.setSystemTime(now); await a.engine.run();
     expect(remote.index!.attachments).not.toContain(hash);
     expect(remote.index!.retired.some((ref)=>ref.path===`attachments/${hash}.webp`)).toBe(true);
     const c=await device(remote,"C",()=>now); await c.engine.run();
@@ -471,13 +477,13 @@ describe("seven-day snapshot and recycle-bin policy", () => {
     expect((await a.sync.status()).nextSnapshotAt).toBe(new Date(origin + week * 2).toISOString());
   });
 
-  it("manual rebuilds empty the current recycle bin and durably reset the deadline", async () => {
+  it("manual rebuilds preserve the recycle bin and durably reset the snapshot deadline", async () => {
     clock(); const remote = new MemoryBackend(), a = await device(remote, "A");
     const first = await a.store.create(entry()); await a.engine.run();
     vi.setSystemTime(origin + day); await a.store.delete(first.id); await a.engine.run();
     expect(await a.store.deletedEntries()).toHaveLength(1);
     expect((await a.engine.run({ rebuildSnapshot: true })).snapshotCreated).toBe(true);
-    expect(await a.store.deletedEntries()).toHaveLength(0);
+    expect(await a.store.deletedEntries()).toHaveLength(1);
     expect(remote.index!.snapshot!.generation).toBe(2);
     const reopened = new SyncStore(a.backend);
     expect(await reopened.status(remote.id)).toMatchObject({ lastSnapshotAt: new Date(origin + day).toISOString(), nextSnapshotAt: new Date(origin + day + week).toISOString() });
@@ -492,10 +498,10 @@ describe("seven-day snapshot and recycle-bin policy", () => {
     expect(await a.store.deletedEntries()).toHaveLength(1);
     expect((await a.sync.status()).nextSnapshotAt).toBe(new Date(origin + week).toISOString());
     remote.fail = false; await a.engine.run({ rebuildSnapshot: true });
-    expect(await a.store.deletedEntries()).toHaveLength(0);
+    expect(await a.store.deletedEntries()).toHaveLength(1);
   });
 
-  it("finishes local expiry after a published snapshot's acknowledgement is lost", async () => {
+  it("preserves recovery after a published snapshot's acknowledgement is lost", async () => {
     clock(); const remote = new MemoryBackend(), a = await device(remote, "A");
     const first = await a.store.create(entry()); await a.engine.run();
     vi.setSystemTime(origin + day); await a.store.delete(first.id);
@@ -506,7 +512,7 @@ describe("seven-day snapshot and recycle-bin policy", () => {
     const accepted = remote.index!.snapshot!.path;
     const reopened = new SyncEngine(new SyncStore(a.backend), remote, { deviceName: "A" });
     await reopened.run();
-    expect(remote.index!.snapshot!.path).toBe(accepted); expect(await a.store.deletedEntries()).toHaveLength(0);
+    expect(remote.index!.snapshot!.path).toBe(accepted); expect(await a.store.deletedEntries()).toHaveLength(1);
     expect((await a.sync.status()).nextSnapshotAt).toBe(new Date(origin + day + week).toISOString());
   });
 
@@ -526,7 +532,7 @@ describe("seven-day snapshot and recycle-bin policy", () => {
     const publish = remote.publish.bind(remote);
     remote.publish = async (publication) => { vi.setSystemTime(origin + day + 1000); await a.store.delete(during.id); return publish(publication); };
     await a.engine.run({ rebuildSnapshot: true });
-    expect((await a.store.deletedEntries()).map((item) => item.id)).toEqual([during.id]);
+    expect((await a.store.deletedEntries()).map((item) => item.id)).toEqual([during.id, before.id]);
   });
 
   it("preserves offline-device acknowledgements and deletion tombstones during a manual rebuild", async () => {

@@ -5,11 +5,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { addDays, addMonths, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { draftToEntry, entriesForDate, isAppView, resolveEntryColor, type AppView, type DueReminder, type Entry, type EntryDraft, type EntryStatus, type Locale, type ThemeMode } from "./domain/entry";
 import { EMPTY_ENTRY_FILTER, entryMatchesFilter, filterActive, type EntryFilter } from "./domain/entryFilter";
-import { billCategoryOptions, createDefaultSettings, createEntryId, defaultItemCategoryForCalendar, defaultPaymentMethodForCalendar, formatEntryTime, localizeBuiltinSettings, normalizeChronoEonSettings, outstandingTaskSections, scheduleCategoryOptions, timerSessionToDraft, type AIProviderConfig, type ChronoEonSettings, type TimerSegment, type TimerSession } from "@chronoeon/domain";
+import { billCategoryOptions, createDefaultSettings, createEntryId, defaultItemCategoryForCalendar, defaultPaymentMethodForCalendar, formatEntryTime, localizeBuiltinSettings, mergeSharedSettings, normalizeChronoEonSettings, outstandingTaskSections, scheduleCategoryOptions, timerSessionToDraft, type AIProviderConfig, type ChronoEonSettings, type TimerSegment, type TimerSession } from "@chronoeon/domain";
 import type { LunarPreference } from "./domain/lunar";
 import { entryToDraft, entryWithDraft, entryWithOccurrenceMove, entryWithOccurrenceStatus, sourceEntryId, type EntryEditContext } from "./domain/entryWorkflow";
 import { entryMatchesSearch } from "./domain/search";
-import { exportEntriesCsv, settingsSyncPayload, importSettingsBundleJson } from "./domain/dataTransfer";
+import { exportEntriesCsv, settingsSyncPayload } from "./domain/dataTransfer";
 import { useChronoEonStore } from "./hooks/useChronoEonStore";
 import { useLiveTimer, type TimerLifecycleEvent } from "./hooks/useLiveTimer";
 import { notifyTimer } from "./platform/timerNotification";
@@ -130,6 +130,7 @@ function App() {
   const [demoItems, setDemoItems] = useState<Item[]>([]);
   const items = isTauri() ? sqliteItems.items : demoItems;
   const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [captureLinkedItem, setCaptureLinkedItem] = useState<Item | null>(null);
   const [itemDraftSeed, setItemDraftSeed] = useState<Partial<ItemDraft> | null>(null);
   const [syncJournal, setSyncJournal] = useState<SyncStore | null>(null);
   const [chatSyncVersion, setChatSyncVersion] = useState(0);
@@ -205,6 +206,7 @@ function App() {
   const [composerSeed, setComposerSeed] = useState<Partial<EntryDraft> | undefined>(undefined);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInitialMode, setChatInitialMode] = useState<"capture" | "ask">("capture");
+  const [chatArchivedOnly, setChatArchivedOnly] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection>("general");
   const [reminderNotice, setReminderNotice] = useState<DueReminder[] | null>(null);
@@ -222,6 +224,7 @@ function App() {
   const [lunar, setLunar] = usePersistentPreference<LunarPreference>("lunar", "auto");
   const [dayPhotos, setDayPhotos] = usePersistentPreference<boolean>("dayPhotos", true);
   const [accentTheme, setAccentTheme] = usePersistentPreference<AccentTheme>("accentTheme", "terracotta");
+  const [resizeStep, setResizeStep] = usePersistentPreference<5 | 10>("resizeStep", 5);
   const [lowEndMode, setLowEndMode] = usePersistentPreference<boolean>("lowEndMode", false);
   const [syncConfig, setSyncConfig] = usePersistentPreference<SyncConfig>("syncConfig", DEFAULT_SYNC_CONFIG);
   const [remindersEnabled, setRemindersEnabled] = usePersistentPreference<boolean>("remindersEnabled", true);
@@ -463,53 +466,18 @@ function App() {
     return () => query.removeEventListener("change", update);
   }, []);
 
-  const syncSettings = useMemo(() => settingsSyncPayload(settings, {
-    theme, accentTheme, dayPhotos, lunar, remindersEnabled, captureShortcut,
-    captureShortcutEnabled, miniShortcut, miniShortcutEnabled, lowEndMode,
-  }), [settings, theme, accentTheme, dayPhotos, lunar, remindersEnabled, captureShortcut,
-    captureShortcutEnabled, miniShortcut, miniShortcutEnabled, lowEndMode]);
+  const syncSettings = useMemo(() => settingsSyncPayload(settings), [settings]);
   const syncService = useSyncService(syncJournal, syncConfig, syncSettings, {
     importSettings: (payload) => {
-    const imported = importSettingsBundleJson(JSON.stringify(payload));
-    updateSettings(imported.settings);
-    setLocale(imported.settings.language);
-    if (imported.preferences.theme) setTheme(imported.preferences.theme);
-    if (imported.preferences.accentTheme) setAccentTheme(imported.preferences.accentTheme);
-    if (imported.preferences.dayPhotos !== undefined) setDayPhotos(imported.preferences.dayPhotos);
-    if (imported.preferences.lunar) setLunar(imported.preferences.lunar);
-    if (imported.preferences.lowEndMode !== undefined) setLowEndMode(imported.preferences.lowEndMode);
-    if (imported.preferences.remindersEnabled !== undefined) setRemindersEnabled(imported.preferences.remindersEnabled);
-    if (imported.preferences.captureShortcut) setCaptureShortcut(imported.preferences.captureShortcut);
-    if (imported.preferences.captureShortcutEnabled !== undefined) setCaptureShortcutEnabled(imported.preferences.captureShortcutEnabled);
-    if (imported.preferences.miniShortcut) setMiniShortcut(imported.preferences.miniShortcut);
-    if (imported.preferences.miniShortcutEnabled !== undefined) setMiniShortcutEnabled(imported.preferences.miniShortcutEnabled);
+      if (payload.settings && typeof payload.settings === "object") {
+        updateSettings(mergeSharedSettings(settings, payload.settings as Partial<ChronoEonSettings>));
+      }
     },
     onApplied: async () => { await sqliteEntries.reload(); await sqliteItems.reload(); await refreshDeletedEntries(); setChatSyncVersion((value) => value + 1); },
     onMaintenance: async active => { ledgerBusyRef.current = active; if (active) await writeQueue.current; },
     onConflicts: (count) => notify(`${t("syncConflictNotice", locale)} (${count})`, "warning"),
   });
 
-  const storedSettingsApplied = useRef(false);
-  useEffect(() => {
-    if (!syncJournal || storedSettingsApplied.current) return;
-    storedSettingsApplied.current = true;
-    void syncJournal.getSettings().then((payload) => {
-      if (!payload?.settings) return;
-      const imported = importSettingsBundleJson(JSON.stringify(payload));
-      updateSettings(imported.settings);
-      setLocale(imported.settings.language);
-      if (imported.preferences.theme) setTheme(imported.preferences.theme);
-      if (imported.preferences.accentTheme) setAccentTheme(imported.preferences.accentTheme);
-      if (imported.preferences.dayPhotos !== undefined) setDayPhotos(imported.preferences.dayPhotos);
-      if (imported.preferences.lunar) setLunar(imported.preferences.lunar);
-      if (imported.preferences.lowEndMode !== undefined) setLowEndMode(imported.preferences.lowEndMode);
-      if (imported.preferences.remindersEnabled !== undefined) setRemindersEnabled(imported.preferences.remindersEnabled);
-      if (imported.preferences.captureShortcut) setCaptureShortcut(imported.preferences.captureShortcut);
-      if (imported.preferences.captureShortcutEnabled !== undefined) setCaptureShortcutEnabled(imported.preferences.captureShortcutEnabled);
-      if (imported.preferences.miniShortcut) setMiniShortcut(imported.preferences.miniShortcut);
-      if (imported.preferences.miniShortcutEnabled !== undefined) setMiniShortcutEnabled(imported.preferences.miniShortcutEnabled);
-    }).catch((error) => console.warn("Could not read stored settings", error));
-  }, [setAccentTheme, setCaptureShortcut, setCaptureShortcutEnabled, setDayPhotos, setLocale, setLunar, setLowEndMode, setMiniShortcut, setMiniShortcutEnabled, setRemindersEnabled, setTheme, syncJournal, updateSettings]);
 
   /**
    * Serialize writes as a FIFO queue. Two overlapping writes race on the same
@@ -630,6 +598,7 @@ function App() {
     setComposerSeed(undefined);
     setEditingItem(null);
     setItemDraftSeed(null);
+    setCaptureLinkedItem(null);
   }, []);
 
   const openSettings = useCallback((section: SettingsSection = "general") => {
@@ -687,6 +656,7 @@ function App() {
   const openComposer = useCallback((entry: Entry | null = null) => {
     setEditingItem(null);
     setItemDraftSeed(null);
+    setCaptureLinkedItem(null);
     const source = entry?.recurrenceSourceId
       ? entries.find((candidate) => candidate.id === sourceEntryId(entry)) ?? entry
       : entry;
@@ -697,6 +667,9 @@ function App() {
   }, [entries]);
 
   const openComposerAt = useCallback((seed: Partial<EntryDraft>) => {
+    setCaptureLinkedItem(null);
+    setEditingItem(null);
+    setItemDraftSeed(null);
     setComposerSeed(seed);
     setEditingEntry(null);
     setEditingSourceEntry(null);
@@ -704,6 +677,7 @@ function App() {
   }, []);
 
   const openItemComposer = useCallback((item: Item | null = null, seed: Partial<ItemDraft> = {}) => {
+    setCaptureLinkedItem(null);
     setComposerSeed(undefined);
     setEditingEntry(null);
     setEditingSourceEntry(null);
@@ -771,14 +745,24 @@ function App() {
 
     const created = draftToEntry(draft, "local", resolveEntryColor(draft.category, draft.kind, settings, draft.calendar));
     try {
-      await persistCreated(created);
+      if (captureLinkedItem) {
+        const session = await createSqliteStoreSession();
+        if (session) {
+          await session.store.createWithItemLink(created, captureLinkedItem, settings);
+          await sqliteEntries.reload(); await sqliteItems.reload();
+        } else {
+          if (captureLinkedItem.purchaseEntryId || created.kind !== "bill") throw new Error("ItemBillAlreadyLinked");
+          await persistCreated(created);
+          setDemoItems(current => current.map(item => item.id === captureLinkedItem.id ? { ...item, purchaseEntryId: created.id } : item));
+        }
+      } else await persistCreated(created);
       closeComposer();
       notify(t("created", locale));
       return created;
     } catch (error) {
       reportWriteFailure(error);
     }
-  }, [closeComposer, locale, notify, persistCreated, persistUpdated, reportWriteFailure, settings, writable]);
+  }, [captureLinkedItem, closeComposer, locale, notify, persistCreated, persistUpdated, reportWriteFailure, settings, sqliteEntries, sqliteItems, writable]);
 
   /** Public save entry point: serialized so overlapping writes cannot race. */
   const handleSave = useCallback(async (draft: EntryDraft, editingId?: string, context?: EntryEditContext) => {
@@ -1210,6 +1194,7 @@ function App() {
           anchor={view === "week" ? "week" : "selection"}
           weekStartsOn={settings.firstDay}
           timeScale={settings.timeScale}
+          resizeStep={resizeStep === 10 ? 10 : 5}
           lunar={lunar}
           showPhotos={dayPhotos || photosOnly}
           photosOnly={photosOnly}
@@ -1243,9 +1228,10 @@ function App() {
     searchedEntries, entries, items, locale, settings, filter, search, lunar, dayPhotos, todayKey]);
   const renderedViews = useMemo(() => new Map(visiblePages.map(page => [page.key, renderPage(page)])), [visiblePages, renderPage]);
 
-  const preferences: AppPreferences = { lunar, dayPhotos, accentTheme, remindersEnabled, captureShortcut, captureShortcutEnabled, miniShortcut, miniShortcutEnabled, lowEndMode };
+  const preferences: AppPreferences = { resizeStep, lunar, dayPhotos, accentTheme, remindersEnabled, captureShortcut, captureShortcutEnabled, miniShortcut, miniShortcutEnabled, lowEndMode };
 
   function applyPreferences(patch: Partial<AppPreferences>) {
+    if (patch.resizeStep === 5 || patch.resizeStep === 10) setResizeStep(patch.resizeStep);
     if (patch.lunar !== undefined) setLunar(patch.lunar);
     if (patch.dayPhotos !== undefined) setDayPhotos(patch.dayPhotos);
     if (patch.accentTheme !== undefined) setAccentTheme(patch.accentTheme);
@@ -1343,6 +1329,12 @@ function App() {
     onSaveLocalHeaders={saveLocalHeaders}
     onTestAI={testAI}
     onTestNotification={() => { void sendTestNotification(); }}
+    onOpenArchivedConversations={() => {
+      setSettingsOpen(false);
+      setChatInitialMode("capture");
+      setChatArchivedOnly(true);
+      setChatOpen(true);
+    }}
     onClose={() => setSettingsOpen(false)}
     onLocaleChange={changeLocale}
     onThemeChange={setTheme}
@@ -1356,6 +1348,12 @@ function App() {
     onSyncConfigChange={setSyncConfig}
     syncService={syncService}
     deletedEntries={deletedEntries}
+    historyJournal={syncJournal}
+    onHistoryRestored={async () => {
+      await sqliteEntries.reload(); await sqliteItems.reload(); await refreshDeletedEntries();
+      const payload = await syncJournal?.getSettings();
+      if (payload?.settings && typeof payload.settings === "object") updateSettings(mergeSharedSettings(settingsRef.current, payload.settings as Partial<ChronoEonSettings>));
+    }}
     recycleBusy={recycleBusy}
     onRestoreDeleted={(id) => restoreDeletedEntry(id)}
     onClearDeleted={clearRecycleBin}
@@ -1396,6 +1394,7 @@ function App() {
     settings={settings}
     availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
     initialMode={chatInitialMode}
+    showArchivedOnly={chatArchivedOnly}
     onOpenEntry={(entryId) => {
       const entry = entries.find((candidate) => candidate.id === entryId);
       if (entry) {
@@ -1404,13 +1403,25 @@ function App() {
       }
     }}
     onConfirmCapture={confirmSmartCapture}
+    availableAssets={items}
+    onOpenAssetCapture={(seed, itemId) => {
+      setChatOpen(false);
+      openItemComposer(itemId ? items.find(item => item.id === itemId) ?? null : null, seed);
+    }}
+    onOpenLinkedCapture={(draft, assetId) => {
+      const item = items.find(candidate => candidate.id === assetId);
+      if (!item) return;
+      setChatOpen(false);
+      openComposerAt(draft);
+      setCaptureLinkedItem(item);
+    }}
     onOpenManualCapture={(value) => {
       setChatOpen(false);
       const [title, ...lines] = value.split("\n");
       openComposerAt(value ? { title, note: lines.join("\n").trim() || undefined } : {});
     }}
     onOpenSettings={() => { setSettingsInitialSection("ai"); setSettingsOpen(true); }}
-    onClose={() => setChatOpen(false)}
+    onClose={() => { setChatOpen(false); setChatArchivedOnly(false); }}
   /> : null;
 
   const filterControl = <button ref={filterTriggerRef} type="button"
@@ -1466,7 +1477,7 @@ function App() {
     notify(t("deleted", locale));
   }, [closeComposer, locale, notify, sqliteItems.reload]);
 
-  const captureDialog = composerOpen ? <EntryComposer onOpenBill={entry => viewActions.current.openComposer(entry)} entries={entries} items={items} editingItem={editingItem} initialItemDraft={itemDraftSeed} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onEditItem={item => openItemComposer(item)} onCreateItemFromBill={createItemFromBill} availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
+  const captureDialog = composerOpen ? <EntryComposer onOpenBill={entry => viewActions.current.openComposer(entry)} entries={entries} items={items} pendingItemLink={captureLinkedItem} editingItem={editingItem} initialItemDraft={itemDraftSeed} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onEditItem={item => openItemComposer(item)} onCreateItemFromBill={createItemFromBill} availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
     locale={locale} settings={settings} selectedDate={selectedKey} editing={editingEntry} sourceEntry={editingSourceEntry}
     history={entries} onClose={closeComposer} onSave={handleSave} onDelete={handleDelete} onNotice={notify} onConfirm={confirm}
     initialDraft={composerSeed} /> : null;

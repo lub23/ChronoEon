@@ -21,7 +21,7 @@ export function extractPlace(text: CaptureText, history: readonly { location?: s
     const candidate = chinese[1];
     const stop = candidate.search(ACTION);
     const place = candidate.slice(0, Math.min(stop >= 0 ? stop : candidate.length, 8));
-    if (place && !/^\d/.test(place)) {
+    if (place && !/^[\d@#%&!]/.test(place)) {
       consume(text, chinese.index, chinese[0].length - candidate.length + place.length, "place");
       return place;
     }

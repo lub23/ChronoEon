@@ -30,7 +30,7 @@ import { Icon } from "./Icon";
 import { ItemChip } from "./ItemChip";
 import { MonthDayPeek } from "./MonthDayPeek";
 import { PhotoWallView } from "./PhotoWallView";
-import { clearChipDrag, markChipDragActive } from "./dragGesture";
+import { calendarEdgeScroll, clearChipDrag, markChipDragActive } from "./dragGesture";
 
 interface DayViewProps {
   entries: Entry[];
@@ -45,6 +45,7 @@ interface DayViewProps {
   search: string;
   weekStartsOn?: ChronoEonSettings["firstDay"];
   timeScale?: ChronoEonSettings["timeScale"];
+  resizeStep?: 5 | 10;
   lunar?: LunarPreference;
   showPhotos?: boolean;
   /** Photo appreciation: hide every chip and show the visible days' photos. */
@@ -228,6 +229,7 @@ export function DayView({
   search,
   weekStartsOn = 1,
   timeScale = 15,
+  resizeStep = 5,
   lunar = "auto",
   showPhotos = true,
   photosOnly = false,
@@ -446,16 +448,15 @@ export function DayView({
     sourceSegmentDate?: string,
   ) {
     if ((event.button !== 0 && event.pointerType !== "touch") || event.isPrimary === false || gestureCleanupRef.current) return;
-    event.preventDefault();
+    if (event.pointerType !== "touch") event.preventDefault();
     event.stopPropagation();
     const originX = event.clientX;
     const originY = event.clientY;
     const pointerId = event.pointerId;
     const target = event.currentTarget;
     pendingTouchRef.current?.cancel();
-    // A resize handle is an explicit drag target and takes ownership immediately.
-    // Only touching the block body waits for a hold, leaving a quick swipe native.
-    if (event.pointerType === "touch" && edge === "move") {
+    // Edges are easy to brush on a phone: every touch drag waits for a hold.
+    if (event.pointerType === "touch") {
       const cancelPending = () => {
         window.clearTimeout(timer);
         window.removeEventListener("pointermove", onPendingMove, true);
@@ -523,10 +524,18 @@ export function DayView({
       setDragAnnounce(announceFor(entry, latest, grabbedDate, inLane, locale));
       markChipDragActive();
 
+      let point = { clientX: originX, clientY: originY };
+      const originScrollTop = scrollRef.current?.scrollTop ?? 0;
+      const autoScroll = calendarEdgeScroll(scrollRef.current, () => paintDrag(point));
       const update = (moveEvent: PointerEvent) => {
         if (moveEvent.pointerId !== pointerId) return;
         if (moveEvent.cancelable) moveEvent.preventDefault();
         moveEvent.stopPropagation();
+        point = { clientX: moveEvent.clientX, clientY: moveEvent.clientY };
+        paintDrag(point);
+        if (!inLane) autoScroll.update(point.clientY);
+      };
+      const paintDrag = (moveEvent: { clientX: number; clientY: number }) => {
         const allDayGrid = calendarRef.current?.querySelector<HTMLElement>(".calendar-all-day-grid");
         const allDayRect = allDayGrid?.getBoundingClientRect();
         const inAllDayTarget = Boolean(allDayRect
@@ -585,9 +594,11 @@ export function DayView({
         // so a downward resize inside one column snaps to 24:00 of that day
         // rather than freely spilling into the next civil day — the parity
         // behaviour of the plugin's clampAndSnapMinutes(min=0,max=1440).
-        const rawMinutes = inLane ? 0 : ((moveEvent.clientY - originY) / hourHeight) * 60;
+        const scrollDelta = (scrollRef.current?.scrollTop ?? originScrollTop) - originScrollTop;
+        const rawMinutes = inLane ? 0 : ((moveEvent.clientY - originY + scrollDelta) / hourHeight) * 60;
         const clamped = inLane ? 0 : Math.max(-24 * 60, Math.min(24 * 60, rawMinutes));
-        const deltaMinutes = inLane ? 0 : Math.round(clamped / timeScale) * timeScale;
+        const step = edgeIsResize(edge) ? resizeStep : timeScale;
+        const deltaMinutes = inLane ? 0 : Math.round(clamped / step) * step;
         const moved = deltaDays !== 0 || deltaMinutes !== 0;
         latest = {
           key,
@@ -609,6 +620,7 @@ export function DayView({
         touchEvent.stopPropagation();
       };
       function cleanup() {
+        autoScroll.stop();
         window.removeEventListener("pointermove", update);
         window.removeEventListener("pointerup", finish);
         window.removeEventListener("pointercancel", cancel);
@@ -687,6 +699,8 @@ export function DayView({
     let selectionStarted = false;
     let touchTimer = 0;
     let current: TimeSelectionVisual | null = null;
+    let point = { clientX: originX, clientY: originY };
+    const autoScroll = calendarEdgeScroll(scrollRef.current, () => paintSelection(point));
     const cancelTouchGate = () => {
       window.clearTimeout(touchTimer);
       window.removeEventListener("touchmove", touchGate, { capture: true, passive: false } as EventListenerOptions);
@@ -717,7 +731,10 @@ export function DayView({
         if (Math.hypot(moveEvent.clientX - originX, moveEvent.clientY - originY) > 8) cancel();
         return;
       }
-      paintSelection(moveEvent);
+      if (moveEvent.cancelable) moveEvent.preventDefault();
+      point = { clientX: moveEvent.clientX, clientY: moveEvent.clientY };
+      paintSelection(point);
+      autoScroll.update(point.clientY);
     };
     const paintSelection = (moveEvent: { clientX: number; clientY: number }) => {
       const target = columnAtPoint(moveEvent.clientX, moveEvent.clientY);
@@ -776,6 +793,7 @@ export function DayView({
       setTimeSelection(null);
     };
     function cleanup() {
+      autoScroll.stop();
       cancelTouchGate();
       if (selectionStarted) clearChipDrag();
       window.removeEventListener("pointermove", update);

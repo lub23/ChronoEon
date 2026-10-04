@@ -12,13 +12,14 @@ export function extractMoney(text: CaptureText, settings: ChronoEonSettings): Ca
   const input = remainingText(text);
   const prefix = "(?:[¥￥$€£]|\\b(?:CNY|RMB|USD|EUR|GBP|JPY)\\b)";
   const suffix = "(?:块钱|块|元|人民币|美元|美金|刀|欧元|英镑|日元|\\b(?:CNY|RMB|USD|EUR|GBP|JPY|dollars?|yuan)\\b)";
-  const explicit = new RegExp("(?:" + prefix + ")\\s*([+-]?" + NUMBER + ")(?![\\d.])|(?<![\\d.])([+-]?" + NUMBER + ")\\s*(?:" + suffix + ")", "i").exec(input);
+  const amount = "(?:\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,2})?|" + NUMBER + ")";
+  const explicit = new RegExp("(?:" + prefix + ")\\s*([+-]?" + amount + ")(?![\\d.,])|(?<![\\d.,])([+-]?" + amount + ")\\s*(?:" + suffix + ")", "i").exec(input);
   const match = explicit ?? (INCOME.test(text.input) || BILL_CUE.test(text.input) ? /(?<![\d.:/\-])([+-]?\d+(?:\.\d{1,2})?)(?![\d.:/\-])/.exec(input) : null);
   if (!match) return {};
   // A bare quantity is not a price: "buy 2 books" must not become a bill.
   if (!explicit && /^\s*(?:本|个|件|杯|份|张|台|次|人|天|小时|分钟|books?\b|items?\b|cups?\b)/i.test(input.slice(match.index + match[0].length))) return {};
   const number = explicit ? explicit[1] ?? explicit[2] : match[1];
-  const value = parseNumber(number.replace(/^[+-]/, ""));
+  const value = parseNumber(number.replace(/^[+-]/, "").replaceAll(",", ""));
   if (!Number.isFinite(value)) return {};
   const income = number.startsWith("+") || (!number.startsWith("-") && INCOME.test(text.input));
   const currency = /\$|USD|美元|美金|刀|dollars?/i.test(match[0]) ? "USD" : /€|EUR|欧元/i.test(match[0]) ? "EUR"

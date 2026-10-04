@@ -1,3 +1,6 @@
+export { OperationHistoryStore } from "./history/OperationHistoryStore";
+export type { OperationHistoryRecord, OperationHistoryChange, HistoryRow } from "./history/OperationHistoryStore";
+export { RECOVERY_RETENTION_MS } from "./history/transaction";
 export { SqliteEntryStore } from "./SqliteEntryStore";
 export { SqliteItemStore } from "./SqliteItemStore";
 export type { AttachmentRowInput, DeletedEntrySummary, SeedBatch, SeedMeta } from "./SqliteEntryStore";

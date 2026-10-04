@@ -5,6 +5,7 @@ import {
   isStableEntryId,
   narrowEntryPriority,
   normalizeChronoEonSettings,
+  sharedSettings,
   resolveEntryColor,
   type ChronoEonSettings,
   type Entry,
@@ -375,9 +376,11 @@ export function parseEntriesCsv(input: string, settings: ChronoEonSettings = DEF
   };
 }
 
-/** Only allowlisted preferences/catalogs enter sync. Connection settings and
- * AI credentials are device-local and never appear in this payload. */
-export function settingsSyncPayload(settings: ChronoEonSettings, preferences: AppDisplayPreferences = {}): Record<string, unknown> {
+/** Sync carries user catalogs only. A manual export may include local preferences. */
+export function settingsSyncPayload(settings: ChronoEonSettings): Record<string, unknown> {
+  return { format: "chronoeon-settings", version: 1, settings: sharedSettings(settings) };
+}
+function settingsExportPayload(settings: ChronoEonSettings, preferences: AppDisplayPreferences = {}): SettingsExportEnvelope {
   const safe: AppDisplayPreferences = {};
   if (preferences.theme === "dark" || preferences.theme === "light") safe.theme = preferences.theme;
   if (["terracotta", "jade", "ocean", "violet"].includes(preferences.accentTheme ?? "")) safe.accentTheme = preferences.accentTheme;
@@ -389,14 +392,14 @@ export function settingsSyncPayload(settings: ChronoEonSettings, preferences: Ap
   return { format: "chronoeon-settings", version: 1, settings: normalizeChronoEonSettings(settings), preferences: safe };
 }
 export function exportSettingsJson(settings: ChronoEonSettings, preferences: AppDisplayPreferences = {}): string {
-  return JSON.stringify(settingsSyncPayload(settings, preferences), null, 2) + "\n";
+  return JSON.stringify(settingsExportPayload(settings, preferences), null, 2) + "\n";
 }
 export function importSettingsBundleJson(input: string): ImportedSettingsBundle {
   const record = JSON.parse(input) as SettingsExportEnvelope;
   if (!record || record.format !== "chronoeon-settings" || record.version !== 1 || !record.settings || typeof record.settings !== "object") {
     throw new Error("Unsupported settings format");
   }
-  const safe = settingsSyncPayload(record.settings, record.preferences) as unknown as SettingsExportEnvelope;
+  const safe = settingsExportPayload(record.settings, record.preferences) as unknown as SettingsExportEnvelope;
   return { settings: safe.settings, preferences: safe.preferences ?? {} };
 }
 export function importSettingsJson(input: string): ChronoEonSettings { return importSettingsBundleJson(input).settings; }

@@ -1,3 +1,4 @@
+import { historyTransaction } from "./history/transaction";
 import { itemImageHashes, billDirectionForCategory, validateItemDraft, type Item, type ChronoEonSettings } from "@chronoeon/domain";
 import type { ItemStore } from "@chronoeon/ports";
 import { StorageError } from "./errors";
@@ -63,7 +64,7 @@ export class SqliteItemStore implements ItemStore {
 
   delete(id: string): Promise<void> {
     return runDatabaseOperation(this.backend, async () => {
-      await this.backend.transaction(async () => {
+      await historyTransaction(this.backend, async () => {
         await this.backend.execute("DELETE FROM items WHERE id=?", [id]);
       });
       notifyLocalChange(this.backend);
@@ -72,35 +73,38 @@ export class SqliteItemStore implements ItemStore {
 
   save(item: Item, settings: ChronoEonSettings): Promise<Item> {
     return runDatabaseOperation(this.backend, async () => {
-      const saved = await this.backend.transaction(async () => {
-        try { validateItemDraft(item); }
-        catch (error) { throw new StorageError("InvalidItem", "Invalid item fields", error instanceof Error ? error.message : undefined); }
-        const images = item.images ?? [];
-        const imageHashes = itemImageHashes(images);
-        if (!UUID.test(item.id) || !Number.isFinite(Date.parse(item.createdAt))
-          || images.some(image => !image.match(/^attachments\/([0-9a-f]{64})\.webp$/))
-          || images.length !== imageHashes.length || new Set(images).size !== images.length) {
-          throw new StorageError("InvalidItem", "An item requires a stable ID, timestamp and canonical image reference");
-        }
-        const rows = await this.backend.select<ItemRow>(`SELECT ${COLUMNS.join(",")} FROM items WHERE id=?`, [item.id]);
-        const previous = rows[0];
-        if (previous && item.updatedAt !== previous.updated_at) {
-          throw new StorageError("RevisionMismatch", "The item changed since it was loaded", item.id);
-        }
-        await this.validateBinding(item.id, item.purchaseEntryId, previous?.purchase_entry_id, "expense", item.currency.trim(), settings);
-        await this.validateBinding(item.id, item.saleEntryId, previous?.sale_entry_id, "income", item.currency.trim(), settings);
-        const result: Item = { ...item, name: item.name.trim(), currency: item.currency.trim(), location: item.location?.trim() || undefined,
-          notes: item.notes?.trim() || undefined, images,
-          createdAt: previous?.created_at ?? item.createdAt, updatedAt: nextTimestamp(previous?.updated_at ?? item.createdAt) };
-        const values: SqlParam[] = [result.id, result.name, result.calendarId, result.category, result.acquisition, result.acquiredOn, result.acquiredAt, result.cost, result.currency,
-          result.location ?? null, result.payment ?? null, result.purchaseEntryId ?? null, result.disposal ?? null, result.disposedOn ?? null, result.saleAmount ?? null,
-          result.saleEntryId ?? null, JSON.stringify(images), result.notes ?? null, result.createdAt, result.updatedAt];
-        await this.backend.execute(`INSERT INTO items (${COLUMNS.join(",")}) VALUES (${COLUMNS.map(() => "?").join(",")}) ON CONFLICT(id) DO UPDATE SET ${COLUMNS.filter((column) => column !== "id" && column !== "created_at").map((column) => `${column}=excluded.${column}`).join(",")}`, values);
-        return result;
-      });
+      const saved = await historyTransaction(this.backend, () => this.saveInTransaction(item, settings));
       notifyLocalChange(this.backend);
       return saved;
     });
+  }
+
+  /** Internal composition point: caller already owns the database queue and history transaction. */
+  async saveInTransaction(item: Item, settings: ChronoEonSettings): Promise<Item> {
+    try { validateItemDraft(item); }
+    catch (error) { throw new StorageError("InvalidItem", "Invalid item fields", error instanceof Error ? error.message : undefined); }
+    const images = item.images ?? [];
+    const imageHashes = itemImageHashes(images);
+    if (!UUID.test(item.id) || !Number.isFinite(Date.parse(item.createdAt))
+      || images.some(image => !image.match(/^attachments\/([0-9a-f]{64})\.webp$/))
+      || images.length !== imageHashes.length || new Set(images).size !== images.length) {
+      throw new StorageError("InvalidItem", "An item requires a stable ID, timestamp and canonical image reference");
+    }
+    const rows = await this.backend.select<ItemRow>(`SELECT ${COLUMNS.join(",")} FROM items WHERE id=?`, [item.id]);
+    const previous = rows[0];
+    if (previous && item.updatedAt !== previous.updated_at) {
+      throw new StorageError("RevisionMismatch", "The item changed since it was loaded", item.id);
+    }
+    await this.validateBinding(item.id, item.purchaseEntryId, previous?.purchase_entry_id, "expense", item.currency.trim(), settings);
+    await this.validateBinding(item.id, item.saleEntryId, previous?.sale_entry_id, "income", item.currency.trim(), settings);
+    const result: Item = { ...item, name: item.name.trim(), currency: item.currency.trim(), location: item.location?.trim() || undefined,
+      notes: item.notes?.trim() || undefined, images,
+      createdAt: previous?.created_at ?? item.createdAt, updatedAt: nextTimestamp(previous?.updated_at ?? item.createdAt) };
+    const values: SqlParam[] = [result.id, result.name, result.calendarId, result.category, result.acquisition, result.acquiredOn, result.acquiredAt, result.cost, result.currency,
+      result.location ?? null, result.payment ?? null, result.purchaseEntryId ?? null, result.disposal ?? null, result.disposedOn ?? null, result.saleAmount ?? null,
+      result.saleEntryId ?? null, JSON.stringify(images), result.notes ?? null, result.createdAt, result.updatedAt];
+    await this.backend.execute(`INSERT INTO items (${COLUMNS.join(",")}) VALUES (${COLUMNS.map(() => "?").join(",")}) ON CONFLICT(id) DO UPDATE SET ${COLUMNS.filter((column) => column !== "id" && column !== "created_at").map((column) => `${column}=excluded.${column}`).join(",")}`, values);
+    return result;
   }
 
   private async validateBinding(assetId: string, entryId: string | undefined, previous: string | null | undefined, direction: "expense" | "income", currency: string, settings: ChronoEonSettings): Promise<void> {

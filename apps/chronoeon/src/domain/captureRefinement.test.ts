@@ -40,6 +40,12 @@ describe("adaptive capture fields", () => {
     const restored = refineCapture(next, { title: "Yoga" }, options);
     expect(restored.draft.start).toBe("09:00");
   });
+  it("preserves explicit source fields and later user corrections", () => {
+    const item = { draft: { ...initial, tags: ["original"], location: "Chosen room", priority: "high" as const }, touched: ["tags", "location", "priority"] as Array<keyof EntryDraft> };
+    const next = refineCapture(item, { title: "Design review @Office #other !low" }, options);
+    expect(next.draft).toMatchObject({ location: "Chosen room", tags: ["original"], priority: "high" });
+    expect(next.draft.note).toBeUndefined();
+  });
   it("does not learn fields from another calendar or replace a manually chosen kind", () => {
     const next = refineCapture({ draft: initial }, { title: "Yoga", kind: "task" }, { ...options, history: history.map(entry => ({ ...entry, calendar: "other" })) });
     expect(next.draft.kind).toBe("task");

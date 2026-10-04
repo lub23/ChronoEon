@@ -35,7 +35,7 @@ describe("snapshot rebuild settings", () => {
   it("asks for destructive confirmation in a viewport portal and cancelling does nothing", async () => {
     const sync = service(); act(() => render(sync));
     await act(async () => { rebuildButton().click(); });
-    expect(confirmation().textContent).toContain("永久清空，无法恢复");
+    expect(confirmation().textContent).toContain("不清空回收站或操作历史");
     expect(confirmation().textContent).toContain("7 天");
     expect(confirmation().parentElement?.parentElement).toBe(document.body);
     expect(sync.rebuildSnapshot).not.toHaveBeenCalled();
@@ -52,7 +52,7 @@ describe("snapshot rebuild settings", () => {
     expect(rebuildSnapshot).toHaveBeenCalledTimes(1); expect(rebuildButton().disabled).toBe(true);
     expect(host.textContent).not.toContain("快照已重建");
     await act(async () => { finish(success); });
-    expect(host.textContent).toContain("快照已重建，本周期的回收站条目已清空");
+    expect(host.textContent).toContain("快照已重建，回收站和操作历史已保留");
   });
 
   it("does not announce cleared recovery after a failed rebuild", async () => {

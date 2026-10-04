@@ -16,6 +16,8 @@ holds the UI-independent rules: `domain`, `storage`, `ports`.
 
 ## Run the browser demo
 
+Use Node.js 24+ (the storage tests use the built-in `node:sqlite` module). / 使用 Node.js 24+（存储测试依赖内置 `node:sqlite`）。
+
 ```bash
 npm install
 npm run dev          # http://localhost:1420   (?compact=1 previews the mini window)
@@ -56,7 +58,7 @@ npm run tauri:dev
 
 Ubuntu needs the WebKitGTK development packages from the official Tauri guide
 (`libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev libssl-dev
-libayatana-appindicator3-dev` plus build tools). Windows needs Node 20+, the
+libayatana-appindicator3-dev` plus build tools). Windows needs Node 24+, the
 stable Rust toolchain and WebView2. The repository `.npmrc` overrides a
 machine-level `npm global` setting that otherwise breaks the workspace scripts;
 if this checkout was copied from another OS, run `npm run doctor:windows`

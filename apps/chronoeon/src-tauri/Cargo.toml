@@ -1,6 +1,6 @@
 [package]
 name = "chronoeon-app"
-version = "0.2.1"
+version = "0.3.0"
 description = "ChronoEon (时元) standalone application"
 authors = ["ChronoEon contributors"]
 edition = "2021"

@@ -39,6 +39,7 @@ import { TagInput } from "./TagInput";
 import { TaskStatusMenu } from "./TaskSummaryList";
 import { EntryGlyph, TaskStatusGlyph } from "./ItemGlyph";
 import { registerModalDismiss } from "./modalLayer";
+import { FieldSuggestions, locationFieldCandidates } from "./FieldSuggestions";
 import { readCurrentPlace } from "../platform/location";
 import { labeledOptions, priorities, recurrenceOptions, reminderLabels, reminderTriggerLabel, weekdayIndexForDate } from "./entryFieldLabels";
 import type { Item } from "@chronoeon/domain";
@@ -64,6 +65,7 @@ interface EntryComposerProps {
   /** Local entries are the only category-learning corpus; never sent anywhere. */
   history?: readonly CaptureHistoryItem[];
   items?: Item[];
+  pendingItemLink?: Item | null;
   editingItem?: Item | null;
   initialItemDraft?: Partial<ItemDraft> | null;
   onOpenBill?: (entry: Entry) => void;
@@ -172,6 +174,7 @@ export function EntryComposer({
   initialDraft: seed,
   history = [],
   items = [],
+  pendingItemLink = null,
   onEditItem,
   onOpenBill,
   onCreateItemFromBill,
@@ -192,7 +195,7 @@ export function EntryComposer({
     ? normalizeItemDraftClock({ ...defaultItemDraft(selectedDate, settings), ...editingItem })
     : initialItemDraft ? normalizeItemDraftClock({ ...defaultItemDraft(selectedDate, settings), ...initialItemDraft }) : null);
   const [billItemCategory, setBillItemCategory] = useState("");
-  const linkedBillItem = editing?.kind === "bill" ? items.find(item => item.purchaseEntryId === editing.id || item.saleEntryId === editing.id) : undefined;
+  const linkedBillItem = pendingItemLink ?? (editing?.kind === "bill" ? items.find(item => item.purchaseEntryId === editing.id || item.saleEntryId === editing.id) : undefined);
   // Category direction owns the sign, so the composer only edits a magnitude.
   const [amountText, setAmountText] = useState(() => (
     draft.amount == null ? "" : String(Math.abs(draft.amount))
@@ -211,6 +214,7 @@ export function EntryComposer({
   const [itemBusy, setItemBusy] = useState(false);
   const itemBusyRef = useRef(false);
   const [locating, setLocating] = useState(false);
+  const locationInput = useRef<HTMLInputElement | null>(null);
   const now = new Date();
   const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   // A selected value wins over every later title-derived suggestion.
@@ -226,6 +230,9 @@ export function EntryComposer({
   const itemSuggestions = useMemo(() => itemDraft && settings.locationAutofill
     ? inferLocationCandidates(itemDraft.name, [...itemHistory, ...history.filter(entry => !entry.calendar || entry.calendar === itemDraft.calendarId)], itemDraft.acquiredOn)
     : [], [itemDraft?.name, itemDraft?.calendarId, itemDraft?.acquiredOn, itemHistory, history, settings.locationAutofill]);
+  const itemLocationSuggestions = useMemo(() => itemDraft && settings.locationAutofill
+    ? locationFieldCandidates(itemDraft.name, itemDraft.location, [...itemHistory, ...history.filter(entry => !entry.calendar || entry.calendar === itemDraft.calendarId)], itemDraft.acquiredOn)
+    : [], [itemDraft?.name, itemDraft?.location, itemDraft?.calendarId, itemDraft?.acquiredOn, itemHistory, history, settings.locationAutofill]);
   useEffect(() => {
     if (!itemDraft || editingItem) return;
     const availableCategories = new Set(itemCategoriesForCalendar(settings, itemDraft.calendarId).map(item => item.id));
@@ -241,10 +248,10 @@ export function EntryComposer({
   }, [itemDraft?.name, itemDraft?.calendarId, itemHistory, itemSuggestions, editingItem, settings]);
   const [statusMenu, setStatusMenu] = useState<{ left: number; top: number } | null>(null);
   const locationSuggestions = useMemo(
-    () => settings.locationAutofill && draft.title.trim()
-      ? inferLocationCandidates(draft.title.trim(), localHistory, draft.date)
+    () => settings.locationAutofill && draft.title.trim() && activeKind !== "item"
+      ? locationFieldCandidates(draft.title, draft.location, localHistory, draft.date)
       : [],
-    [draft.date, draft.title, localHistory, settings.locationAutofill],
+    [activeKind, draft.date, draft.location, draft.title, localHistory, settings.locationAutofill],
   );
   // The draft at open time is the discard baseline: Esc (or the close button)
   // with unsaved changes asks before losing them.
@@ -657,7 +664,7 @@ export function EntryComposer({
             <ItemFields
               draft={itemDraft}
               patch={patchItem}
-              locationSuggestions={itemSuggestions}
+              locationSuggestions={itemLocationSuggestions}
               items={items}
               entries={entries}
               locale={locale}
@@ -698,6 +705,7 @@ export function EntryComposer({
                 <div className="location-input-wrap">
                   <input
                     disabled={occurrenceOnly}
+                    ref={locationInput}
                     value={draft.location ?? ""}
                     onChange={(event) => { locationTouchedRef.current = true; update("location", event.target.value); }}
                     placeholder={t("locationPlaceholder", locale)}
@@ -714,6 +722,8 @@ export function EntryComposer({
                       <Icon name="close" size={11} />
                     </button>
                   )}
+                  <FieldSuggestions inputRef={locationInput} locale={locale} suggestions={locationSuggestions}
+                    onSelect={value => { locationTouchedRef.current = true; update("location", value); }} />
                 </div>
               </label>
             ) : (
@@ -723,15 +733,6 @@ export function EntryComposer({
               </label>
             )}
           </div>
-          )}
-
-          {locationSuggestions.length > 1 && draft.kind !== "idea" && activeKind !== "item" && (
-            <div className="field-suggestions" role="group" aria-label={t("location", locale)}>
-              {locationSuggestions.map(suggestion => (
-                <button key={suggestion.value} type="button" className={draft.location === suggestion.value ? "is-active" : ""}
-                  onClick={() => { locationTouchedRef.current = true; update("location", suggestion.value); }}>{suggestion.value}</button>
-              ))}
-            </div>
           )}
 
           {statusMenu && draft.kind === "task" && activeKind !== "item" && (
@@ -922,7 +923,7 @@ export function EntryComposer({
                   )}
                   {draft.kind === "bill" && (
                     <label className="field-label item-from-bill-field">
-                      <span className="linked-field-heading">{t("itemAddFromBill", locale)}{linkedBillItem && onEditItem && <button type="button" className="icon-button" aria-label={`${t("itemAddFromBill", locale)} · ${linkedBillItem.name}`} onClick={() => onEditItem(linkedBillItem)}><Icon name="arrow-right" size={14} /></button>}</span>
+                      <span className="linked-field-heading">{pendingItemLink ? `${locale === "zh" ? "关联物品" : "Linked asset"} · ${pendingItemLink.name}` : t("itemAddFromBill", locale)}{linkedBillItem && onEditItem && <button type="button" className="icon-button" aria-label={`${t("itemAddFromBill", locale)} · ${linkedBillItem.name}`} onClick={() => onEditItem(linkedBillItem)}><Icon name="arrow-right" size={14} /></button>}</span>
                       <GlassSelect
                         value={linkedBillItem?.category ?? billItemCategory}
                         disabled={Boolean(linkedBillItem)}

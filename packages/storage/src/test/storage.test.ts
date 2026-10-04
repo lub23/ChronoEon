@@ -33,7 +33,7 @@ describe("storage unit", () => {
       "entry_tags", "schema_meta", "timer_session", "attachment_ingest_queue",
       "sync_batches", "sync_changes", "sync_conflicts", "sync_control", "sync_documents",
       "sync_entities", "sync_links", "sync_meta", "sync_outbox", "sync_settings",
-      "deleted_entries",
+      "deleted_entries", "history_control", "operation_history", "operation_history_changes",
     ].sort());
     const version = await backend.select<{ user_version: number }>("PRAGMA user_version");
     expect(version[0].user_version).toBe(SCHEMA_VERSION);

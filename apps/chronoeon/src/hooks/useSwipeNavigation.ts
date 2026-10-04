@@ -18,8 +18,12 @@ export function horizontalScrollOwner(target: Element, boundary: Element, dx: nu
   for (let node: Element | null = target; node && node !== boundary; node = node.parentElement) {
     if (!(node instanceof HTMLElement)) continue;
     const max = node.scrollWidth - node.clientWidth;
-    if (max > 2 && /auto|scroll/.test(getComputedStyle(node).overflowX)
-      && (dx < 0 ? node.scrollLeft < max - 1 : node.scrollLeft > 1)) return node;
+    if (max > 2 && /auto|scroll/.test(getComputedStyle(node).overflowX)) {
+      if (dx < 0 ? node.scrollLeft < max - 2 : node.scrollLeft > 2) return node;
+      // At a calendar edge, its parent layout overflow is not another timeline.
+      // Let the next outward gesture page rather than trapping it in that parent.
+      if (node.classList.contains("calendar-scroll")) return null;
+    }
   }
   return null;
 }
@@ -344,7 +348,13 @@ export function useSwipeNavigation(options: Options) {
     // empty calendar areas from being swallowed by the browser's pan.
     const touchMove = (event: TouchEvent) => {
       if (!gesture) return;
-      if (gesture.kind === "page" || gesture.kind === "scroll" || gesture.kind === "sidebar") {
+      const touch = event.touches?.[0];
+      // Some WebViews deliver touchmove before pointermove. Preserve the
+      // horizontal contact until the pointer recognizer can choose scroll/page.
+      const horizontal = !gesture.kind && touch
+        && Math.abs(touch.clientX - gesture.x) > 8
+        && Math.abs(touch.clientX - gesture.x) > Math.abs(touch.clientY - gesture.y) * 1.5;
+      if (horizontal || gesture.kind === "page" || gesture.kind === "scroll" || gesture.kind === "sidebar") {
         if (event.cancelable) event.preventDefault();
       }
     };

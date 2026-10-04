@@ -13,5 +13,5 @@ export function extractKind(text: CaptureText, hasAmount: boolean, historicalKin
     if (!prefix) kind = "task";
     consumeMatch(text, cue, "cue");
   }
-  return hasAmount ? "bill" : kind;
+  return prefix ? kind : hasAmount ? "bill" : kind;
 }

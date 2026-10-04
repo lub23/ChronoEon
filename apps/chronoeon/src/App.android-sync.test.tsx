@@ -40,7 +40,7 @@ beforeEach(async()=>{
   otherBackend=await MemorySqliteBackend.open([]);const other=await SqliteEntryStore.create(otherBackend);const otherSync=new SyncStore(otherBackend);
   const now=new Date();const date=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
   await other.create({id:createEntryId(),kind:"task",title:"Synced entry stays visible",date,allDay:true,category:"work",color:"#77787b",createdAt:now.toISOString()});
-  await otherSync.setSettings(settingsSyncPayload({ ...createDefaultSettings(), language: "zh" },{theme:"dark"}));
+  await otherSync.setSettings({ ...settingsSyncPayload({ ...createDefaultSettings(), language: "en" }), preferences: { theme: "dark" } });
   await new SyncEngine(otherSync,mobile.remote,{deviceName:"Other device"}).run();
   host=document.createElement("div");document.body.appendChild(host);root=createRoot(host);
 });
@@ -54,7 +54,8 @@ describe("mobile logical sync lifecycle",()=>{
     await act(async()=>{await new Promise((resolve)=>setTimeout(resolve,50));});
     await act(async()=>{await new Promise((resolve)=>setTimeout(resolve,1200));});
     expect(mobile.fetches).toBe(1);expect(mobile.boots).toBe(1);expect(mobile.session.dispose).not.toHaveBeenCalled();
-    expect(host.textContent).toContain("Synced entry stays visible");expect(localStorage.getItem("chronoeon.preference.theme")).toBe('"dark"');
+    expect(host.textContent).toContain("Synced entry stays visible");expect(localStorage.getItem("chronoeon.preference.theme")).not.toBe('"dark"');
+    expect(localStorage.getItem("chronoeon.preference.locale")).toBe('"zh"');
     expect(await mobile.session.sync.conflicts()).toEqual([]);
     await act(async()=>{await new Promise((resolve)=>setTimeout(resolve,400));});expect(mobile.fetches).toBe(1);
     await act(async()=>{window.dispatchEvent(new Event("online"));await new Promise((resolve)=>setTimeout(resolve,150));});
@@ -89,8 +90,8 @@ it("rebuilds from Settings → Data and refreshes the recycle bin without reopen
     await new Promise((resolve) => setTimeout(resolve, 150));
   });
   expect(mobile.remote.index.snapshot.generation).toBe(generation + 1);
-  expect(await mobile.session.store.deletedEntries()).toEqual([]);
-  expect(host.querySelector(".recycle-bin")?.textContent).toContain("没有可恢复的删除记录");
+  expect(await mobile.session.store.deletedEntries()).toHaveLength(1);
+  expect(host.querySelector(".recycle-bin-list")?.textContent).toContain(stored.title);
   expect(host.querySelector(".sync-snapshot-schedule time")?.getAttribute("datetime")).toBe(new Date(Date.parse(mobile.remote.index.snapshot.createdAt) + 7 * 86400000).toISOString());
   expect(mobile.boots).toBe(1);
 }, 10000);

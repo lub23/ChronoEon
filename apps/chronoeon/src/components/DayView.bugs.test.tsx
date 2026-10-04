@@ -636,7 +636,7 @@ describe("day view: touch gesture ownership", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  function renderTouch(item = entry({})) {
+  function renderTouch(item = entry({}), resizeStep: 5 | 10 = 5) {
     const onReschedule = vi.fn(), onViewChange = vi.fn(), onNewAt = vi.fn();
     function Harness() {
       const nav = useSwipeNavigation({ enabled: true, activeView: "day", selectedDate: new Date(2026, 7, 10),
@@ -645,7 +645,7 @@ describe("day view: touch gesture ownership", () => {
         <DayView entries={[item]} selectedDate={new Date(2026, 7, 10)} locale="en"
           settings={DEFAULT_CHRONOEON_SETTINGS} days={2} anchor="selection" filter={[]} search=""
           onSelectDate={() => {}} onToggle={() => {}} onEdit={() => {}} onNew={() => {}}
-          onNewAt={onNewAt} onReschedule={onReschedule} />
+          onNewAt={onNewAt} onReschedule={onReschedule} resizeStep={resizeStep} />
       </div>;
     }
     act(() => root.render(<Harness />));
@@ -654,12 +654,15 @@ describe("day view: touch gesture ownership", () => {
     return { onReschedule, onViewChange, onNewAt };
   }
 
-  it.each(["start", "end"] as const)("starts a timed %s resize immediately and blocks scroll/navigation", (edge) => {
+  it.each(["start", "end"] as const)("starts a timed %s resize after a hold and blocks scroll/navigation", (edge) => {
     const { onReschedule, onViewChange, onNewAt } = renderTouch();
     const handle = host.querySelector<HTMLElement>(`.calendar-resize-handle--${edge}`)!;
     handle.setPointerCapture = vi.fn();
     const y = 100 + (edge === "start" ? 9 : 10) * 64;
     act(() => { firePointer("pointerdown", handle, 96, y, "touch"); });
+    expect(isChipDragActive()).toBe(false);
+    expect(handle.setPointerCapture).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(300); });
     expect(isChipDragActive()).toBe(true);
     expect(handle.setPointerCapture).toHaveBeenCalledWith(1);
     const touchMove = new Event("touchmove", { bubbles: true, cancelable: true });
@@ -682,11 +685,12 @@ describe("day view: touch gesture ownership", () => {
     expect(afterRelease.defaultPrevented).toBe(false);
   });
 
-  it.each(["start", "end"] as const)("starts an all-day %s resize without a hold", (edge) => {
+  it.each(["start", "end"] as const)("starts an all-day %s resize after a hold", (edge) => {
     const { onReschedule, onViewChange } = renderTouch(entry({ allDay: true, start: undefined, end: undefined }));
     const handle = host.querySelector(`.calendar-span-handle--${edge}`)!;
     act(() => {
       firePointer("pointerdown", handle, 96, 60, "touch");
+      vi.advanceTimersByTime(300);
       firePointer("pointermove", handle, 182, 60, "touch");
       firePointer("pointerup", handle, 182, 60, "touch");
       vi.advanceTimersByTime(1000);
@@ -700,6 +704,7 @@ describe("day view: touch gesture ownership", () => {
     const handle = host.querySelector(".calendar-resize-handle--end")!;
     act(() => {
       firePointer("pointerdown", handle, 96, 740, "touch");
+      vi.advanceTimersByTime(300);
       firePointer("pointermove", handle, 182, 804, "touch", 2);
       firePointer("pointerup", handle, 182, 804, "touch", 2);
     });
@@ -715,6 +720,97 @@ describe("day view: touch gesture ownership", () => {
     const touchMove = new Event("touchmove", { bubbles: true, cancelable: true });
     act(() => host.dispatchEvent(touchMove));
     expect(touchMove.defaultPrevented).toBe(false);
+  });
+
+  it.each([5, 10] as const)("resizes by %i minutes independently of grid density", (step) => {
+    const { onReschedule } = renderTouch(entry({}), step);
+    const handle = host.querySelector(".calendar-resize-handle--end")!;
+    act(() => {
+      firePointer("pointerdown", handle, 96, 740, "touch");
+      vi.advanceTimersByTime(300);
+      firePointer("pointermove", handle, 96, 740 + 64 * step / 60, "touch");
+      firePointer("pointerup", handle, 96, 740 + 64 * step / 60, "touch");
+    });
+    expect(onReschedule.mock.calls[0][1].end).toBe(step === 5 ? "10:05" : "10:10");
+  });
+
+  it.each(["start", "end"])("does not resize when a finger brushes the %s edge", (edge) => {
+    const { onReschedule } = renderTouch();
+    const handle = host.querySelector(`.calendar-resize-handle--${edge}`)!;
+    let down!: Event;
+    act(() => {
+      down = firePointer("pointerdown", handle, 96, 740, "touch");
+      firePointer("pointermove", handle, 96, 765, "touch");
+      vi.advanceTimersByTime(400);
+      firePointer("pointerup", handle, 96, 765, "touch");
+    });
+    expect(down.defaultPrevented).toBe(false);
+    expect(isChipDragActive()).toBe(false);
+    expect(onReschedule).not.toHaveBeenCalled();
+  });
+
+  it("scrolls a held cross-day selection toward midnight and stops on release", () => {
+    const { onNewAt } = renderTouch();
+    const scroller = host.querySelector<HTMLElement>(".calendar-scroll")!;
+    const columns = [...host.querySelectorAll<HTMLElement>(".calendar-day-column")];
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, right: left + width, bottom: top + height, width, height }) as DOMRect;
+    scroller.getBoundingClientRect = () => rect(0, 0, 225, 600);
+    Object.defineProperty(scroller, "clientHeight", { value: 600 });
+    Object.defineProperty(scroller, "scrollHeight", { value: 24 * 64 + 100 });
+    scroller.scrollTop = 1000;
+    columns.forEach((column, index) => {
+      column.getBoundingClientRect = () => rect(53 + index * 86, 100 - scroller.scrollTop, 86, 24 * 64);
+    });
+    act(() => {
+      firePointer("pointerdown", columns[0], 96, 100 + 23 * 64 - 1000, "touch");
+      vi.advanceTimersByTime(350);
+      firePointer("pointermove", columns[1], 182, 5, "touch");
+      vi.advanceTimersByTime(2400);
+    });
+    expect(scroller.scrollTop).toBeLessThan(200);
+    act(() => {
+      firePointer("pointermove", columns[1], 182, 100 + 3 * 64 - scroller.scrollTop, "touch");
+      firePointer("pointerup", columns[1], 182, 100 + 3 * 64 - scroller.scrollTop, "touch");
+    });
+    expect(onNewAt).toHaveBeenCalledWith(expect.objectContaining({ date: "2026-08-10", start: "23:00", endDate: "2026-08-11", end: "03:00" }));
+    const stoppedAt = scroller.scrollTop;
+    act(() => vi.advanceTimersByTime(1000));
+    expect(scroller.scrollTop).toBe(stoppedAt);
+    expect(isChipDragActive()).toBe(false);
+  });
+
+  it("includes autoscroll distance in a held resize and cancels its animation", () => {
+    const { onReschedule } = renderTouch();
+    const handle = host.querySelector(".calendar-resize-handle--start")!;
+    const scroller = host.querySelector<HTMLElement>(".calendar-scroll")!;
+    scroller.getBoundingClientRect = () => ({ top: 0, bottom: 600, height: 600 }) as DOMRect;
+    Object.defineProperty(scroller, "clientHeight", { value: 600 });
+    Object.defineProperty(scroller, "scrollHeight", { value: 1636 });
+    scroller.scrollTop = 500;
+    act(() => {
+      firePointer("pointerdown", handle, 96, 176, "touch");
+      vi.advanceTimersByTime(300);
+      firePointer("pointermove", handle, 96, 5, "touch");
+      vi.advanceTimersByTime(500);
+      firePointer("pointerup", handle, 96, 5, "touch");
+    });
+    const delta = Math.round(((5 - 176 + scroller.scrollTop - 500) / 64 * 60) / 5) * 5;
+    const start = 9 * 60 + delta;
+    expect(onReschedule.mock.calls[0][1].start).toBe(`${String(Math.floor(start / 60)).padStart(2, "0")}:${String(start % 60).padStart(2, "0")}`);
+    expect(scroller.scrollTop).toBeLessThan(500);
+    const stoppedAt = scroller.scrollTop;
+    act(() => vi.advanceTimersByTime(500));
+    expect(scroller.scrollTop).toBe(stoppedAt);
+    act(() => {
+      firePointer("pointerdown", handle, 96, 176, "touch");
+      vi.advanceTimersByTime(300);
+      firePointer("pointermove", handle, 96, 5, "touch");
+      firePointer("pointercancel", handle, 96, 5, "touch");
+      vi.advanceTimersByTime(500);
+    });
+    expect(scroller.scrollTop).toBe(stoppedAt);
+    expect(onReschedule).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the body hold gate but permits a quick vertical swipe to scroll", () => {

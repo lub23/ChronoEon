@@ -1,6 +1,8 @@
+import { historyTransaction, pruneRecovery } from "./history/transaction";
 import { nextTimestamp } from "./persistence/timestamp";
 import { runDatabaseOperation, notifyLocalChange } from "./persistence/coordinator";
-import { createEntryId, isStableEntryId, prepareLedgerReplacement, type ChronoEonSettings, type LedgerImportPayload, type LedgerImportSummary, type Entry, type EntryKind } from "@chronoeon/domain";
+import { SqliteItemStore } from "./SqliteItemStore";
+import { createEntryId, isStableEntryId, prepareLedgerReplacement, billDirectionForCategory, type Item, type ChronoEonSettings, type LedgerImportPayload, type LedgerImportSummary, type Entry, type EntryKind } from "@chronoeon/domain";
 import { SETTINGS_ID, stableJson } from "./sync/protocol";
 import type { EntryQuery, EntryRepositoryEvent, EntryStore } from "@chronoeon/ports";
 import { StorageError } from "./errors";
@@ -320,6 +322,30 @@ export class SqliteEntryStore implements EntryStore {
     return this.createEntry(entry);
   }
 
+  /** Create an expense and bind an existing unbound purchase item as one reversible operation. */
+  async createWithItemLink(entry: Entry, item: Item, settings: ChronoEonSettings): Promise<Entry> {
+    return this.runOp(async () => {
+      const stored = { ...entry, id: isStableEntryId(entry.id) ? entry.id : createEntryId() };
+      await historyTransaction(this.backend, async () => {
+        if (stored.kind !== "bill" || !Number.isFinite(stored.amount) || !stored.amount || billDirectionForCategory(stored.category, settings, stored.calendar) !== "expense") {
+          throw new StorageError("ItemBillDirectionMismatch", "Only purchase expenses can create an item link");
+        }
+        const rows = await this.backend.select<{ purchase_entry_id: string | null; acquisition: string }>("SELECT purchase_entry_id,acquisition FROM items WHERE id=?", [item.id]);
+        if (!rows[0] || rows[0].acquisition !== "purchase") throw new StorageError("InvalidItem", "The purchase item no longer exists", item.id);
+        if (rows[0].purchase_entry_id || item.purchaseEntryId) throw new StorageError("ItemBillAlreadyLinked", "The item already has a purchase bill", item.id);
+        const row = entryToRow(stored);
+        await insertRow(this.backend, "entries", Object.keys(row), Object.values(row));
+        await this.replaceTags(stored.id, stored.tags ?? []);
+        await this.replaceAttachmentRows(stored.id, stored.images ?? []);
+        await new SqliteItemStore(this.backend).saveInTransaction({ ...item, purchaseEntryId: stored.id }, settings);
+      });
+      const created = await this.getDirect(stored.id);
+      if (!created) throw new StorageError("PersistenceFailed", "The linked bill could not be read back", stored.id);
+      this.emit({ type: "created", snapshot: { entry: created, revision: await this.revisionOf(created.id) } });
+      return created;
+    });
+  }
+
   /** The entry and removal of its live timer are one durable transaction. */
   async createFromTimer(entry: Entry, sessionId: string): Promise<Entry> {
     return this.createEntry(entry, sessionId);
@@ -329,7 +355,7 @@ export class SqliteEntryStore implements EntryStore {
     return this.runOp(async () => {
       const id = isStableEntryId(entry.id) ? entry.id : createEntryId();
       const stored: Entry = { ...entry, id };
-      await this.backend.transaction(async () => {
+      await historyTransaction(this.backend, async () => {
         if (timerSessionId) {
           const rows = await this.backend.select<{ payload_json: string }>("SELECT payload_json FROM timer_session WHERE id = ?", ["active"]);
           if (!rows[0] || JSON.parse(rows[0].payload_json).id !== timerSessionId) throw new StorageError("PersistenceFailed", "The active timer changed before it could be saved");
@@ -350,7 +376,7 @@ export class SqliteEntryStore implements EntryStore {
   async update(entry: Entry, options?: { expectedUpdatedAt?: string }): Promise<Entry> {
     return this.runOp(async () => {
       const id = entry.id;
-      await this.backend.transaction(async () => {
+      await historyTransaction(this.backend, async () => {
         const rows = await this.backend.select<{ updated_at: string | null }>(
           "SELECT updated_at FROM entries WHERE id = ?", [id],
         );
@@ -382,34 +408,18 @@ export class SqliteEntryStore implements EntryStore {
 
   async delete(id: string): Promise<void> {
     await this.runOp(async () => {
-      await this.backend.transaction(async () => {
-        const rows = await this.backend.select<EntryColumns>(`SELECT ${ENTRY_COLUMNS.join(", ")} FROM entries WHERE id = ?`, [id]);
-        if (!rows[0]) throw new StorageError("EntryNotFound", `Entry ${id} does not exist`);
-        const [entry] = await this.hydrate([rows[0]]);
-        if (!entry) throw new StorageError("PersistenceFailed", `Entry ${id} could not be snapshotted`);
-        const attachments = await this.backend.select<DeletedAttachmentRow>(
-          `SELECT a.id, a.entry_id, a.sha256, a.kind, a.width, a.height, a.bytes, a.mime, a.caption,
-                  a.sort, a.file_missing, a.created_at, q.source_path
-             FROM attachments a
-             LEFT JOIN attachment_ingest_queue q ON q.attachment_id = a.id
-            WHERE a.entry_id = ?
-            ORDER BY a.sort, a.id`,
-          [id],
-        );
-        const payload: DeletedEntryPayload = { entry, attachments };
-        await this.backend.execute(
-          "INSERT INTO deleted_entries(id,payload_json,deleted_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json, deleted_at=excluded.deleted_at",
-          [id, JSON.stringify(payload), new Date().toISOString()],
-        );
+      await historyTransaction(this.backend, async () => {
+        await archiveEntryForRecovery(this.backend, id);
         await this.backend.execute("DELETE FROM entries WHERE id = ?", [id]);
       });
       this.emit({ type: "deleted", id, revision: "" });
     });
   }
 
-  /** Recent local deletes, newest first. Cleared when a sync snapshot lands. */
+  /** Local deletes retain their own seven-day lifetime, independent of sync. */
   async deletedEntries(): Promise<DeletedEntrySummary[]> {
     return this.runOp(async () => {
+      await pruneRecovery(this.backend);
       const rows = await this.backend.select<{ id: string; payload_json: string; deleted_at: string }>(
         "SELECT id, payload_json, deleted_at FROM deleted_entries ORDER BY deleted_at DESC, id",
       );
@@ -429,12 +439,15 @@ export class SqliteEntryStore implements EntryStore {
   /** Restore a recent delete, including attachment IDs and missing-file state. */
   async restoreDeleted(id: string): Promise<Entry> {
     return this.runOp(async () => {
-      await this.backend.transaction(async () => {
+      await historyTransaction(this.backend, async () => {
         const rows = await this.backend.select<{ payload_json: string }>(
           "SELECT payload_json FROM deleted_entries WHERE id = ?", [id],
         );
         if (!rows[0]) throw new StorageError("EntryNotFound", `Deleted entry ${id} is no longer recoverable`);
         const payload = JSON.parse(rows[0].payload_json) as DeletedEntryPayload;
+        if ((await this.backend.select("SELECT id FROM entries WHERE id=?", [id])).length) {
+          throw new StorageError("RevisionMismatch", "The deleted entry has already been restored or replaced", id);
+        }
         const entryRow = entryToRow(payload.entry);
         await upsertRow(this.backend, "entries", Object.keys(entryRow), Object.values(entryRow));
         await this.replaceTags(id, payload.entry.tags ?? []);
@@ -460,7 +473,7 @@ export class SqliteEntryStore implements EntryStore {
     });
   }
 
-  /** Drop all recovery snapshots after the remote history has been compacted. */
+  /** Explicitly empty only the recycle bin, never operation history. */
   clearDeletedEntries(): Promise<void> {
     return this.runOp(() => this.backend.execute("DELETE FROM deleted_entries"));
   }
@@ -496,7 +509,7 @@ export class SqliteEntryStore implements EntryStore {
    */
   async bulkSeed(batch: SeedBatch, options: { merge?: boolean } = {}): Promise<void> {
     await this.runOp(async () => {
-      await this.backend.transaction(async () => {
+      await historyTransaction(this.backend, async () => {
         const meta = await this.getSeedMetaDirect();
         if (!options.merge && meta.importId && meta.importId !== batch.meta.importId) {
           throw new StorageError(
@@ -588,7 +601,7 @@ export class SqliteEntryStore implements EntryStore {
     const prepared = prepareLedgerReplacement(settings, payload, importedAt);
     const importedIds = new Set(prepared.entries.map((entry) => entry.id));
     return this.runOp(async () => {
-      const replacedCount = await this.backend.transaction(async () => {
+      const replacedCount = await historyTransaction(this.backend, async () => {
         const control = await this.backend.select<{ applying: number }>("SELECT applying FROM sync_control WHERE id=1");
         if (control[0]?.applying !== 0) throw new Error("LEDGER_SYNC_APPLY_ACTIVE");
         const settingsRows = await this.backend.select<{ payload_json: string }>("SELECT payload_json FROM sync_settings WHERE id=?", [SETTINGS_ID]);
@@ -745,6 +758,17 @@ export class SqliteEntryStore implements EntryStore {
       listener(event);
     }
   }
+}
+
+/** Shared by normal deletes and inverse-history deletes; caller owns the transaction. */
+export async function archiveEntryForRecovery(backend: PersistencePort, id: string): Promise<void> {
+  const rows = await backend.select<EntryColumns>(`SELECT ${ENTRY_COLUMNS.join(",")} FROM entries WHERE id=?`, [id]);
+  if (!rows[0]) throw new StorageError("EntryNotFound", `Entry ${id} does not exist`);
+  const tags = await backend.select<{ tag: string }>("SELECT tag FROM entry_tags WHERE entry_id=? ORDER BY position,tag", [id]);
+  const attachments = await backend.select<DeletedAttachmentRow>(
+    `SELECT a.*,q.source_path FROM attachments a LEFT JOIN attachment_ingest_queue q ON q.attachment_id=a.id WHERE a.entry_id=? ORDER BY a.sort,a.id`, [id]);
+  const payload: DeletedEntryPayload = { entry: rowToEntry(rows[0], tags.map(row => row.tag), attachments.map(attachmentReference)), attachments };
+  await backend.execute("INSERT INTO deleted_entries(id,payload_json,deleted_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,deleted_at=excluded.deleted_at", [id, JSON.stringify(payload), new Date().toISOString()]);
 }
 
 function attachmentReference(row: { id: string; sha256: string | null }): string {

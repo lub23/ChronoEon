@@ -16,19 +16,26 @@ export function refineCapture<T extends EditableCapture>(item: T, patch: Partial
   if (!["title", "kind", "date", "calendar", "amount"].some(key => key in patch)) return { ...item, draft, touched, baseline };
   const history = (options.history ?? []).filter(entry => !entry.calendar || entry.calendar === draft.calendar);
   const index = new CaptureDecisionIndex(history);
-  const parsed = parseCapture(draft.title, { ...options, history, decisionIndex: index });
+  const parsed = parseCapture(draft.title, { ...options, settings: { ...options.settings, defaultCalendarID: draft.calendar ?? options.settings.defaultCalendarID }, history, decisionIndex: index });
   const span = (kind: string) => parsed.spans.some(value => value.kind === kind);
   const kind = touched.includes("kind") || !("title" in patch) ? draft.kind
     : parsed.decisions.kind.selected || span("amount") || span("cue") ? parsed.draft.kind : baseline.kind;
   const decisions = index.decide(parsed.draft.title, { kind, availableCategories: new Set(categoryOptionsForKind(kind, options.settings, draft.calendar).map(value => value.value)) });
   const locations = !options.settings.locationAutofill ? [] : inferLocationCandidates(parsed.draft.title, history.filter(entry => entry.kind === kind), draft.date);
-  decisions.location = { options: locations.map(value => ({ value: value.value, count: 1, match: value.score })), selected: locations[0]?.value };
+  decisions.location = { options: locations.map(value => ({ value: value.value, count: 1, match: value.score })), selected: decisions.location.selected };
   const temporal = span("date") || span("time") || span("duration");
   const amount = touched.includes("amount") ? draft.amount : span("amount") ? parsed.draft.amount : baseline.amount;
-  const category = inferCategory(parsed.draft.title, draft.title, kind, options.settings, history, options.now, amount, draft.calendar).value;
+  const category = decisions.category.selected ?? inferCategory(parsed.draft.title, draft.title, kind, options.settings, [], options.now, amount, draft.calendar).value;
   const automatic: Partial<EntryDraft> = {
     kind, category, location: span("place") ? parsed.draft.location : decisions.location.selected,
-    note: parsed.draft.note ?? decisions.note.selected,
+    note: parsed.draft.note ?? baseline.note,
+    tags: parsed.draft.tags ?? baseline.tags,
+    priority: parsed.draft.priority ?? baseline.priority,
+    urgency: parsed.draft.urgency ?? baseline.urgency,
+    status: kind === "task" ? parsed.draft.status ?? baseline.status : undefined,
+    recurrence: parsed.draft.recurrence ?? baseline.recurrence,
+    recurringDays: parsed.draft.recurringDays ?? baseline.recurringDays,
+    reminder: parsed.draft.reminder ?? baseline.reminder,
     date: span("date") ? parsed.draft.date : baseline.date,
     start: temporal ? parsed.draft.start : baseline.start,
     end: temporal ? parsed.draft.end : baseline.end,

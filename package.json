@@ -1,6 +1,6 @@
 {
   "name": "chronoeon-workspace",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "ChronoEon (时元) — a calm, local-first calendar and entries app.",
   "workspaces": [
@@ -26,7 +26,7 @@
     "doctor:windows": "npm install --include=optional --global=false && npm run verify:windows"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "license": "MIT",
   "devDependencies": {

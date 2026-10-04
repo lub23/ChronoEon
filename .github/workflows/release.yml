@@ -41,7 +41,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Set up Rust
@@ -111,7 +111,7 @@ jobs:
             apps/chronoeon/src-tauri/target/release/bundle/deb/*.deb
             apps/chronoeon/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             apps/chronoeon/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
-          if-no-files-found: warn
+          if-no-files-found: error
 
   # The Android package is a separate arm64 APK. Everything it needs — Node,
   # JDK 17, the Android SDK/NDK and perl for the vendored OpenSSL in `git2` — is
@@ -131,7 +131,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Set up JDK 17
@@ -152,6 +152,9 @@ jobs:
 
       - name: Install JavaScript dependencies
         run: npm ci
+
+      - name: Check application before packaging
+        run: npm run check
 
       - name: Install Android bundling dependencies
         run: |

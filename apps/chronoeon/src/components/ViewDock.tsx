@@ -213,7 +213,7 @@ export function ViewDock({
                     <button key={tab} type="button" role="menuitemradio" aria-checked={insightsTab === tab}
                       className={insightsTab === tab ? "is-selected" : ""}
                       onClick={() => { onInsightsTabChange?.(tab); setInsightsOpen(false); }}>
-                      {insightsTab === tab ? <Icon name="check" size={12} /> : <i />}
+                      {insightsTab === tab && <Icon name="check" size={12} />}
                       <Icon name={tab === "bills" ? "coins" : tab === "tasks" ? "clock" : "box"} size={12} />
                       {t(tab === "bills" ? "statsBills" : tab === "tasks" ? "statsTasks" : "items", locale)}
                     </button>

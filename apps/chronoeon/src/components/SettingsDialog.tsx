@@ -2,7 +2,8 @@ import type { useSyncService } from "../sync/useSyncService";
 import { useTouchDevice } from "../hooks/useTouchDevice";
 import { useEffect, useRef, useState } from "react";
 import { billCategoryForValue, titleFor, type CalendarConfig, type ChronoEonSettings, type Item } from "@chronoeon/domain";
-import type { DeletedEntrySummary } from "@chronoeon/storage";
+import { OperationHistory } from "./OperationHistory";
+import type { DeletedEntrySummary, SyncStore } from "@chronoeon/storage";
 import type { AIProviderConfig } from "@chronoeon/domain";
 import type { AICustomHeader, AIProviderPreferences } from "../ai/provider";
 import type { Locale, ThemeMode } from "../domain/entry";
@@ -35,6 +36,7 @@ export interface AppPreferences {
   miniShortcut: string;
   miniShortcutEnabled: boolean;
   lowEndMode: boolean;
+  resizeStep?: 5 | 10;
 }
 
 interface SettingsDialogProps {
@@ -69,11 +71,14 @@ interface SettingsDialogProps {
   onPreferencesChange: (patch: Partial<AppPreferences>) => void;
   onRequestNotifications: () => void;
   onTestNotification: () => void;
+  onOpenArchivedConversations: () => void;
   onExportEntries: () => Promise<void>;
   syncConfig: SyncConfig;
   onSyncConfigChange: (config: SyncConfig) => void;
   syncService: ReturnType<typeof useSyncService>;
   deletedEntries: DeletedEntrySummary[];
+  historyJournal?: SyncStore | null;
+  onHistoryRestored?: () => Promise<void>;
   recycleBusy: string;
   onRestoreDeleted: (id: string) => Promise<void>;
   onClearDeleted: () => Promise<void>;
@@ -147,11 +152,14 @@ export function SettingsDialog({
   onPreferencesChange,
   onRequestNotifications,
   onTestNotification,
+  onOpenArchivedConversations,
   onExportEntries,
   syncConfig,
   onSyncConfigChange,
   syncService,
   deletedEntries,
+  historyJournal,
+  onHistoryRestored,
   recycleBusy,
   onRestoreDeleted,
   onClearDeleted,
@@ -490,6 +498,11 @@ export function SettingsDialog({
                     onChange={(value) => patch((current) => ({ ...current, firstDay: Number(value) as ChronoEonSettings["firstDay"] }))}
                   />
                 </label>
+                <label className="settings-field"><span>{locale === "zh" ? "长按调整时间粒度（本机）" : "Drag time increment (this device)"}</span>
+                  <GlassSelect value={String(preferences.resizeStep ?? 5)} ariaLabel={locale === "zh" ? "调整时间粒度" : "Drag time increment"}
+                    options={[5, 10].map(value => ({ value: String(value), label: `${value} ${locale === "zh" ? "分钟" : "min"}` }))}
+                    onChange={value => onPreferencesChange({ resizeStep: Number(value) as 5 | 10 })} />
+                </label>
                 <label className="settings-field"><span>{t("timeScale", locale)}</span>
                   <GlassSelect
                     value={String(settings.timeScale)}
@@ -630,6 +643,7 @@ export function SettingsDialog({
                 onClearRemoteKey={onClearRemoteKey}
                 onSaveLocalHeaders={onSaveLocalHeaders}
                 onTest={onTestAI}
+                onOpenArchived={onOpenArchivedConversations}
               />
             )}
 
@@ -638,6 +652,7 @@ export function SettingsDialog({
               <div className="settings-card settings-data-card">
                 <div className="settings-data-block"><div className="settings-option-copy"><strong>{t("exportEntries", locale)}</strong><small>{t("entriesCsvDetail", locale)}</small></div><button type="button" className="secondary-button" disabled={transferBusy} onClick={() => void onExportEntries()}><Icon name="download" size={15} />{transferBusy ? t("importExportBusy", locale) : t("exportEntries", locale)}</button></div>
               </div>
+              {historyJournal && onHistoryRestored && <OperationHistory locale={locale} journal={historyJournal} onRestored={onHistoryRestored} />}
               <SectionHeading title={t("recycleBin", locale)} detail={t("recycleBinDetail", locale)} />
               <div className="settings-card recycle-bin">
                 {deletedEntries.length === 0 ? (

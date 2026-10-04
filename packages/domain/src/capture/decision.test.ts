@@ -20,13 +20,14 @@ describe("capture field decision index", () => {
     expect(parseCapture("Coffee 20 yuan Test+Pay", { now, settings: custom, locale: "en" }).draft.payment).toBe("custom-pay");
     expect(parseCapture("Coffee 20 yuan TestttPay", { now, settings: custom, locale: "en" }).draft.payment).toBeUndefined();
   });
-  it("selects the dominant kind rather than the first kind in display order", () => {
+  it("keeps a mixed historical kind distribution for confirmation", () => {
     const index = new CaptureDecisionIndex([
       { kind: "event", title: "Review", category: "alpha", date: "2026-09-01" },
       { kind: "task", title: "Review", category: "beta", date: "2026-09-02" },
       { kind: "task", title: "Review", category: "beta", date: "2026-09-03" },
     ]);
-    expect(index.decide("Review").kind.selected).toBe("task");
+    expect(index.decide("Review").kind.selected).toBeUndefined();
+    expect(index.decide("Review").kind.options[0].value).toBe("task");
   });
   it("keeps a bare purchase quantity out of the amount field", () => {
     expect(parseCapture("buy 2 books", { now, locale: "en", settings }).draft.amount).toBeUndefined();
@@ -52,22 +53,22 @@ describe("capture field decision index", () => {
     const result = parseCapture("九点半到十一点半工作", { now, locale: "zh", settings, history });
     expect(result.draft).toMatchObject({ kind: "event", category: "beta", start: "09:30", end: "11:30" });
     expect(result.decisions.kind.options).toHaveLength(2);
-    expect(result.decisions.category.selected).toBe("beta");
+    expect(result.decisions.category.selected).toBeUndefined();
   });
 
   it("keeps top three locations and notes for alternate picking", () => {
     const index = new CaptureDecisionIndex(history);
-    const decisions = index.decide("工作");
+    const decisions = index.decide("工作", { kind: "event" });
     expect(decisions.location.options.map((option) => option.value)).toEqual(["家里", "办公室"]);
     expect(decisions.note.options.map((option) => option.value)).toEqual(["带工牌"]);
-    expect(decisions.note.selected).toBe("带工牌");
+    expect(decisions.note.selected).toBeUndefined();
   });
 
   it("syncs one new record without a fresh index", () => {
     const index = new CaptureDecisionIndex(history);
     index.sync([...history, { id: "work-4", kind: "event", title: "晚上工作", category: "alpha", location: "办公室", note: "整理周报", date: "2026-09-04" }]);
-    const decisions = index.decide("工作");
-    expect(decisions.category.selected).toBe("beta");
+    const decisions = index.decide("工作", { kind: "event" });
+    expect(decisions.category.selected).toBeUndefined();
     expect(decisions.category.options.map((option) => option.value)).toEqual(["beta", "alpha"]);
   });
 

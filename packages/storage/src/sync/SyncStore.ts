@@ -1,6 +1,8 @@
+import { OperationHistoryStore } from "../history/OperationHistoryStore";
+import { historyTransaction, pruneRecovery } from "../history/transaction";
 import { nextSnapshotAt } from "./snapshotPolicy";
 import { packState, unpackState } from "./stateCodec";
-import { itemImageHashes, createEntryId } from "@chronoeon/domain";
+import { itemImageHashes, createEntryId, sharedSettings, SHARED_SETTINGS_KEYS, type ChronoEonSettings } from "@chronoeon/domain";
 import type { PersistencePort, SqlParam } from "../persistence/PersistencePort";
 import { notifyLocalChange, runDatabaseOperation, subscribeLocalChanges } from "../persistence/coordinator";
 import { ENTITY_TABLES } from "./entitySchema";
@@ -28,6 +30,9 @@ const MAX_LINE_BYTES = 8 * 1024 * 1024;
  * Triggers capture *every* business write atomically, including chat and deletes. */
 export class SyncStore {
   constructor(private readonly db: PersistencePort) {}
+  history(limit = 100, offset = 0) { return new OperationHistoryStore(this.db).list(limit, offset); }
+  restoreHistory(id: string): Promise<void> { return new OperationHistoryStore(this.db).restore(id); }
+  clearHistory(): Promise<void> { return new OperationHistoryStore(this.db).clear(); }
   private run<T>(work: () => Promise<T>): Promise<T> { return runDatabaseOperation(this.db, work); }
   subscribe(listener: () => void): () => void { return subscribeLocalChanges(this.db, listener); }
   private async meta<T>(key: string, initial: T): Promise<T> {
@@ -63,6 +68,7 @@ export class SyncStore {
     return rows[0] ? unpackState(JSON.parse(rows[0].state_json)) : undefined;
   }
   private async saveState(state: EntityState): Promise<void> {
+    if (state.entity === "settings") state = { ...state, fields: sharedSyncFields(state.fields) };
     await this.db.execute("INSERT INTO sync_entities(entity,id,state_json) VALUES (?,?,?) ON CONFLICT(entity,id) DO UPDATE SET state_json=excluded.state_json", [state.entity, state.id, JSON.stringify(packState(state))]);
     await this.db.execute("DELETE FROM sync_links WHERE entity=? AND id=?", [state.entity,state.id]);
     const data = materialize(state).data;
@@ -133,6 +139,13 @@ export class SyncStore {
         group = []; bytes = 0;
       };
       for (const row of rows) {
+        const operation = JSON.parse(row.operation_json) as SyncOperation;
+        if (operation.entity === "settings") {
+          operation.data = sharedSyncFields(operation.data);
+          operation.base = sharedSyncFields(operation.base);
+          validateOperation(operation);
+          row.operation_json = JSON.stringify(operation);
+        }
         const size = new TextEncoder().encode(row.operation_json).length + 1;
         if (size > MAX_LINE_BYTES) throw new Error("SYNC_ENTITY_TOO_LARGE");
         if (group.length && (bytes + size > MAX_BATCH_BYTES || group.length >= 1000)) await write();
@@ -147,9 +160,11 @@ export class SyncStore {
       await this.flushDirect();
       const lines: string[] = []; const frontier: Clock = {};
       for await (const row of this.stateRows()) {
-        const clock = (JSON.parse(row.state_json) as { clock: Clock }).clock;
+        const state = unpackState(JSON.parse(row.state_json));
+        const clock = state.clock;
         for (const [device, seq] of Object.entries(clock)) frontier[device] = Math.max(frontier[device] ?? 0, seq);
-        lines.push(row.state_json);
+        if (state.entity === "settings") state.fields = sharedSyncFields(state.fields);
+        lines.push(JSON.stringify(packState(state)));
       }
       const header = { format: "chronoeon.snapshot", version: 1, datasetId, createdAt: now.toISOString(), count: lines.length, frontier };
       return [JSON.stringify(header), ...lines].join("\n") + "\n";
@@ -264,11 +279,6 @@ export class SyncStore {
       if (!pending.some((item)=>item.path===document.path)) {
         pending.push({path:document.path,hash:document.hash,createdAt:header.createdAt});
         await this.putMeta(`pendingSnapshots:${backend}`,pending);
-        // The recycle bin expires by identity, not by comparing this device's
-        // delete timestamps against a snapshot's wall clock: the rows that
-        // exist at this cut are exactly the rows the snapshot covers.
-        const covered = await this.db.select<{ id: string }>("SELECT id FROM deleted_entries");
-        await this.putMeta(`snapshotCoverage:${backend}`, { path: document.path, ids: covered.map((row) => row.id) });
       }
     }));
   }
@@ -281,20 +291,7 @@ export class SyncStore {
         await this.db.execute("INSERT INTO sync_documents(path,hash) VALUES (?,?) ON CONFLICT(path) DO UPDATE SET hash=excluded.hash", [doc.path, doc.hash]);
         await this.db.execute("DELETE FROM sync_batches WHERE path=?", [doc.path]);
       }
-      const previous = await this.meta<{ path: string; createdAt: string } | null>("snapshot:" + backend, null);
-      if (previous?.path !== snapshot.path) {
-        // Only an acknowledged snapshot expires recovery, and only the rows its
-        // own cut covered — a delete made while the upload was in flight is
-        // never in that set, and no second clock can move the boundary.
-        const coverage = await this.meta<{ path: string; ids: string[] } | null>(`snapshotCoverage:${backend}`, null);
-        if (coverage?.path === snapshot.path) {
-          for (let start = 0; start < coverage.ids.length; start += 500) {
-            const chunk = coverage.ids.slice(start, start + 500);
-            await this.db.execute(`DELETE FROM deleted_entries WHERE id IN (${chunk.map(() => "?").join(",")})`, chunk);
-          }
-        }
-        await this.putMeta(`snapshotCoverage:${backend}`, null);
-      }
+      await pruneRecovery(this.db, now);
       await this.putMeta("snapshot:" + backend, snapshot);
       await this.putMeta("lastBackend", backend);
       await this.putMeta(`pendingSnapshots:${backend}`, []);
@@ -337,7 +334,7 @@ export class SyncStore {
   }
   conflicts(): Promise<SyncConflict[]> { return this.run(() => this.conflictsDirect()); }
   resolve(entity: EntityKind, id: string, field: string, value: Json, expectedClock?: Clock): Promise<void> {
-    return this.run(() => this.db.transaction(async () => {
+    return this.run(() => historyTransaction(this.db, async () => {
       await this.flushDirect();
       const state = await this.state(entity, id);
       if (!state?.fields[field] || (expectedClock && !equal(expectedClock,state.clock))) throw new Error("SYNC_CONFLICT_CHANGED");
@@ -347,8 +344,8 @@ export class SyncStore {
     }));
   }
   setSettings(settings: Record<string, unknown>): Promise<void> {
-    return this.run(() => this.db.transaction(async () => {
-      const data = flattenSettings(settings);
+    return this.run(() => historyTransaction(this.db, async () => {
+      const data = flattenSettings(sharedSettingsPayload(settings));
       const rows = await this.db.select<{ payload_json: string }>("SELECT payload_json FROM sync_settings WHERE id=?", [SETTINGS_ID]);
       if (rows[0] && equal(JSON.parse(rows[0].payload_json), data)) return;
       await this.db.execute("INSERT INTO sync_settings(id,payload_json) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json", [SETTINGS_ID, stableJson(data)]);
@@ -358,7 +355,7 @@ export class SyncStore {
   getSettings(): Promise<Record<string, unknown> | null> {
     return this.run(async () => {
       const rows = await this.db.select<{ payload_json: string }>("SELECT payload_json FROM sync_settings WHERE id=?", [SETTINGS_ID]);
-      return rows[0] ? unflattenSettings(JSON.parse(rows[0].payload_json)) : null;
+      return rows[0] ? sharedSettingsPayload(unflattenSettings(JSON.parse(rows[0].payload_json))) : null;
     });
   }
   attachmentImports(): Promise<Array<{ attachment_id: string; source_path: string }>> {
@@ -411,7 +408,8 @@ export class SyncStore {
    * never point at bytes that were discarded by transport/compaction. */
   attachmentHashes(): Promise<string[]> {
     return this.run(async () => {
-      const hashes = new Set<string>();
+      await pruneRecovery(this.db);
+      const hashes = new Set(await new OperationHistoryStore(this.db).attachmentHashesDirect());
       for await (const row of this.stateRows("WHERE entity IN ('attachment','asset')")) {
         const state = unpackState(JSON.parse(row.state_json));
         if (!(await this.reachable(state))) continue;
@@ -435,6 +433,18 @@ export class SyncStore {
       return [...hashes].sort();
     });
   }
+}
+function sharedSyncFields<T>(fields: Record<string, T>): Record<string, T> {
+  return Object.fromEntries(Object.entries(fields).filter(([path]) => path === "$exists" || path === "/format" || path === "/version"
+    || SHARED_SETTINGS_KEYS.some(key => path === `/settings/${key}` || path.startsWith(`/settings/${key}/`))));
+}
+function sharedSettingsPayload(value: Record<string, unknown>): Record<string, unknown> {
+  const settings = value.settings;
+  return {
+    ...(value.format !== undefined ? { format: value.format } : {}),
+    ...(value.version !== undefined ? { version: value.version } : {}),
+    settings: sharedSettings(settings && typeof settings === "object" && !Array.isArray(settings) ? settings as Partial<ChronoEonSettings> : {}),
+  };
 }
 function flattenSettings(value: Record<string, unknown>, prefix = "", result: EntityData = {}): EntityData {
   for (const [key, child] of Object.entries(value)) {

@@ -26,6 +26,7 @@ interface AISettingsPanelProps {
   onClearRemoteKey: () => Promise<void>;
   onSaveLocalHeaders: (headers: AICustomHeader[]) => Promise<AICustomHeader[]>;
   onTest: (provider: AIProviderConfig) => Promise<void>;
+  onOpenArchived: () => void;
 }
 
 /**
@@ -132,7 +133,7 @@ function AIEndpointFields({ locale, choice, onChange, onTest }: {
 export function AISettingsPanel({
   locale, preferences, localKeyStored, remoteKeyStored, onChange,
   localHeaders, onSaveLocalKey, onClearLocalKey, onSaveRemoteKey, onClearRemoteKey,
-  onSaveLocalHeaders, onTest,
+  onSaveLocalHeaders, onTest, onOpenArchived,
 }: AISettingsPanelProps) {
   const [keyDrafts, setKeyDrafts] = useState({ remote: "", local: "" });
   const [headerDrafts, setHeaderDrafts] = useState<AICustomHeader[]>(localHeaders);
@@ -262,6 +263,10 @@ export function AISettingsPanel({
 
       <header className="settings-section-heading settings-subheading"><h3>{t("quickNote", locale)}</h3><p>{t("aiCaptureDetail", locale)}</p></header>
       <div className="settings-card ai-settings-card">
+        <div className="settings-option">
+          <span className="settings-option-copy"><strong>{t("aiChatArchived", locale)}</strong><small>{locale === "zh" ? "查看或恢复已归档的对话。" : "Review or restore archived conversations."}</small></span>
+          <button type="button" className="secondary-button" onClick={onOpenArchived}><Icon name="folder" size={14} />{t("aiChatArchived", locale)}</button>
+        </div>
         <div className="settings-option">
           <span className="settings-option-copy">
             <strong>{t("aiCaptureMode", locale)}</strong>

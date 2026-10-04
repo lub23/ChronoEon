@@ -6,11 +6,18 @@ import {
   BUILTIN_CURRENCIES,
   TIMED_REMINDERS,
   categoryOptionsForKind,
+  billDirectionForCategory,
   defaultCategoryForKind,
   defaultPaymentMethodForCalendar,
   entriesInRange,
   paymentMethodsForCalendar,
   parseCapture,
+  parseAssetCapture,
+  isAssetCapture,
+  completeCapture,
+  type CaptureIssue,
+  type Item,
+  type ItemDraft,
   parseClockMinutes,
   splitCaptureItems,
   statsPresetRange,
@@ -21,6 +28,7 @@ import {
   type EntryDraft,
   type EntryKind,
   type EntryStatus,
+  type CaptureHistoryItem,
   type CaptureFieldDecisions,
   type Recurrence,
   type Reminder,
@@ -48,6 +56,7 @@ import { readCurrentPlace } from "../platform/location";
 import { askPresets, askPresetToolPlan, type AskPreset, type AskPresetToolPlan } from "../ai/askPresets";
 import { TaskStatusGlyph } from "./ItemGlyph";
 import { openImagePreview } from "./photoPreviewBus";
+import { FieldSuggestions, locationFieldCandidates } from "./FieldSuggestions";
 
 interface ChatDialogProps {
   locale: Locale;
@@ -56,7 +65,11 @@ interface ChatDialogProps {
   conversations: AiConversationApi | null;
   settings: ChronoEonSettings;
   availableTags?: string[];
+  availableAssets?: Item[];
+  onOpenAssetCapture?: (seed: Partial<ItemDraft>, itemId?: string) => void;
+  onOpenLinkedCapture?: (draft: EntryDraft, assetId: string) => void;
   initialMode?: ChatMode;
+  showArchivedOnly?: boolean;
   refreshVersion?: number;
   onOpenEntry: (entryId: string) => void;
   onConfirmCapture: (drafts: EntryDraft[]) => Promise<boolean>;
@@ -103,7 +116,28 @@ interface CaptureDraftItem extends EditableCapture {
   key: string;
   draft: EntryDraft;
   warnings: AIValidationIssue[];
+  parseIssues?: CaptureIssue[];
+  link?: string;
   decisions?: CaptureFieldDecisions;
+}
+
+function CaptureLocationInput({ value, history, date, locale, locating, onChange, onLocate }: {
+  value?: string; history: CaptureHistoryItem[]; date: string; locale: Locale; locating: boolean;
+  onChange: (value: string | undefined) => void; onLocate: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const suggestions = useMemo(() => locationFieldCandidates("", value, history, date), [history, value, date]);
+  return (
+    <span className="capture-review-location-wrap">
+      <input className="capture-review-location" ref={inputRef} value={value ?? ""} placeholder={t("locationPlaceholder", locale)}
+        aria-label={t("location", locale)} onChange={event => onChange(event.target.value || undefined)} />
+      {Boolean(value) && <button type="button" className="capture-review-location-clear" onClick={() => onChange(undefined)}
+        aria-label={t("clearLocation", locale)} title={t("clearLocation", locale)}><Icon name="close" size={11} /></button>}
+      <button type="button" className="capture-review-location-pin" onClick={onLocate} disabled={locating}
+        aria-label={t("useDeviceLocation", locale)} title={t("useDeviceLocation", locale)}><Icon name="map-pin" size={12} /></button>
+      <FieldSuggestions inputRef={inputRef} locale={locale} suggestions={suggestions} onSelect={onChange} />
+    </span>
+  );
 }
 
 interface CaptureReview {
@@ -117,6 +151,11 @@ interface CaptureReview {
   countdown: number;
 }
 
+const CAPTURE_FIELD_NAMES: Record<string, [string, string]> = {
+  location: ["地点", "Location"], category: ["分类", "Category"], amount: ["金额", "Amount"],
+  priority: ["重要性", "Priority"], urgency: ["紧急性", "Urgency"], status: ["状态", "Status"],
+  recurrence: ["重复", "Repeat"], reminder: ["提醒", "Reminder"], link: ["关联", "Link"],
+};
 const CAPTURE_AUTO_SAVE_MS = 10_000;
 const CAPTURE_KINDS: EntryKind[] = ["task", "event", "bill", "idea"];
 /** Inline photos a chat turn may carry; keeps one request inside provider limits. */
@@ -226,16 +265,18 @@ function offlineCapture(
   entries: readonly Entry[],
   decisionIndex: CaptureDecisionIndex,
 ): CaptureDraftItem[] {
-  decisionIndex.sync(captureHistory(entries));
+  const history = captureHistory(entries);
+  decisionIndex.sync(history);
   return splitCaptureItems(raw).map((item, index) => {
     const parsed = parseCapture(item, {
       now: new Date(),
       locale,
       settings,
-      history: captureHistory(entries),
+      history,
       decisionIndex,
     });
-    return { key: `offline-${index}`, draft: parsed.draft, warnings: [], decisions: parsed.decisions };
+    return { key: `offline-${index}`, draft: parsed.draft, baseline: parsed.draft, touched: parsed.explicitFields,
+      warnings: [], decisions: parsed.decisions, parseIssues: parsed.issues, link: parsed.link };
   });
 }
 
@@ -252,12 +293,22 @@ function normalizeCapturedDraft(draft: EntryDraft, timeScale: number): EntryDraf
 }
 
 export function ChatDialog({
-  locale, entries, aiPreferences, conversations, settings, availableTags = [], initialMode = "capture",
-  refreshVersion = 0, onOpenEntry, onConfirmCapture, onOpenManualCapture, onOpenSettings, onClose,
+  locale, entries, aiPreferences, conversations, settings, availableTags = [], availableAssets = [], initialMode = "capture", showArchivedOnly = false,
+  refreshVersion = 0, onOpenEntry, onConfirmCapture, onOpenManualCapture, onOpenAssetCapture, onOpenLinkedCapture, onOpenSettings, onClose,
 }: ChatDialogProps) {
   const [list, setList] = useState<AiConversation[]>([]);
   const [messages, setMessages] = useState<AiMessageRecord[]>([]);
   const [draft, setDraft] = useState("");
+  const captureCompletions = useMemo(() => completeCapture(draft, {
+    categories: isAssetCapture(draft)
+      ? (settings.calendars.find(calendar => calendar.id === settings.defaultCalendarID)?.itemCategories ?? []).map(value => ({ value: value.id, label: value.name }))
+      : [...new Map(CAPTURE_KINDS.flatMap(kind => categoryOptionsForKind(kind, settings)).map(value => [value.value, { value: value.value, label: value.label }])).values()],
+    locations: [...new Set(entries.filter(entry => !entry.calendar || entry.calendar === settings.defaultCalendarID).flatMap(entry => entry.location ? [entry.location] : []))],
+    tags: availableTags,
+    links: isAssetCapture(draft)
+      ? entries.filter(entry => entry.kind === "bill" && billDirectionForCategory(entry.category, settings, entry.calendar) === "expense" && (!entry.calendar || entry.calendar === settings.defaultCalendarID)).map(entry => ({ value: entry.id, label: `${entry.title} · ${entry.date}` }))
+      : availableAssets.filter(item => !item.purchaseEntryId && item.acquisition === "purchase" && item.calendarId === settings.defaultCalendarID).map(item => ({ value: item.id, label: item.name })),
+  }), [draft, settings, entries, availableTags, availableAssets]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conversationQuery, setConversationQuery] = useState("");
@@ -270,6 +321,7 @@ export function ChatDialog({
   const [narrowRail, setNarrowRail] = useState(() => mediaMatches(RAIL_OVERLAY_QUERY));
   const [railOpen, setRailOpen] = useState(() => !mediaMatches(RAIL_OVERLAY_QUERY));
   const [mode, setMode] = useState<ChatMode>(initialMode);
+  const [archivedOnly, setArchivedOnly] = useState(showArchivedOnly);
   // Each composer keeps its own open conversation so switching tabs never has
   // to create an empty history record just to have somewhere to type.
   const [activeByMode, setActiveByMode] = useState<Record<ChatMode, string | null>>({ capture: null, ask: null });
@@ -373,7 +425,7 @@ export function ChatDialog({
 
   const reloadList = useCallback(async () => {
     if (!conversations) return;
-    setList(await conversations.listConversations());
+    setList(await conversations.listConversations({ includeArchived: true }));
   }, [conversations]);
 
   useEffect(() => {
@@ -554,7 +606,7 @@ export function ChatDialog({
     try {
       const photoRefs = photos.map((photo) => photo.reference);
       const imageParts: AIChatContentPart[] = [];
-      for (const reference of photoRefs) {
+      for (const reference of mode === "ask" ? photoRefs : []) {
         const dataUrl = await attachmentModelImage(reference);
         if (dataUrl) imageParts.push({ type: "image_url", image_url: { url: dataUrl } });
       }
@@ -578,6 +630,25 @@ export function ChatDialog({
       const next = [...history, userMessage];
       await loadMessages(conversationId);
       if (mode === "capture") {
+        const parts = splitCaptureItems(text);
+        if (parts.length > 1 && parts.some(isAssetCapture)) {
+          setDraft(text);
+          setError(locale === "zh" ? "物品需要单独在编辑器确认，请一次录入一个物品。原文已保留。" : "Confirm items individually in the editor. Enter one item at a time; your original text is preserved.");
+          return;
+        }
+        if (isAssetCapture(text)) {
+          const parsed = parseAssetCapture(text, { now: new Date(), locale, settings, history: captureHistory(entries) });
+          const linked = parsed.link ? entries.filter(entry => entry.kind === "bill" && billDirectionForCategory(entry.category, settings, entry.calendar) === "expense" && (entry.id === parsed.link || entry.title === parsed.link)
+            && (!entry.calendar || entry.calendar === settings.defaultCalendarID)) : [];
+          if (!onOpenAssetCapture || parsed.issues.length || (parsed.link && (linked.length !== 1 || parsed.draft.acquisition !== "purchase"))) {
+            setDraft(text);
+            setError(locale === "zh" ? "请确认物品字段；使用 & 从候选中选择关联账目。" : "Confirm the item fields; use & to select a linked bill.");
+            return;
+          }
+          onOpenAssetCapture({ ...parsed.draft, images: photoRefs, purchaseEntryId: linked[0]?.id });
+          succeeded = true;
+          return;
+        }
         captureDecisionIndex.current ??= new CaptureDecisionIndex();
         const drafts = withPhotos(offlineCapture(text, settings, locale, entries, captureDecisionIndex.current));
         const assistant = await conversations.appendMessage(conversationId, {
@@ -590,7 +661,7 @@ export function ChatDialog({
           conversationId,
           source: text,
           drafts,
-          edited: false,
+          edited: drafts.some(item => item.link || item.parseIssues?.length || Object.values(item.decisions ?? {}).some(value => value && typeof value === "object" && "options" in value && value.options.length > 0 && !value.selected)),
           saved: false,
           countdown: CAPTURE_AUTO_SAVE_MS / 1000,
         };
@@ -693,6 +764,7 @@ export function ChatDialog({
       await reloadList();
     } catch (sendError) {
       console.warn("Chat send failed", sendError);
+      if (mode === "capture") setDraft(text);
       const message = sendError instanceof Error ? sendError.message : String(sendError);
       if (!controller.signal.aborted) setError(t(/tool.?call|unsupported.*tool/i.test(message) ? "aiToolCallsUnsupported" : "aiRequestFailed", locale));
     } finally {
@@ -700,7 +772,7 @@ export function ChatDialog({
       if (succeeded) setPhotos([]);
     }
   }, [activeId, aiPreferences, busy, contextToday, conversationTitle, conversations, draft, entries, locale, messages,
-    mode, modelConfigured, photos, reloadList, selectedContextEntries, settings, startConversation]);
+    mode, modelConfigured, photos, reloadList, selectedContextEntries, settings, startConversation, onOpenAssetCapture]);
 
   const toggleContextEntry = (id: string) => {
     setSelectedContextIds((current) => current.includes(id)
@@ -719,7 +791,7 @@ export function ChatDialog({
   }, [activeId, conversations, mode, reloadList]);
 
   const saveCaptureReview = useCallback(async (review: CaptureReview) => {
-    if (captureSavingRef.current || review.saved) return;
+    if (captureSavingRef.current || review.saved || review.drafts.some(item => item.link || item.parseIssues?.length)) return;
     captureSavingRef.current = true;
     setCaptureSaving(true);
     setError(null);
@@ -740,7 +812,7 @@ export function ChatDialog({
     }
   }, [conversations, locale, onConfirmCapture]);
 
-  const pendingInvalid = Boolean(pendingCapture?.drafts.some((item) =>
+  const pendingInvalid = Boolean(pendingCapture?.drafts.some((item) => item.link || item.parseIssues?.length ||
     validateAIStructuredDraft(item.draft).some((issue) => issue.severity === "error")));
   // A review belongs to its conversation until it is saved or dismissed.
   const activeReview = pendingCapture && pendingCapture.conversationId === activeId ? pendingCapture : null;
@@ -776,7 +848,8 @@ export function ChatDialog({
       ...current,
       edited: true,
       countdown: 0,
-      drafts: current.drafts.map((item) => item.key === key ? refineCapture(item, patch, { now: new Date(), settings, locale, history: captureHistory(entries) }) : item),
+      drafts: current.drafts.map((item) => item.key === key ? { ...refineCapture(item, patch, { now: new Date(), settings, locale, history: captureHistory(entries) }),
+        parseIssues: item.parseIssues?.filter(issue => !(issue.field in patch)) } : item),
     } : current);
   };
 
@@ -922,7 +995,8 @@ export function ChatDialog({
   const tokenTotalsUsed = tokenTotals.prompt > 0 || tokenTotals.completion > 0;
   const filteredConversations = list.filter((conversation) => {
     const query = conversationQuery.trim().toLocaleLowerCase();
-    return !query || `${conversation.title ?? ""} ${conversation.model ?? ""}`.toLocaleLowerCase().includes(query);
+    return (archivedOnly ? Boolean(conversation.archivedAt) : !conversation.archivedAt)
+      && (!query || `${conversation.title ?? ""} ${conversation.model ?? ""}`.toLocaleLowerCase().includes(query));
   });
   // The textarea itself must stay usable while empty; only the send button
   // waits for content. Disabling the field on empty text made the first
@@ -1042,11 +1116,14 @@ export function ChatDialog({
                           </strong>
                           <small>{messageTime(conversation.updatedAt)}</small>
                         </button>
-                        <button type="button" className="icon-button subtle" disabled={busy && conversation.id === activeId} onClick={() => { void archiveFor(conversation.id); }} title={t("aiChatArchive", locale)} aria-label={t("aiChatArchive", locale)}><Icon name="folder" size={13} /></button>
-                        <button type="button" className="icon-button subtle" disabled={busy && conversation.id === activeId} onClick={() => { void remove(conversation.id); }} title={t("delete", locale)} aria-label={t("delete", locale)}><Icon name="trash" size={13} /></button>
+                        <button type="button" className="icon-button subtle" disabled={busy && conversation.id === activeId} onClick={async () => {
+                          if (archivedOnly) await conversations.unarchiveConversation(conversation.id);
+                          else await archiveFor(conversation.id);
+                          await reloadList();
+                        }} title={t(archivedOnly ? "aiChatRestore" : "aiChatArchive", locale)} aria-label={t(archivedOnly ? "aiChatRestore" : "aiChatArchive", locale)}><Icon name={archivedOnly ? "arrow-right" : "folder"} size={13} /></button>
                       </div>
                     ))}
-                    {!filteredConversations.length && <p className="chat-empty">{t("aiChatEmpty", locale)}</p>}
+                    {!filteredConversations.length && <p className="chat-empty">{t(archivedOnly ? "aiChatArchived" : "aiChatEmpty", locale)}</p>}
                   </div>
                   <div className="chat-rail-actions">
                     <button type="button" className="chat-rail-action" disabled={busy} onClick={startNew}>
@@ -1054,6 +1131,9 @@ export function ChatDialog({
                     </button>
                     <button type="button" className="chat-rail-action" onClick={onOpenSettings}>
                       <Icon name="settings" size={15} /><span>{t("aiChatConfigure", locale)}</span>
+                    </button>
+                    <button type="button" className={archivedOnly ? "chat-rail-action is-active" : "chat-rail-action"} onClick={() => setArchivedOnly(current => !current)}>
+                      <Icon name="folder" size={15} /><span>{t("aiChatArchived", locale)}</span>
                     </button>
                   </div>
                 </>
@@ -1183,6 +1263,18 @@ export function ChatDialog({
                       );
                       return (
                         <div className="capture-review-card" key={item.key}>
+                          {Boolean(item.parseIssues?.length) && <div className="capture-field-options" role="status">
+                            <span>{locale === "zh" ? "请确认：" : "Confirm: "}{item.parseIssues!.map(issue => `${CAPTURE_FIELD_NAMES[issue.field]?.[locale === "zh" ? 0 : 1] ?? issue.field}: ${issue.value}`).join(" · ")}</span>
+                            <button type="button" onClick={() => setPendingCapture(current => current ? { ...current, edited: true, drafts: current.drafts.map(value => value.key === item.key ? { ...value, parseIssues: [] } : value) } : current)}>
+                              {locale === "zh" ? "使用当前字段" : "Keep current fields"}
+                            </button>
+                          </div>}
+                          {item.link && <div className="capture-field-options" role="group" aria-label={locale === "zh" ? "关联物品" : "Link item"}>
+                            <span>{locale === "zh" ? "选择物品后在编辑器确认绑定：" : "Select an item, then confirm the link in the editor: "}{item.link}</span>
+                            {item.draft.kind === "bill" && billDirectionForCategory(item.draft.category, settings, item.draft.calendar) === "expense" && availableAssets.filter(asset => !asset.purchaseEntryId && asset.acquisition === "purchase" && asset.calendarId === item.draft.calendar && (asset.id === item.link || asset.name.toLocaleLowerCase().includes(item.link!.toLocaleLowerCase()))).slice(0, 5).map(asset =>
+                              <button key={asset.id} type="button" disabled={!onOpenLinkedCapture} onClick={() => { onOpenLinkedCapture?.(item.draft, asset.id); removeCaptureDraft(activeReview, item.key); }}>{asset.name}</button>)}
+                            <button type="button" onClick={() => setPendingCapture(current => current ? { ...current, edited: true, drafts: current.drafts.map(value => value.key === item.key ? { ...value, link: undefined } : value) } : current)}>{locale === "zh" ? "不关联" : "No link"}</button>
+                          </div>}
                           {/* Symmetric to the item number: one parsed item can be
                               dropped on its own, as long as nothing is written yet. */}
                           {!activeReview.saved && (
@@ -1245,43 +1337,26 @@ export function ChatDialog({
                               <GlassSelect value={item.draft.kind} ariaLabel={t("type", locale)} options={CAPTURE_KINDS.map((kind) => ({ value: kind, label: t(kind, locale) }))} onChange={(value) => changeCaptureKind(item, value as EntryKind)} />
                             </span>
                             {item.draft.kind !== "idea" && (
-                              <span className="capture-review-location-wrap">
-                                <input
-                                  className="capture-review-location"
-                                  value={item.draft.location ?? ""}
-                                  placeholder={t("locationPlaceholder", locale)}
-                                  aria-label={t("location", locale)}
-                                  onChange={(event) => patchCaptureDraft(item.key, { location: event.target.value || undefined })}
-                                />
-                                {Boolean(item.draft.location) && (
-                                  <button
-                                    type="button"
-                                    className="capture-review-location-clear"
-                                    onClick={() => patchCaptureDraft(item.key, { location: undefined })}
-                                    aria-label={t("clearLocation", locale)}
-                                    title={t("clearLocation", locale)}
-                                  >
-                                    <Icon name="close" size={11} />
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  className="capture-review-location-pin"
-                                  onClick={() => void locateDraft(item.key)}
-                                  disabled={locating === item.key}
-                                  aria-label={t("useDeviceLocation", locale)}
-                                  title={t("useDeviceLocation", locale)}
-                                >
-                                  <Icon name="map-pin" size={12} />
-                                </button>
-                              </span>
+                              <CaptureLocationInput
+                                value={item.draft.location}
+                                history={captureHistory(entries)}
+                                date={item.draft.date}
+                                locale={locale}
+                                locating={locating === item.key}
+                                onChange={value => patchCaptureDraft(item.key, { location: value })}
+                                onLocate={() => void locateDraft(item.key)}
+                              />
                             )}
                             <label className="capture-review-category">
                               <GlassSelect value={item.draft.category} ariaLabel={t("category", locale)} options={categoryOptions.map((option) => ({ value: option.value, label: option.label, color: option.color, group: option.group }))} onChange={(value) => patchCaptureDraft(item.key, { category: value })} />
                             </label>
                           </div>
 
-                          {fieldOptions && fieldOptions.location.options.length > 1 && (
+                          {fieldOptions && !fieldOptions.category.selected && fieldOptions.category.options.length > 0 && <div className="capture-field-options" role="group" aria-label={t("category", locale)}>
+                            <small>{locale === "zh" ? "历史分类候选" : "Category suggestions from history"}</small>
+                            {fieldOptions.category.options.map(option => <button type="button" key={option.value} onClick={() => patchCaptureDraft(item.key, { category: option.value })}>{categoryOptions.find(value => value.value === option.value)?.label ?? option.value}</button>)}
+                          </div>}
+                          {fieldOptions && fieldOptions.location.options.length > 0 && (
                             <div className="capture-field-options" role="group" aria-label={t("captureFieldSuggestions", locale)}>
                               <small>{t("captureFieldSuggestions", locale)}</small>
                               {fieldOptions.location.options.map((option) => (
@@ -1417,7 +1492,7 @@ export function ChatDialog({
                                 <label>
                                   <span>{t("note", locale)}</span>
                                   <textarea rows={3} value={item.draft.note ?? ""} onChange={(event) => patchCaptureDraft(item.key, { note: event.target.value })} />
-                                  {fieldOptions && fieldOptions.note.options.length > 1 && (
+                                  {fieldOptions && fieldOptions.note.options.length > 0 && (
                                     <div className="capture-field-options capture-field-options--note" role="group" aria-label={t("captureFieldSuggestions", locale)}>
                                       {fieldOptions.note.options.map((option) => (
                                         <button
@@ -1636,6 +1711,15 @@ export function ChatDialog({
                 )}
                 {mode === "capture" && photos.length > 0 && <small>{t("chatPhotoParseHint", locale)}</small>}
               </div>
+                {mode === "capture" && captureCompletions.length > 0 && <div className="capture-field-options capture-completions is-floating" role="group" aria-label={locale === "zh" ? "快捷补全" : "Quick completions"}>
+                {captureCompletions.map(option => <button type="button" key={option.value} onClick={() => {
+                  setDraft(value => value.replace(/(?:^|\s)[/@#%&][^\s]*$/, match => `${/^\s/.test(match) ? " " : ""}${option.value} `));
+                  composerRef.current?.focus();
+                }}>{option.label}</button>)}
+              </div>}
+              {mode === "capture" && <details className="capture-syntax-help"><summary>{locale === "zh" ? "快捷语法" : "Quick syntax"}</summary><small>
+                {locale === "zh" ? '/task 待办 · /event 日程 · /bill 账目 · /idea 灵感 · /asset 物品；@地点 #标签 %分类 !high 重要 !!high 紧急 &关联；多条内容用句号或分号分隔。' : '/task · /event · /bill · /idea · /asset; @place #tag %category !high priority !!high urgency &link. Separate records with periods or semicolons.'}
+              </small></details>}
               <div className="chat-composer">
                 <textarea
                   ref={composerRef}
