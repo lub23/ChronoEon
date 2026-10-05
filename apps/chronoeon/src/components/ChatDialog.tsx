@@ -91,7 +91,7 @@ function mediaMatches(query: string): boolean {
 const MODE_ICONS = { capture: "edit", ask: "sparkle" } as const;
 const MODE_TITLE_PREFIX = /^(?:随心记|随心问|Capture|Ask)\s+/;
 
-/** Measure the caret in the textarea's own coordinate space, including wrapped lines. */
+/** Measure the caret once for a new popup, choosing the roomier side on mobile. */
 function captureCaretAnchor(node: HTMLTextAreaElement) {
   const style = getComputedStyle(node);
   const context = document.createElement("canvas").getContext("2d");
@@ -100,14 +100,27 @@ function captureCaretAnchor(node: HTMLTextAreaElement) {
   const beforeCaret = node.value.slice(0, node.selectionStart ?? node.value.length);
   const lines = beforeCaret.split("\n");
   const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.5;
-  const left = node.offsetLeft + Number.parseFloat(style.paddingLeft || "0")
+  const nodeRect = node.getBoundingClientRect();
+  const hostRect = (node.offsetParent as HTMLElement | null)?.getBoundingClientRect() ?? nodeRect;
+  const caretLeftViewport = nodeRect.left + Number.parseFloat(style.paddingLeft || "0")
     + (context?.measureText(lines.at(-1) ?? "").width ?? 0) - node.scrollLeft;
-  const top = node.offsetTop + Number.parseFloat(style.paddingTop || "0")
-    + (lines.length - 1) * lineHeight + lineHeight + 4 - node.scrollTop;
-  const parent = node.offsetParent as HTMLElement | null;
+  const caretTopViewport = nodeRect.top + Number.parseFloat(style.paddingTop || "0")
+    + (lines.length - 1) * lineHeight - node.scrollTop;
+  const caretBottomViewport = caretTopViewport + lineHeight;
+  const viewport = window.visualViewport;
+  const viewportTop = viewport?.offsetTop ?? 0;
+  const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
+  const width = Math.min(260, window.innerWidth - 24);
+  const leftViewport = Math.max(12, Math.min(caretLeftViewport, window.innerWidth - width - 12));
+  const below = viewportBottom - caretBottomViewport - 20;
+  const above = caretTopViewport - viewportTop - 20;
+  const openBelow = below >= 167 || below >= above;
+  const maxHeight = Math.max(96, Math.min(167, openBelow ? below : above));
+  const topViewport = openBelow ? caretBottomViewport + 4 : caretTopViewport - 4 - maxHeight;
   return {
-    left: Math.max(12, Math.min(left, (parent?.clientWidth ?? node.offsetWidth) - 180)),
-    top: Math.max(0, Math.min(top, (parent?.clientHeight ?? node.offsetHeight) - 48)),
+    left: leftViewport - hostRect.left,
+    top: topViewport - hostRect.top,
+    maxHeight,
   };
 }
 
@@ -329,8 +342,8 @@ export function ChatDialog({
       ? entries.filter(entry => entry.kind === "bill" && billDirectionForCategory(entry.category, settings, entry.calendar) === "expense" && (!entry.calendar || entry.calendar === settings.defaultCalendarID)).map(entry => ({ value: entry.id, label: `${entry.title} · ${entry.date}` }))
       : availableAssets.filter(item => !item.purchaseEntryId && item.acquisition === "purchase" && item.calendarId === settings.defaultCalendarID).map(item => ({ value: item.id, label: item.name })),
   }), [draft, settings, entries, availableTags, availableAssets]);
-  const [captureAnchor, setCaptureAnchor] = useState({ left: 12, top: 44 });
-  const updateCaptureAnchor = useCallback(() => {
+  const [captureAnchor, setCaptureAnchor] = useState({ left: 12, top: 44, maxHeight: 167 });
+  const openCaptureCandidates = useCallback(() => {
     if (composerRef.current) setCaptureAnchor(captureCaretAnchor(composerRef.current));
   }, []);
   const chooseCaptureCompletion = useCallback((value: string) => {
@@ -1729,8 +1742,6 @@ export function ChatDialog({
                 )}
                 {mode === "capture" && photos.length > 0 && <small>{t("chatPhotoParseHint", locale)}</small>}
               </div>
-                {mode === "capture" && <FieldSuggestions inputRef={composerRef} locale={locale} label={locale === "zh" ? "快捷补全" : "Quick completions"}
-                  suggestions={captureCompletions} anchor={captureAnchor} onSelect={chooseCaptureCompletion} />}
               {mode === "capture" && <details className="capture-syntax-help"><summary>{locale === "zh" ? "快捷语法" : "Quick syntax"}</summary><small>
                 {locale === "zh" ? '/task 待办 · /event 日程 · /bill 账目 · /idea 灵感 · /asset 物品；@地点 #标签 %分类 !high 重要 !!high 紧急 &关联；多条内容用句号或分号分隔。' : '/task · /event · /bill · /idea · /asset; @place #tag %category !high priority !!high urgency &link. Separate records with periods or semicolons.'}
               </small></details>}
@@ -1740,10 +1751,6 @@ export function ChatDialog({
                   value={draft}
                   rows={1}
                   onChange={(event) => setDraft(event.target.value)}
-                  onFocus={updateCaptureAnchor}
-                  onClick={updateCaptureAnchor}
-                  onKeyUp={updateCaptureAnchor}
-                  onScroll={updateCaptureAnchor}
                   onPaste={(event) => { void pastePhotos(event); }}
                   onCompositionStart={() => { composingRef.current = true; }}
                   onCompositionEnd={() => { composingRef.current = false; }}
@@ -1756,6 +1763,8 @@ export function ChatDialog({
                   placeholder={t(mode === "capture" ? "quickNotePlaceholder" : "aiChatPlaceholder", locale)}
                   disabled={composerDisabled}
                 />
+                {mode === "capture" && <FieldSuggestions inputRef={composerRef} locale={locale} label={locale === "zh" ? "快捷补全" : "Quick completions"}
+                  suggestions={captureCompletions} anchor={captureAnchor} onSelect={chooseCaptureCompletion} onOpen={openCaptureCandidates} />}
                 {busy ? (
                   <button type="button" className="chat-send is-stop" onClick={() => { abortRef.current?.abort(); }} title={t("aiChatStop", locale)} aria-label={t("aiChatStop", locale)}>
                     <Icon name="stop" size={15} />

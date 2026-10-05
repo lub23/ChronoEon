@@ -141,7 +141,7 @@ describe("unified capture and ask dialog", () => {
     act(() => textarea.dispatchEvent(new Event("focus", { bubbles: false })));
     const completion = host.querySelector<HTMLButtonElement>(".field-suggestion-menu button")!;
     expect(completion.textContent).toBe("project-a");
-    act(() => completion.click());
+    act(() => completion.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true })));
     expect(textarea.value).toBe("/task Review #project-a ");
   });
 

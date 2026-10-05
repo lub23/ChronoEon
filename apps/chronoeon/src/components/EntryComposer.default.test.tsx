@@ -172,6 +172,22 @@ describe("EntryComposer defaults", () => {
     expect(location.value).toBe("");
   });
 
+  it("replaces typed location content when a pointer candidate is chosen", async () => {
+    const history: CaptureHistoryItem[] = [
+      { kind: "event", title: "Design review", category: "default", location: "Office", date: "2026-09-12" },
+    ];
+    act(() => root.render(<EntryComposer locale="en" selectedDate="2026-09-12" editing={null} settings={createDefaultSettings("en")} history={history} onClose={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} />));
+    const title = host.querySelector<HTMLInputElement>(".field-label--title input")!;
+    await act(async () => setInputValue(title, "Design review"));
+    const location = host.querySelector<HTMLInputElement>(".location-input-wrap input")!;
+    act(() => location.focus());
+    await act(async () => setInputValue(location, "Of"));
+    const candidate = host.querySelector<HTMLButtonElement>(".field-suggestion-menu button")!;
+    expect(candidate.textContent).toBe("Office");
+    await act(async () => candidate.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true })));
+    expect(location.value).toBe("Office");
+  });
+
   it("sets both times with the wheel instead of a free-text clock field", async () => {
     act(() => {
       root.render(

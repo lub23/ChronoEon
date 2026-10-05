@@ -26,13 +26,17 @@ interface Props {
   suggestions: Array<{ value: string; label?: string }>;
   onSelect: (value: string) => void;
   /** Coordinates relative to the positioned parent; used by the capture caret. */
-  anchor?: { left: number; top: number };
+  anchor?: { left: number; top: number; maxHeight?: number };
+  /** Called once when a new candidate popup opens, so the caller can measure its caret once. */
+  onOpen?: () => void;
 }
 
 /** Keyboard candidates for a focused field, anchored below its caret line. */
-export function FieldSuggestions({ inputRef, locale, label, suggestions, onSelect, anchor }: Props) {
+export function FieldSuggestions({ inputRef, locale, label, suggestions, onSelect, anchor, onOpen }: Props) {
   const [active, setActive] = useState(0);
   const [focused, setFocused] = useState(false);
+  const openedRef = useRef(false);
+  const anchorRef = useRef<HTMLDivElement | null>(null);
   const activeRef = useRef(0);
   activeRef.current = active;
   const signature = suggestions.map(suggestion => suggestion.value).join("\0");
@@ -52,6 +56,13 @@ export function FieldSuggestions({ inputRef, locale, label, suggestions, onSelec
   }, [inputRef]);
 
   const visible = focused && suggestions.length > 0 && Boolean(inputRef.current);
+
+  useEffect(() => {
+    if (!visible) { openedRef.current = false; return; }
+    if (openedRef.current) return;
+    openedRef.current = true;
+    onOpen?.();
+  }, [onOpen, visible]);
 
   useEffect(() => {
     setActive(0);
@@ -76,7 +87,9 @@ export function FieldSuggestions({ inputRef, locale, label, suggestions, onSelec
       }
     };
     const dismiss = (event: PointerEvent) => {
-      if (event.target instanceof Node && !input.closest(".field-suggestion-anchor")?.contains(event.target)) input.blur();
+      const target = event.target instanceof Node ? event.target : null;
+      if (target && (input === target || input.contains(target) || anchorRef.current?.contains(target))) return;
+      input.blur();
     };
     input.addEventListener("keydown", onKeyDown, true);
     document.addEventListener("pointerdown", dismiss, true);
@@ -88,12 +101,17 @@ export function FieldSuggestions({ inputRef, locale, label, suggestions, onSelec
 
   if (!visible) return null;
   return (
-    <div className={anchor ? "field-suggestion-anchor is-caret" : "field-suggestion-anchor"} style={anchor ? { left: anchor.left, top: anchor.top } : undefined}>
-      <div className="field-suggestion-menu" role="listbox" aria-label={label ?? t("location", locale)}>
+    <div ref={anchorRef} className={anchor ? "field-suggestion-anchor is-caret" : "field-suggestion-anchor"} style={anchor ? { left: anchor.left, top: anchor.top } : undefined}>
+      <div className="field-suggestion-menu" role="listbox" aria-label={label ?? t("location", locale)}
+        style={anchor?.maxHeight ? { maxHeight: `${anchor.maxHeight}px` } : undefined}>
         {suggestions.map((suggestion, index) => (
           <button key={suggestion.value} type="button" role="option" aria-selected={index === active}
-            className={index === active ? "is-active" : ""} onPointerDown={event => event.preventDefault()}
-            onClick={() => onSelect(suggestion.value)}>
+            className={index === active ? "is-active" : ""}
+            onPointerDown={event => {
+              event.preventDefault();
+              event.stopPropagation();
+              onSelect(suggestion.value);
+            }}>
             {suggestion.label ?? suggestion.value}
           </button>
         ))}
