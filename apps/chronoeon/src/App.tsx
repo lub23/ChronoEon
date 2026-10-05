@@ -41,7 +41,7 @@ import { useSyncService } from "./sync/useSyncService";
 import { DEFAULT_SYNC_CONFIG, type SyncConfig } from "./sync/types";
 import { calendarDisplayName, categoryLabel, t } from "./i18n";
 import { AgendaView } from "./components/AgendaView";
-import type { AgendaFilter } from "./domain/agendaTimeline";
+import { itemAllowed, type AgendaFilter } from "./domain/agendaTimeline";
 import { Brand } from "./components/Brand";
 import { AmbientParticles } from "./components/AmbientParticles";
 import { EntryComposer } from "./components/EntryComposer";
@@ -199,6 +199,12 @@ function App() {
     () => filteredEntries.filter((entry) => entryMatchesSearch(entry, search, locale, settings)),
     [filteredEntries, locale, search, settings],
   );
+  const searchedItems = useMemo(() => {
+    if (!itemAllowed(filter)) return [];
+    const query = search.trim().toLocaleLowerCase();
+    return items.filter(item => (entryFilter.calendarIds.length === 0 || entryFilter.calendarIds.includes(item.calendarId))
+      && (!query || [item.name, item.notes, item.location].some(value => value?.toLocaleLowerCase().includes(query))));
+  }, [entryFilter.calendarIds, filter, items, search]);
   const [miniDayCountPref, setMiniDayCount] = usePersistentPreference<number>("miniDayCount", 1);
   const [composerOpen, setComposerOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
@@ -1211,7 +1217,7 @@ function App() {
       );
     }
     if (view === "ideas") return <IdeasView entries={itemEntries} locale={locale} settings={settings} search={search} today={todayKey} onEdit={entry => viewActions.current.openComposer(entry)} onConvert={(id, date) => { void viewActions.current.convertIdea(id, date); }} onNew={() => viewActions.current.openComposerAt({ kind: "idea", date: todayKey, start: format(new Date(), "HH:mm") })} />;
-    return <StatsView tab={pageTab ?? "bills"} onTabChange={setInsightsTab} items={items} allEntries={entries} onAddItem={() => openItemComposer()} onEditItem={item => openItemComposer(item)} onOpenBill={entry => viewActions.current.openComposer(entry)} onEditEntry={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={search} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} />;
+    return <StatsView tab={pageTab ?? "bills"} onTabChange={setInsightsTab} items={searchedItems} allEntries={entries} onAddItem={() => openItemComposer()} onEditItem={item => openItemComposer(item)} onOpenBill={entry => viewActions.current.openComposer(entry)} onEditEntry={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={search} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} />;
   }
     // Keep JSX identity for the outgoing page when a neighbor mounts and when
     // that neighbor is promoted. Never rerender both heavy surfaces on lock.
@@ -1225,7 +1231,7 @@ function App() {
       return pages.get(key)!;
     };
   }, [compact, safeMiniDayCount, safeDayCount, entryFilter.photosOnly,
-    searchedEntries, entries, items, locale, settings, filter, search, lunar, dayPhotos, todayKey]);
+    searchedEntries, searchedItems, entries, locale, settings, filter, search, lunar, dayPhotos, todayKey]);
   const renderedViews = useMemo(() => new Map(visiblePages.map(page => [page.key, renderPage(page)])), [visiblePages, renderPage]);
 
   const preferences: AppPreferences = { resizeStep, lunar, dayPhotos, accentTheme, remindersEnabled, captureShortcut, captureShortcutEnabled, miniShortcut, miniShortcutEnabled, lowEndMode };

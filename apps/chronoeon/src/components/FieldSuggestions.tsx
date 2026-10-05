@@ -22,17 +22,36 @@ export function locationFieldCandidates(
 interface Props {
   inputRef: { current: HTMLInputElement | HTMLTextAreaElement | null };
   locale: Locale;
-  suggestions: Array<{ value: string }>;
+  label?: string;
+  suggestions: Array<{ value: string; label?: string }>;
   onSelect: (value: string) => void;
+  /** Coordinates relative to the positioned parent; used by the capture caret. */
+  anchor?: { left: number; top: number };
 }
 
-/** Keyboard candidates for a free-entry field, anchored below the input caret line. */
-export function FieldSuggestions({ inputRef, locale, suggestions, onSelect }: Props) {
+/** Keyboard candidates for a focused field, anchored below its caret line. */
+export function FieldSuggestions({ inputRef, locale, label, suggestions, onSelect, anchor }: Props) {
   const [active, setActive] = useState(0);
+  const [focused, setFocused] = useState(false);
   const activeRef = useRef(0);
   activeRef.current = active;
   const signature = suggestions.map(suggestion => suggestion.value).join("\0");
-  const visible = suggestions.length > 0 && Boolean(inputRef.current);
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    const onFocus = () => setFocused(true);
+    const onBlur = () => setFocused(false);
+    setFocused(document.activeElement === input);
+    input.addEventListener("focus", onFocus);
+    input.addEventListener("blur", onBlur);
+    return () => {
+      input.removeEventListener("focus", onFocus);
+      input.removeEventListener("blur", onBlur);
+    };
+  }, [inputRef]);
+
+  const visible = focused && suggestions.length > 0 && Boolean(inputRef.current);
 
   useEffect(() => {
     setActive(0);
@@ -69,13 +88,13 @@ export function FieldSuggestions({ inputRef, locale, suggestions, onSelect }: Pr
 
   if (!visible) return null;
   return (
-    <div className="field-suggestion-anchor">
-      <div className="field-suggestion-menu" role="listbox" aria-label={t("location", locale)}>
+    <div className={anchor ? "field-suggestion-anchor is-caret" : "field-suggestion-anchor"} style={anchor ? { left: anchor.left, top: anchor.top } : undefined}>
+      <div className="field-suggestion-menu" role="listbox" aria-label={label ?? t("location", locale)}>
         {suggestions.map((suggestion, index) => (
           <button key={suggestion.value} type="button" role="option" aria-selected={index === active}
             className={index === active ? "is-active" : ""} onPointerDown={event => event.preventDefault()}
             onClick={() => onSelect(suggestion.value)}>
-            {suggestion.value}
+            {suggestion.label ?? suggestion.value}
           </button>
         ))}
       </div>

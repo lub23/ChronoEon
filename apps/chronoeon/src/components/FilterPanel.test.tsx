@@ -63,8 +63,9 @@ describe("unified entry filtering", () => {
   });
   it("keeps kind checkboxes multi-select and protects the final kind", () => {
     setup(); const by = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('.filter-section [role="checkbox"]')].find(e => e.textContent === name)!;
-    click(by("账目")); click(by("任务")); click(by("事件")); expect(by("灵感").disabled).toBe(true);
+    click(by("账目")); click(by("任务")); click(by("事件")); click(by("灵感")); expect(by("物品").disabled).toBe(true);
     click(by("事件")); click(by("任务")); click(by("账目"));
+    click(by("灵感"));
     expect([...document.querySelectorAll('.filter-section [role="checkbox"]')].every(e => e.getAttribute("aria-checked") === "true")).toBe(true);
   });
   it("clears search, kind and category state together", () => {

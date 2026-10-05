@@ -107,7 +107,12 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
       <h2 className="view-heading"><span className="headline-leaf">{t("insightsTitle", locale)}</span></h2>
       <div className="items-toolbar-controls">
         <GlassSelect value={sortField} options={Object.entries(sortLabels).map(([value, label]) => ({ value, label: t(label, locale) }))} onChange={value => setSortField(value as ItemSortField)} ariaLabel={t("itemSort", locale)} />
-        <GlassSelect value={sortDirection} options={[{ value: "asc", label: t("sortAscending", locale) }, { value: "desc", label: t("sortDescending", locale) }]} onChange={value => setSortDirection(value as ItemSortDirection)} ariaLabel={sortDirection === "asc" ? t("sortAscending", locale) : t("sortDescending", locale)} />
+        <button type="button" className={sortDirection === "asc" ? "item-sort-direction is-asc" : "item-sort-direction is-desc"}
+          aria-label={sortDirection === "asc" ? t("sortAscending", locale) : t("sortDescending", locale)}
+          title={sortDirection === "asc" ? t("sortAscending", locale) : t("sortDescending", locale)}
+          onClick={() => setSortDirection(current => current === "asc" ? "desc" : "asc")}>
+          <i aria-hidden="true"><b className="is-down" /><b className="is-up" /></i>
+        </button>
         <button type="button" className="primary-button items-add-button" onClick={onAdd} disabled={!onAdd} aria-label={t("itemAdd", locale)}><Icon name="plus" size={16} /></button>
       </div>
     </div>

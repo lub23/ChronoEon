@@ -25,7 +25,7 @@ const messages = {
   itemTransport: { en: "Transport", zh: "交通工具" },
   itemHobby: { en: "Hobbies", zh: "兴趣爱好" },
   itemOther: { en: "Other", zh: "其他物品" },
-  itemAcquisition: { en: "Acquired by", zh: "获得方式" },
+  itemAcquisition: { en: "Source", zh: "获得方式" },
   itemPurchase: { en: "Purchase", zh: "购入" },
   itemGift: { en: "Gift", zh: "获赠" },
   itemWindfall: { en: "Windfall", zh: "意外" },

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { createMotionPortal as createPortal } from "./MotionPresence";
 import { EMPTY_ENTRY_FILTER, filterActive, toggleValue, type EntryFilter } from "../domain/entryFilter";
-import type { AgendaFilter } from "../domain/agendaTimeline";
-import type { Entry, EntryKind, Locale } from "../domain/entry";
+import type { AgendaFilter, FilterKind } from "../domain/agendaTimeline";
+import type { Entry, Locale } from "../domain/entry";
 import type { ChronoEonSettings, EntryCategoryOption } from "@chronoeon/domain";
 import { calendarDisplayName, t } from "../i18n";
 import { Icon } from "./Icon";
@@ -27,9 +27,10 @@ interface FilterPanelProps {
   onChange: (filter: EntryFilter) => void;
   onClose: () => void;
 }
-const KIND_OPTIONS: Array<{ id: EntryKind; label: "tasks" | "events" | "bills" | "ideas" }> = [
+const KIND_OPTIONS: Array<{ id: FilterKind; label: "tasks" | "events" | "bills" | "ideas" | "items" }> = [
   { id: "task", label: "tasks" }, { id: "event", label: "events" },
   { id: "bill", label: "bills" }, { id: "idea", label: "ideas" },
+  { id: "item", label: "items" },
 ];
 
 /** One surface for text, calendars, kinds, photos and category filters. */

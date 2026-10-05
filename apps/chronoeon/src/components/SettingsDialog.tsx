@@ -170,6 +170,7 @@ export function SettingsDialog({
   const [shortcutDraft, setShortcutDraft] = useState(preferences.captureShortcut);
   const [miniShortcutDraft, setMiniShortcutDraft] = useState(preferences.miniShortcut);
   const [catalogCalendarID, setCatalogCalendarID] = useState(settings.defaultCalendarID);
+  const [showAllDeleted, setShowAllDeleted] = useState(false);
   const patch = (change: (current: ChronoEonSettings) => ChronoEonSettings) => onSettingsChange(change(settings));
   const activeCalendar = settings.calendars.find((calendar) => calendar.id === catalogCalendarID)
     ?? settings.calendars.find((calendar) => calendar.id === settings.defaultCalendarID)
@@ -653,37 +654,54 @@ export function SettingsDialog({
                 <div className="settings-data-block"><div className="settings-option-copy"><strong>{t("exportEntries", locale)}</strong><small>{t("entriesCsvDetail", locale)}</small></div><button type="button" className="secondary-button" disabled={transferBusy} onClick={() => void onExportEntries()}><Icon name="download" size={15} />{transferBusy ? t("importExportBusy", locale) : t("exportEntries", locale)}</button></div>
               </div>
               {historyJournal && onHistoryRestored && <OperationHistory locale={locale} journal={historyJournal} onRestored={onHistoryRestored} />}
-              <SectionHeading title={t("recycleBin", locale)} detail={t("recycleBinDetail", locale)} />
-              <div className="settings-card recycle-bin">
+              <div className="settings-card recovery-card recycle-bin">
+                <header className="recovery-heading">
+                  <div><h4>{t("recycleBin", locale)}</h4><p className="settings-footnote">{t("recycleBinDetail", locale)}</p></div>
+                  {deletedEntries.length > 5 && <button type="button" className="secondary-button" onClick={() => setShowAllDeleted(true)}>{locale === "zh" ? `全部 ${deletedEntries.length} 项` : `All ${deletedEntries.length}`}</button>}
+                </header>
                 {deletedEntries.length === 0 ? (
                   <p className="settings-footnote">{t("recycleBinEmpty", locale)}</p>
                 ) : (
-                  <>
-                    <ul className="recycle-bin-list">
-                      {deletedEntries.map((item) => (
-                        <li key={item.id}>
-                          <span>
-                            <strong>{titleFor(item.entry, locale)}</strong>
-                            <small className="recycle-bin-meta">
-                              {item.entry.date}{item.entry.start ? ` ${item.entry.start}` : ""} · {categoryLabel(item.entry.category, locale, undefined, settings)} · {new Date(item.deletedAt).toLocaleString(locale === "zh" ? "zh-CN" : "en-US")}
-                            </small>
-                            {item.entry.note && <small className="recycle-bin-note">{item.entry.note}</small>}
-                          </span>
-                          <button
-                            type="button"
-                            className="secondary-button"
-                            disabled={Boolean(recycleBusy)}
-                            onClick={() => void onRestoreDeleted(item.id)}
-                          >
-                            <Icon name="restore" size={14} />{recycleBusy === item.id ? t("saving", locale) : t("undo", locale)}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                    <button type="button" className="secondary-button recycle-bin-clear" disabled={Boolean(recycleBusy)} onClick={() => void onClearDeleted()}>
-                      <Icon name="trash" size={14} />{t("recycleBinClear", locale)}
-                    </button>
-                  </>
+                  <ul className="recovery-list recycle-bin-list">
+                    {deletedEntries.slice(0, 5).map((item) => (
+                      <li key={item.id}>
+                        <div className="recovery-copy">
+                          <strong><i className="history-action is-delete">{t("delete", locale)}</i>{titleFor(item.entry, locale)}</strong>
+                          <small>{item.entry.date}{item.entry.start ? ` ${item.entry.start}` : ""} · {new Date(item.deletedAt).toLocaleString(locale === "zh" ? "zh-CN" : "en-US")}</small>
+                        </div>
+                        <div className="recovery-changes"><span>{categoryLabel(item.entry.category, locale, undefined, settings)}{item.entry.note ? ` · ${item.entry.note}` : ""}</span></div>
+                        <button
+                          type="button"
+                          className="secondary-button recovery-action"
+                          disabled={Boolean(recycleBusy)}
+                          onClick={() => void onRestoreDeleted(item.id)}
+                        >
+                          <Icon name="restore" size={14} />{recycleBusy === item.id ? t("saving", locale) : t("undo", locale)}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {showAllDeleted && (
+                  <div className="settings-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setShowAllDeleted(false); }}>
+                    <section className="settings-modal" role="dialog" aria-modal="true" aria-label={t("recycleBin", locale)}>
+                      <header><h4>{t("recycleBin", locale)}</h4><div><button type="button" className="danger-button" disabled={Boolean(recycleBusy)} onClick={() => void onClearDeleted()}><Icon name="trash" size={14} />{t("recycleBinClear", locale)}</button><button type="button" className="secondary-button" onClick={() => setShowAllDeleted(false)}>{t("close", locale)}</button></div></header>
+                      <ul className="recovery-list recycle-bin-list">
+                        {deletedEntries.map((item) => (
+                          <li key={item.id}>
+                            <div className="recovery-copy">
+                              <strong><i className="history-action is-delete">{t("delete", locale)}</i>{titleFor(item.entry, locale)}</strong>
+                              <small>{item.entry.date}{item.entry.start ? ` ${item.entry.start}` : ""} · {new Date(item.deletedAt).toLocaleString(locale === "zh" ? "zh-CN" : "en-US")}</small>
+                            </div>
+                            <div className="recovery-changes"><span>{categoryLabel(item.entry.category, locale, undefined, settings)}{item.entry.note ? ` · ${item.entry.note}` : ""}</span></div>
+                            <button type="button" className="secondary-button recovery-action" disabled={Boolean(recycleBusy)} onClick={() => void onRestoreDeleted(item.id)}>
+                              <Icon name="restore" size={14} />{recycleBusy === item.id ? t("saving", locale) : t("undo", locale)}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  </div>
                 )}
               </div>
               {isTauri

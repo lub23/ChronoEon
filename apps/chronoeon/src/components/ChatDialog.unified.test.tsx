@@ -138,7 +138,8 @@ describe("unified capture and ask dialog", () => {
     render(vi.fn(async () => true), vi.fn(), { availableTags: ["project-a", "garden"] });
     const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
     act(() => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "/task Review #pro"); textarea.dispatchEvent(new Event("input", { bubbles: true })); });
-    const completion = host.querySelector<HTMLButtonElement>(".capture-completions button")!;
+    act(() => textarea.dispatchEvent(new Event("focus", { bubbles: false })));
+    const completion = host.querySelector<HTMLButtonElement>(".field-suggestion-menu button")!;
     expect(completion.textContent).toBe("project-a");
     act(() => completion.click());
     expect(textarea.value).toBe("/task Review #project-a ");

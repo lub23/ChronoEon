@@ -91,6 +91,26 @@ function mediaMatches(query: string): boolean {
 const MODE_ICONS = { capture: "edit", ask: "sparkle" } as const;
 const MODE_TITLE_PREFIX = /^(?:随心记|随心问|Capture|Ask)\s+/;
 
+/** Measure the caret in the textarea's own coordinate space, including wrapped lines. */
+function captureCaretAnchor(node: HTMLTextAreaElement) {
+  const style = getComputedStyle(node);
+  const context = document.createElement("canvas").getContext("2d");
+  const font = style.font || `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  if (context) context.font = font;
+  const beforeCaret = node.value.slice(0, node.selectionStart ?? node.value.length);
+  const lines = beforeCaret.split("\n");
+  const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.5;
+  const left = node.offsetLeft + Number.parseFloat(style.paddingLeft || "0")
+    + (context?.measureText(lines.at(-1) ?? "").width ?? 0) - node.scrollLeft;
+  const top = node.offsetTop + Number.parseFloat(style.paddingTop || "0")
+    + (lines.length - 1) * lineHeight + lineHeight + 4 - node.scrollTop;
+  const parent = node.offsetParent as HTMLElement | null;
+  return {
+    left: Math.max(12, Math.min(left, (parent?.clientWidth ?? node.offsetWidth) - 180)),
+    top: Math.max(0, Math.min(top, (parent?.clientHeight ?? node.offsetHeight) - 48)),
+  };
+}
+
 const toolMessages: Record<AdvisorTool, MessageKey> = {
   search_entries: "aiToolSearchEntries",
   overdue_tasks: "aiToolOverdueTasks",
@@ -309,6 +329,14 @@ export function ChatDialog({
       ? entries.filter(entry => entry.kind === "bill" && billDirectionForCategory(entry.category, settings, entry.calendar) === "expense" && (!entry.calendar || entry.calendar === settings.defaultCalendarID)).map(entry => ({ value: entry.id, label: `${entry.title} · ${entry.date}` }))
       : availableAssets.filter(item => !item.purchaseEntryId && item.acquisition === "purchase" && item.calendarId === settings.defaultCalendarID).map(item => ({ value: item.id, label: item.name })),
   }), [draft, settings, entries, availableTags, availableAssets]);
+  const [captureAnchor, setCaptureAnchor] = useState({ left: 12, top: 44 });
+  const updateCaptureAnchor = useCallback(() => {
+    if (composerRef.current) setCaptureAnchor(captureCaretAnchor(composerRef.current));
+  }, []);
+  const chooseCaptureCompletion = useCallback((value: string) => {
+    setDraft(current => current.replace(/(?:^|\s)[/@#%&][^\s]*$/, match => `${/^\s/.test(match) ? " " : ""}${value} `));
+    composerRef.current?.focus();
+  }, []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conversationQuery, setConversationQuery] = useState("");
@@ -1100,9 +1128,17 @@ export function ChatDialog({
                       <input value={conversationQuery} onChange={(event) => setConversationQuery(event.target.value)} placeholder={t("search", locale)} aria-label={t("search", locale)} />
                     </div>
                   </div>
+                  <div className="chat-archive-tabs" role="tablist" aria-label={locale === "zh" ? "对话列表" : "Conversation list"}>
+                    <button type="button" role="tab" aria-selected={!archivedOnly} className={!archivedOnly ? "is-active" : ""}
+                      onClick={() => setArchivedOnly(false)}>{t("aiChatRecent", locale)}</button>
+                    <button type="button" role="tab" aria-selected={archivedOnly} className={archivedOnly ? "is-active" : ""}
+                      onClick={() => setArchivedOnly(true)}>{t("aiChatArchived", locale)}</button>
+                  </div>
                   <div className="chat-rail-list">
                     {filteredConversations.map((conversation) => (
-                      <div key={conversation.id} className={conversation.id === activeId ? "chat-conversation is-active" : "chat-conversation"}>
+                      <div key={conversation.id} className={[
+                        "chat-conversation", conversation.id === activeId ? "is-active" : "", conversation.archivedAt ? "is-archived" : "",
+                      ].filter(Boolean).join(" ")}>
                         <button type="button" className="chat-conversation-open" onClick={() => openConversation(conversation)}>
                           <strong>
                             <i
@@ -1114,13 +1150,14 @@ export function ChatDialog({
                             </i>
                             {conversation.title?.replace(MODE_TITLE_PREFIX, "") || t("aiChatUntitled", locale)}
                           </strong>
-                          <small>{messageTime(conversation.updatedAt)}</small>
+                          <small>{conversation.archivedAt ? `${t("aiChatArchived", locale)} · ` : ""}{messageTime(conversation.updatedAt)}</small>
                         </button>
                         <button type="button" className="icon-button subtle" disabled={busy && conversation.id === activeId} onClick={async () => {
                           if (archivedOnly) await conversations.unarchiveConversation(conversation.id);
                           else await archiveFor(conversation.id);
                           await reloadList();
                         }} title={t(archivedOnly ? "aiChatRestore" : "aiChatArchive", locale)} aria-label={t(archivedOnly ? "aiChatRestore" : "aiChatArchive", locale)}><Icon name={archivedOnly ? "arrow-right" : "folder"} size={13} /></button>
+                        {archivedOnly && <button type="button" className="icon-button subtle" disabled={busy && conversation.id === activeId} onClick={() => { void remove(conversation.id); }} title={t("delete", locale)} aria-label={t("delete", locale)}><Icon name="trash" size={13} /></button>}
                       </div>
                     ))}
                     {!filteredConversations.length && <p className="chat-empty">{t(archivedOnly ? "aiChatArchived" : "aiChatEmpty", locale)}</p>}
@@ -1131,9 +1168,6 @@ export function ChatDialog({
                     </button>
                     <button type="button" className="chat-rail-action" onClick={onOpenSettings}>
                       <Icon name="settings" size={15} /><span>{t("aiChatConfigure", locale)}</span>
-                    </button>
-                    <button type="button" className={archivedOnly ? "chat-rail-action is-active" : "chat-rail-action"} onClick={() => setArchivedOnly(current => !current)}>
-                      <Icon name="folder" size={15} /><span>{t("aiChatArchived", locale)}</span>
                     </button>
                   </div>
                 </>
@@ -1356,22 +1390,6 @@ export function ChatDialog({
                             <small>{locale === "zh" ? "历史分类候选" : "Category suggestions from history"}</small>
                             {fieldOptions.category.options.map(option => <button type="button" key={option.value} onClick={() => patchCaptureDraft(item.key, { category: option.value })}>{categoryOptions.find(value => value.value === option.value)?.label ?? option.value}</button>)}
                           </div>}
-                          {fieldOptions && fieldOptions.location.options.length > 0 && (
-                            <div className="capture-field-options" role="group" aria-label={t("captureFieldSuggestions", locale)}>
-                              <small>{t("captureFieldSuggestions", locale)}</small>
-                              {fieldOptions.location.options.map((option) => (
-                                <button
-                                  key={option.value}
-                                  type="button"
-                                  className={item.draft.location === option.value ? "is-active" : ""}
-                                  onClick={() => patchCaptureDraft(item.key, { location: option.value })}
-                                >
-                                  {option.value}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-
                           <div className={item.draft.kind === "bill" ? "capture-review-when is-bill" : "capture-review-when"}>
                             <span className={item.draft.allDay ? "capture-review-cluster is-single" : "capture-review-cluster"}>
                               <GlassDatePicker value={item.draft.date} ariaLabel={t("startDate", locale)} locale={locale} clearable={false} hideIcon onChange={(value) => patchCaptureDraft(item.key, { date: value ?? item.draft.date })} />
@@ -1711,12 +1729,8 @@ export function ChatDialog({
                 )}
                 {mode === "capture" && photos.length > 0 && <small>{t("chatPhotoParseHint", locale)}</small>}
               </div>
-                {mode === "capture" && captureCompletions.length > 0 && <div className="capture-field-options capture-completions is-floating" role="group" aria-label={locale === "zh" ? "快捷补全" : "Quick completions"}>
-                {captureCompletions.map(option => <button type="button" key={option.value} onClick={() => {
-                  setDraft(value => value.replace(/(?:^|\s)[/@#%&][^\s]*$/, match => `${/^\s/.test(match) ? " " : ""}${option.value} `));
-                  composerRef.current?.focus();
-                }}>{option.label}</button>)}
-              </div>}
+                {mode === "capture" && <FieldSuggestions inputRef={composerRef} locale={locale} label={locale === "zh" ? "快捷补全" : "Quick completions"}
+                  suggestions={captureCompletions} anchor={captureAnchor} onSelect={chooseCaptureCompletion} />}
               {mode === "capture" && <details className="capture-syntax-help"><summary>{locale === "zh" ? "快捷语法" : "Quick syntax"}</summary><small>
                 {locale === "zh" ? '/task 待办 · /event 日程 · /bill 账目 · /idea 灵感 · /asset 物品；@地点 #标签 %分类 !high 重要 !!high 紧急 &关联；多条内容用句号或分号分隔。' : '/task · /event · /bill · /idea · /asset; @place #tag %category !high priority !!high urgency &link. Separate records with periods or semicolons.'}
               </small></details>}
@@ -1726,6 +1740,10 @@ export function ChatDialog({
                   value={draft}
                   rows={1}
                   onChange={(event) => setDraft(event.target.value)}
+                  onFocus={updateCaptureAnchor}
+                  onClick={updateCaptureAnchor}
+                  onKeyUp={updateCaptureAnchor}
+                  onScroll={updateCaptureAnchor}
                   onPaste={(event) => { void pastePhotos(event); }}
                   onCompositionStart={() => { composingRef.current = true; }}
                   onCompositionEnd={() => { composingRef.current = false; }}

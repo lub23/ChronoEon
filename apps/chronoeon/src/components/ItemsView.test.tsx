@@ -132,7 +132,7 @@ describe("item editor", () => {
   it("gifts clear purchase bindings and use zero cost", async () => {
     const save = vi.fn(async (_draft: ItemDraft, _id?: string) => {});
     renderComposer({ item: item({ purchaseEntryId: "bill-id" }), entries: [bill()], save });
-    choose("Acquired by", "Gift");
+    choose("Source", "Gift");
     expect(document.querySelector('button[aria-label="Linked bill"]')).toBeNull();
     await act(async () => { document.querySelector(".composer-sheet form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
     expect(save.mock.calls[0][0]).toMatchObject({ acquisition: "gift", cost: 0, purchaseEntryId: undefined });

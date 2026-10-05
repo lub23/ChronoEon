@@ -7,7 +7,13 @@ import { entryMatchesSearch } from "./search";
  * Kinds are independent toggles, not mutually exclusive: `["task", "bill"]`
  * shows tasks and bills together, and the empty array means "everything".
  */
-export type AgendaFilter = EntryKind[];
+/** Assets are inventory records rather than Entry rows, so they join the filter as a separate display kind. */
+export type FilterKind = EntryKind | "item";
+export type AgendaFilter = FilterKind[];
+
+export function itemAllowed(filter: AgendaFilter): boolean {
+  return filter.length === 0 || filter.includes("item");
+}
 
 export function kindAllowed(filter: AgendaFilter, kind: EntryKind): boolean {
   return filter.length === 0 || filter.includes(kind);

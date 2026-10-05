@@ -67,6 +67,19 @@
 .bill-item-create > .glass-select { flex: 1; min-width: 0; }
 .bill-item-create button { min-height: 30px; font-size: 11px; }
 .bill-items-actions button { font-size: 11px; }
+.item-sort-direction {
+  display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; padding: 0;
+  border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--ink-faint);
+}
+.item-sort-direction:hover { background: var(--surface-muted); color: var(--accent-dark); }
+.item-sort-direction i { display: grid; place-items: center; gap: 0; }
+.item-sort-direction b { display: block; width: 0; height: 0; border-inline: 5px solid transparent; }
+.item-sort-direction .is-down { border-top: 6px solid color-mix(in srgb, currentColor 32%, transparent); margin-bottom: 2px; }
+.item-sort-direction .is-up { border-bottom: 6px solid color-mix(in srgb, currentColor 32%, transparent); }
+.item-sort-direction.is-asc { color: var(--accent-dark); }
+.item-sort-direction.is-asc .is-down { border-top-color: currentColor; }
+.item-sort-direction.is-desc { color: var(--accent-dark); }
+.item-sort-direction.is-desc .is-up { border-bottom-color: currentColor; }
 .item-bill-picker { min-width: 0; }
 .item-bill-picker .glass-select { width: 100%; }
 .item-bill-picker .glass-select-trigger { width: 100%; min-width: 0; }
