@@ -34,7 +34,6 @@ export interface AdvisorToolResult {
   notes: string[];
 }
 
-const MAX_RESULTS = 80;
 const KINDS: EntryKind[] = ["task", "event", "bill", "idea"];
 const STATUSES: EntryStatus[] = ["open", "in-progress", "done", "cancelled"];
 
@@ -163,8 +162,7 @@ function searchEntries(entries: readonly Entry[], call: AdvisorToolCall): Entry[
     return terms.some((term) => fields.some((field) => field.includes(term)));
   });
   return matches
-    .sort((left, right) => right.date.localeCompare(left.date) || (right.createdAt ?? "").localeCompare(left.createdAt ?? ""))
-    .slice(0, MAX_RESULTS);
+    .sort((left, right) => right.date.localeCompare(left.date) || (right.createdAt ?? "").localeCompare(left.createdAt ?? ""));
 }
 
 function countedValues<T extends string>(entries: readonly Entry[], valueOf: (entry: Entry) => T): string {
@@ -191,7 +189,7 @@ function runCall(entries: readonly Entry[], call: AdvisorToolCall, today: string
   if (call.tool === "overdue_tasks" || call.tool === "upcoming_tasks") {
     const { overdue, upcoming } = outstandingTaskSections(pool, today);
     const matches = call.tool === "overdue_tasks" ? overdue : upcoming;
-    return { call, entries: matches.slice(0, MAX_RESULTS), notes: [`count=${matches.length}`] };
+    return { call, entries: matches, notes: [`count=${matches.length}`] };
   }
   if (call.tool === "spending_summary") {
     const range = call.range!;
@@ -201,7 +199,7 @@ function runCall(entries: readonly Entry[], call: AdvisorToolCall, today: string
       .join(",");
     return {
       call: { ...call, range },
-      entries: stats.entries.slice(0, MAX_RESULTS),
+      entries: stats.entries,
       notes: [
         `count=${stats.count}`,
         `expense=${stats.expense.toFixed(2)}`,
@@ -225,7 +223,7 @@ function runCall(entries: readonly Entry[], call: AdvisorToolCall, today: string
     notes: [
       `count=${matches.length}`,
       `kinds=${countedValues(matches, (entry) => entry.kind)}`,
-      `statuses=${countedValues(matches, (entry) => entry.status ?? "open")}`,
+      `statuses=${countedValues(matches, (entry) => entry.status ?? (entry.kind === "task" ? "open" : "unspecified"))}`,
       ...(termCounts ? [`terms=${termCounts}`] : []),
       ...(dateCounts ? [`dates=${dateCounts}`] : []),
     ],
@@ -263,33 +261,61 @@ export function executeAdvisorToolCall(raw: AIToolCall, entries: readonly Entry[
   return runCall(entries, { tool }, today);
 }
 
-/** The tool message stays compact but gives the model every analyzed field. */
+/** A shared, lossless compact record for selected context and tool results. */
+export function compactAdvisorEntry(entry: Entry): Record<string, unknown> {
+  const fields = {
+    id: entry.id, date: entry.date, start: entry.allDay ? "all-day" : entry.start,
+    end: entry.end, endDate: entry.endDate,
+    duration_minutes: entryDurationMinutes(entry) || undefined,
+    kind: entry.kind, status: entry.status, title: entry.title,
+    titleZh: entry.titleZh === entry.title ? undefined : entry.titleZh,
+    category: entry.category, location: entry.location,
+    note: entry.note?.replace(/\s+/g, " ").trim(), tags: entry.tags,
+    amount: entry.amount, currency: entry.currency, payment: entry.payment,
+    importance: entry.priority, urgency: entry.urgency,
+    recurrence: entry.recurrence === "none" ? undefined : entry.recurrence,
+    recurringDays: entry.recurringDays, recurringEnd: entry.recurringEnd,
+  };
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) =>
+    value !== undefined && value !== null && value !== "" && (!Array.isArray(value) || value.length > 0)));
+}
+
+export function advisorContextForModel(entries: readonly Entry[]) {
+  const durations: Record<string, number> = {};
+  for (const entry of entries) {
+    const minutes = entryDurationMinutes(entry);
+    if (minutes) durations[entry.kind] = (durations[entry.kind] ?? 0) + minutes;
+  }
+  return {
+    summary: {
+      count: entries.length,
+      kinds: countedValues(entries, entry => entry.kind),
+      duration_minutes_by_kind: durations,
+      months: countedValues(entries, entry => entry.date.slice(0, 7)),
+    },
+    entries: entries.map(compactAdvisorEntry),
+  };
+}
+
 export function advisorToolResultForModel(result: AdvisorToolResult): string {
-  const shown = result.entries.slice(0, 60);
   return JSON.stringify({
     tool: result.call.tool,
-    query: result.call.query,
+    query: result.call.query || undefined,
     range: result.call.range,
-    notes: result.entries.length > shown.length
-      ? [...result.notes, `showing ${shown.length} of ${result.entries.length}`]
-      : result.notes,
-    entries: shown.map((entry) => ({
-      id: entry.id,
-      date: entry.date,
-      start: entry.allDay ? "all-day" : entry.start ?? "anytime",
-      end: entry.end,
-      duration_minutes: entryDurationMinutes(entry) || undefined,
-      kind: entry.kind,
-      status: entry.status,
-      title: entry.title,
-      titleZh: entry.titleZh,
-      category: entry.category,
-      location: entry.location,
-      note: entry.note?.replace(/\s+/g, " ").slice(0, 500),
-      tags: entry.tags,
-      amount: entry.amount,
-      currency: entry.currency,
-      payment: entry.payment,
-    })),
+    kinds: result.call.kinds,
+    statuses: result.call.statuses,
+    notes: result.notes,
+    ...advisorContextForModel(result.entries),
   });
+}
+
+/** Multiple tools often read the same records; send each record only once. */
+export function advisorResultsForModel(results: readonly AdvisorToolResult[]): string {
+  const entries = new Map<string, Entry>();
+  const scopes = results.map(result => {
+    for (const entry of result.entries) entries.set(entry.id, entry);
+    const { entries: _entries, ...metadata } = JSON.parse(advisorToolResultForModel(result));
+    return { ...metadata, entry_ids: result.entries.map(entry => entry.id) };
+  });
+  return JSON.stringify({ results: scopes, ...advisorContextForModel([...entries.values()]) });
 }

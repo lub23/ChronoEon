@@ -23,7 +23,6 @@ export interface CaptureFieldDecisions {
   kind: { options: CaptureKindCandidate[]; selected?: EntryKind };
   category: CaptureFieldDecision;
   location: CaptureFieldDecision;
-  note: CaptureFieldDecision;
   defaultDuration?: number;
 }
 
@@ -123,12 +122,10 @@ export class CaptureDecisionIndex {
     const scoped = records.filter((item) => !selectedKind || item.item.kind === selectedKind);
     const category = this.rank(scoped, (item) => item.category, options.availableCategories, title);
     const location = this.rank(scoped, (item) => item.location, undefined, title);
-    const note = this.rank(scoped, (item) => item.note?.trim(), undefined, title);
     return {
       kind: { options: kindCandidates, selected: chooseKind(kindCandidates) },
       category: { options: category, selected: significant(category)?.value },
       location: { options: location, selected: significant(location)?.value },
-      note: { options: note },
       defaultDuration: this.duration(scoped.filter(record => (record.matchScore ?? 0) >= 0.9)),
     };
   }

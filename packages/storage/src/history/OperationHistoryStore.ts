@@ -1,4 +1,6 @@
-import { archiveEntryForRecovery } from "../SqliteEntryStore";
+import { createEntryId, type Entry, type Item } from "@chronoeon/domain";
+import { archiveEntryForRecovery, attachmentReference, rowToEntry } from "../SqliteEntryStore";
+import { toItem } from "../SqliteItemStore";
 import type { PersistencePort, SqlParam } from "../persistence/PersistencePort";
 import { notifyLocalChange, runDatabaseOperation } from "../persistence/coordinator";
 import { nextTimestamp } from "../persistence/timestamp";
@@ -19,6 +21,7 @@ export interface OperationHistoryRecord {
   action: "create" | "update" | "delete" | "restore";
   title: string;
   changes: OperationHistoryChange[];
+  subject?: { type: "entry"; value: Entry } | { type: "item"; value: Item };
 }
 interface StoredChange { table_name: string; row_key: string; before_json: string | null; after_json: string | null }
 const KEYS: Record<string, string[]> = {
@@ -45,6 +48,19 @@ function predicate(table: string): string {
 export class OperationHistoryStore {
   constructor(private readonly db: PersistencePort) {}
 
+  recordLanguage(before: string, after: string): Promise<void> {
+    if (before === after) return Promise.resolve();
+    return runDatabaseOperation(this.db, async () => {
+      await this.db.transaction(async () => {
+        await pruneRecovery(this.db);
+        const id = createEntryId();
+        await this.db.execute("INSERT INTO operation_history(id,created_at) VALUES (?,?)", [id, new Date().toISOString()]);
+        await this.db.execute("INSERT INTO operation_history_changes(operation_id,table_name,row_key,before_json,after_json) VALUES (?,?,?,?,?)", [id, "device_preferences", JSON.stringify(["language"]), JSON.stringify({ language: before }), JSON.stringify({ language: after })]);
+      });
+      notifyLocalChange(this.db);
+    });
+  }
+
   list(limit = 100, offset = 0, now = new Date()): Promise<OperationHistoryRecord[]> {
     return runDatabaseOperation(this.db, async () => {
       await pruneRecovery(this.db, now);
@@ -56,7 +72,12 @@ export class OperationHistoryStore {
         const primary = changes.find(change => ["entries", "items", "sync_settings"].includes(change.table)) ?? changes[0];
         if (!primary) continue;
         const row = primary.after ?? primary.before;
-        result.push({ id: record.id, createdAt: record.created_at, restoredFrom: record.restored_from,
+        const subject: OperationHistoryRecord["subject"] = primary.table === "entries" && row
+          ? { type: "entry", value: rowToEntry(row as unknown as Parameters<typeof rowToEntry>[0],
+              changes.filter(change => change.table === "entry_tags").map(change => String((change.after ?? change.before)?.tag ?? "")).filter(Boolean),
+              changes.filter(change => change.table === "attachments").map(change => attachmentReference((change.after ?? change.before) as { id: string; sha256: string | null }))) }
+          : primary.table === "items" && row ? { type: "item", value: toItem(row as unknown as Parameters<typeof toItem>[0]) } : undefined;
+        result.push({ id: record.id, createdAt: record.created_at, restoredFrom: record.restored_from, subject,
           action: record.restored_from ? "restore" : !primary.before ? "create" : !primary.after ? "delete" : "update",
           title: String(row?.title ?? row?.name ?? (primary.table === "sync_settings" ? "settings" : primary.table)), changes });
       }
@@ -79,6 +100,7 @@ export class OperationHistoryStore {
         if (!(await this.db.select("SELECT id FROM operation_history WHERE id=?", [id])).length) throw new Error("HISTORY_EXPIRED");
         const changes = (await this.db.select<StoredChange>("SELECT * FROM operation_history_changes WHERE operation_id=? ORDER BY sequence", [id])).map(decode);
         if (!changes.length) throw new Error("HISTORY_EXPIRED");
+        if (changes.some(change => change.table === "device_preferences")) throw new Error("HISTORY_LOCAL_PREFERENCE");
         for (const change of changes) {
           const columns = Object.keys(change.after ?? change.before ?? {}).map(column => `"${column.replaceAll('"', '""')}"`).join(",");
           const rows = await this.db.select<HistoryRow>(`SELECT ${columns} FROM ${change.table} WHERE ${predicate(change.table)}`, change.key);

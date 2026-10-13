@@ -8,7 +8,7 @@ import { ChatDialog } from "./ChatDialog";
 
 const { configured } = vi.hoisted(() => ({ configured: { value: false } }));
 vi.mock("../ai/provider", () => ({
-  activeAIProvider: () => ({ kind: "openai-compatible" }),
+  activeAIProvider: () => ({ kind: "openai-compatible", model: "current-model" }),
   askIsReady: () => configured.value,
   requestAICompletion: vi.fn(),
 }));
@@ -38,7 +38,7 @@ function render(onConfirm = vi.fn(async () => true), onManualAdd = vi.fn(), prop
         entries={[]}
         aiPreferences={{
           enabled: true,
-          ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+          ask: { thinking: false, mode: "ai" }, providers: [{ id: "test", name: "Test", preset: "compatible", kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }], activeProviderId: "test",
           capture: { mode: "offline" },
         }}
         conversations={createMemoryConversationStore()}
@@ -63,7 +63,7 @@ function renderWith(store: ReturnType<typeof createMemoryConversationStore>, ini
         entries={[]}
         aiPreferences={{
           enabled: true,
-          ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+          ask: { thinking: false, mode: "ai" }, providers: [{ id: "test", name: "Test", preset: "compatible", kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }], activeProviderId: "test",
           capture: { mode: "offline" },
         }}
         conversations={store}
@@ -139,9 +139,9 @@ describe("unified capture and ask dialog", () => {
     const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
     act(() => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "/task Review #pro"); textarea.dispatchEvent(new Event("input", { bubbles: true })); });
     act(() => textarea.dispatchEvent(new Event("focus", { bubbles: false })));
-    const completion = host.querySelector<HTMLButtonElement>(".field-suggestion-menu button")!;
+    const completion = document.querySelector<HTMLButtonElement>(".field-suggestion-menu button")!;
     expect(completion.textContent).toBe("project-a");
-    act(() => completion.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true })));
+    act(() => completion.click());
     expect(textarea.value).toBe("/task Review #project-a ");
   });
 
@@ -268,6 +268,9 @@ describe("unified capture and ask dialog", () => {
     expect(card.querySelectorAll(".glass-time-trigger").length).toBeGreaterThanOrEqual(1);
     expect(card.querySelector(".capture-review-allday")?.getAttribute("aria-label")).toBe("全天");
     expect(card.querySelector(".capture-review-more")?.textContent).toBe("更多");
+    act(() => card.querySelector<HTMLButtonElement>(".capture-review-more")!.click());
+    expect(card.textContent).not.toContain("\u91cd\u590d\u622a\u6b62");
+    expect(card.querySelector(".capture-field-options--note")).toBeNull();
   });
 
   it("drops a single parsed item from its own corner button", async () => {
@@ -434,4 +437,18 @@ describe("unified capture and ask dialog", () => {
       vi.useRealTimers();
     }
   });
+});
+
+it("only offers record context in ask mode", () => {
+  render();
+  expect(document.querySelector('.chat-tool[aria-expanded]')).toBeNull();
+
+});
+
+it("shows the active provider model rather than the reopened conversation model", async () => {
+ const store = createMemoryConversationStore();
+ await store.createConversation({ providerKind: "openai-compatible", mode: "ask", model: "old-model", title: "Earlier question" });
+ await act(async () => render(undefined, undefined, { initialMode: "ask", conversations: store }));
+ expect(document.querySelector(".chat-composer-model")?.textContent).toBe("current-model");
+ expect(document.querySelector('.chat-tool[aria-expanded]')).not.toBeNull();
 });

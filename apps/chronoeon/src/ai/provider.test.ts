@@ -1,17 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  DEFAULT_AI_PROVIDER_PREFERENCES,
-  clearLocalAIKey,
-  clearRemoteAIKey,
+  DEFAULT_AI_PROVIDER, DEFAULT_AI_PROVIDER_PREFERENCES,
+  deleteAIProviderCredentials, readAIProviderCredentials,
   normalizeAICustomHeaders,
   normalizeAIBaseUrl,
   normalizeAIProviderPreferences,
-  saveLocalAIKey,
-  saveLocalAIHeaders,
-  saveRemoteAIKey,
+  saveAIProviderCredentials,
   requestAICompletion,
   warmUpAIProvider,
 } from "./provider";
+const testProvider = { ...DEFAULT_AI_PROVIDER, id: "remote", model: "test-model" };
+const testLocalProvider = { ...DEFAULT_AI_PROVIDER, id: "local", kind: "local-openai-compatible" as const, model: "test-model" };
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
@@ -19,10 +18,12 @@ describe("OpenAI-compatible provider adapter", () => {
   it("keeps secrets out of normalized persistent preferences", () => {
     const value = normalizeAIProviderPreferences({
       enabled: true,
-      ask: { remote: { baseUrl: "https://example.test/v1", model: "model", apiKey: "secret" } },
+      providers: [{ id: "first", name: "First", preset: "compatible", baseUrl: "https://example.test/v1", model: "model", apiKey: "secret", headers: [{ name: "X-Key", value: "secret" }] }],
+      activeProviderId: "first",
     });
-    expect(value.ask.remote).not.toHaveProperty("apiKey");
-    expect(value.ask.remote.baseUrl).toBe("https://example.test/v1");
+    expect(value.providers[0]).not.toHaveProperty("apiKey");
+    expect(value.providers[0]).not.toHaveProperty("headers");
+    expect(value.providers[0].baseUrl).toBe("https://example.test/v1");
     // 随心记 answers with JSON only, so it never inherits 随心问's thinking flag.
     expect(value.ask.thinking).toBe(false);
     expect(value.capture).toEqual({ mode: "offline" });
@@ -40,7 +41,7 @@ describe("OpenAI-compatible provider adapter", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("window", { localStorage: { getItem: () => null, setItem: () => undefined } });
     const result = await requestAICompletion(
-      { ...DEFAULT_AI_PROVIDER_PREFERENCES.ask.remote, baseUrl: "https://example.test/v1", model: "m" },
+      { ...testProvider, baseUrl: "https://example.test/v1", model: "m" },
       [{ role: "user", content: "test" }],
       { type: "object" },
     );
@@ -59,7 +60,7 @@ describe("OpenAI-compatible provider adapter", () => {
     }));
     vi.stubGlobal("window", { localStorage: { getItem: () => null, setItem: () => undefined } });
     const result = await requestAICompletion(
-      { ...DEFAULT_AI_PROVIDER_PREFERENCES.ask.remote, baseUrl: "https://example.test/v1", model: "Qwen3.8-27B" },
+      { ...testProvider, baseUrl: "https://example.test/v1", model: "Qwen3.8-27B" },
       [{ role: "user", content: "test" }],
     );
     expect(result.content).toBe("Visible answer");
@@ -75,42 +76,42 @@ describe("OpenAI-compatible provider adapter", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("window", { localStorage: { getItem: () => null, setItem: () => undefined } });
     const result = await requestAICompletion(
-      { ...DEFAULT_AI_PROVIDER_PREFERENCES.ask.remote, baseUrl: "https://example.test/v1", model: "remote-model" },
+      { ...testProvider, baseUrl: "https://example.test/v1", model: "remote-model" },
       [{ role: "user", content: "test" }],
     );
     expect(result.content).toBe("ok");
     const headers = new Headers(fetchMock.mock.calls[0][1].headers);
     expect(headers.get("Authorization")).toBeNull();
     await requestAICompletion(
-      { ...DEFAULT_AI_PROVIDER_PREFERENCES.ask.remote, baseUrl: "https://example.test/v1", model: "remote-model" },
+      { ...testProvider, baseUrl: "https://example.test/v1", model: "remote-model" },
       [{ role: "user", content: "test" }],
     );
     const remoteHeaders = new Headers(fetchMock.mock.calls[1][1].headers);
-    await saveRemoteAIKey("remote-secret");
+    await saveAIProviderCredentials("remote", { apiKey: "remote-secret", headers: [] });
     await requestAICompletion(
-      { ...DEFAULT_AI_PROVIDER_PREFERENCES.ask.remote, baseUrl: "https://example.test/v1", model: "remote-model" },
+      { ...testProvider, baseUrl: "https://example.test/v1", model: "remote-model" },
       [{ role: "user", content: "test" }],
     );
     const remoteKeyHeaders = new Headers(fetchMock.mock.calls[2][1].headers);
-    expect(remoteKeyHeaders.get("X-Api-Key")).toBe("remote-secret");
-    expect(remoteKeyHeaders.get("Authorization")).toBeNull();
-    await saveLocalAIKey("local-secret");
+    expect(remoteKeyHeaders.get("X-Api-Key")).toBeNull();
+    expect(remoteKeyHeaders.get("Authorization")).toBe("Bearer remote-secret");
+    await saveAIProviderCredentials("local", { apiKey: "local-secret", headers: [] });
     await requestAICompletion(
-      { ...DEFAULT_AI_PROVIDER_PREFERENCES.ask.local, baseUrl: "http://127.0.0.1:8080/v1", model: "local-model" },
+      { ...testLocalProvider, baseUrl: "http://127.0.0.1:8080/v1", model: "local-model" },
       [{ role: "user", content: "test" }],
     );
     const localKeyHeaders = new Headers(fetchMock.mock.calls[3][1].headers);
     expect(localKeyHeaders.get("Authorization")).toBe("Bearer local-secret");
-    await saveLocalAIHeaders([{ name: "X-Tenant", value: "home" }]);
+    await saveAIProviderCredentials("local", { apiKey: "local-secret", headers: [{ name: "X-Tenant", value: "home" }] });
     await requestAICompletion(
-      { ...DEFAULT_AI_PROVIDER_PREFERENCES.ask.local, baseUrl: "http://127.0.0.1:8080/v1", model: "local-model" },
+      { ...testLocalProvider, baseUrl: "http://127.0.0.1:8080/v1", model: "local-model" },
       [{ role: "user", content: "test" }],
     );
     const localHeaderHeaders = new Headers(fetchMock.mock.calls[4][1].headers);
     expect(localHeaderHeaders.get("X-Tenant")).toBe("home");
-    await clearLocalAIKey();
-    await saveLocalAIHeaders([]);
-    await clearRemoteAIKey();
+    expect((await readAIProviderCredentials("remote")).headers).toEqual([]);
+    await deleteAIProviderCredentials("local");
+    await deleteAIProviderCredentials("remote");
   });
 
   it("sends model-selected tools and preserves an empty tool-call message", async () => {
@@ -133,7 +134,7 @@ describe("OpenAI-compatible provider adapter", () => {
       function: { name: "search_entries", description: "Search", parameters: { type: "object" } },
     }];
     const result = await requestAICompletion(
-      { ...DEFAULT_AI_PROVIDER_PREFERENCES.ask.remote, baseUrl: "https://example.test/v1", model: "remote-model" },
+      { ...testProvider, baseUrl: "https://example.test/v1", model: "remote-model" },
       [{ role: "user", content: "test" }],
       undefined,
       undefined,
@@ -148,21 +149,21 @@ describe("OpenAI-compatible provider adapter", () => {
 
 
 describe("capture provider defaults and wake-up", () => {
-  const provider = { ...DEFAULT_AI_PROVIDER_PREFERENCES.ask.remote, baseUrl: "https://example.test/v1", model: "test-model" };
+  const provider = { ...testProvider, baseUrl: "https://example.test/v1", model: "test-model" };
   const messages = [{ role: "user" as const, content: "synthetic test" }];
   const answer = { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "answer" } }] }) };
 
-  it("enables the approved remote endpoint while preserving explicit saved choices", () => {
+  it("starts without an endpoint and activates only an existing saved profile", () => {
     const defaults = normalizeAIProviderPreferences({});
-    expect(defaults).toMatchObject({ enabled: true, ask: { remote: { baseUrl: "http://183.173.65.181:8080/v1", model: "Qwen3.8-27B", timeoutMs: 90_000 } } });
-    expect(normalizeAIProviderPreferences({ enabled: false, ask: { remote: { baseUrl: "", model: "" } } }))
-      .toMatchObject({ enabled: false, ask: { remote: { baseUrl: "", model: "" } } });
-    // The two surfaces keep independent endpoints.
+    expect(defaults).toEqual(DEFAULT_AI_PROVIDER_PREFERENCES);
+    expect(normalizeAIProviderPreferences({ activeProviderId: "missing" }).activeProviderId).toBeNull();
     const split = normalizeAIProviderPreferences({
-      ask: { remote: { baseUrl: "https://ask.test/v1", model: "ask-model" } },
+      providers: [{ id: "first", name: "First", preset: "compatible", baseUrl: "https://ask.test/v1", model: "ask-model" }],
+      activeProviderId: "first",
       capture: { mode: "offline" },
     });
-    expect(split.ask.remote.model).toBe("ask-model");
+    expect(split.providers[0].model).toBe("ask-model");
+    expect(split.activeProviderId).toBe("first");
     expect(split.capture).toEqual({ mode: "offline" });
   });
 
@@ -232,6 +233,18 @@ it("retries a connection failure while reading the response body", async () => {
   const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, json: async () => { throw new TypeError("network disconnected"); } })
     .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "Recovered" } }] }) });
   vi.stubGlobal("fetch", fetchMock);
-  const result = await requestAICompletion({ ...DEFAULT_AI_PROVIDER_PREFERENCES.ask.remote, baseUrl: "https://example.test/v1" }, [{ role: "user", content: "test" }]);
+  const result = await requestAICompletion({ ...testProvider, baseUrl: "https://example.test/v1" }, [{ role: "user", content: "test" }]);
   expect(result.content).toBe("Recovered"); expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it("never publishes hidden reasoning as a final answer or tool content", async () => {
+  const call = { id: "one", type: "function", function: { name: "search_entries", arguments: "{}" } };
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "", reasoning_content: "Let me think 中文", tool_calls: [call] } }] }) });
+  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("window", {});
+  const result = await requestAICompletion({ ...testProvider, baseUrl: "https://example.test/v1" }, [{ role: "user", content: "test" }]);
+  expect(result.content).toBe("");
+  expect(result.toolCalls).toEqual([call]);
+  fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "", reasoning_content: "Hidden only" } }] }) });
+  await expect(requestAICompletion({ ...testProvider, baseUrl: "https://example.test/v1" }, [{ role: "user", content: "test" }])).rejects.toThrow("empty message");
 });

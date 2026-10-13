@@ -1,5 +1,7 @@
 import type { EntryDraft, EntryKind, Reminder } from "../entry";
 import { consumeMatch, remainingText, type CaptureText } from "./text";
+import { captureMatchPositions } from "./match";
+export { captureMatchPositions } from "./match";
 
 export interface CaptureIssue { field: string; value: string; code: "unknown" | "conflict" | "unsupported"; }
 export interface ExplicitCapture {
@@ -85,6 +87,7 @@ export function completeCapture(input: string, values: { categories: CaptureComp
   const choices = prefix === "/" ? CAPTURE_COMMANDS.map(value => ({ value: value.slice(1), label: value }))
     : prefix === "%" ? values.categories : prefix === "&" ? values.links ?? []
     : (prefix === "@" ? values.locations : values.tags).map(value => ({ value, label: value }));
-  return choices.filter(choice => choice.label.toLocaleLowerCase().startsWith(query) || choice.value.toLocaleLowerCase().startsWith(query))
-    .slice(0, 5).map(choice => ({ ...choice, value: prefix + (/\s/.test(choice.value) ? `"${choice.value}"` : choice.value) }));
+  return choices.filter(choice => prefix === "/" ? choice.value.toLocaleLowerCase().startsWith(query)
+    : captureMatchPositions(choice.label, query) !== null || captureMatchPositions(choice.value, query) !== null)
+    .map(choice => ({ ...choice, value: prefix + (/\s/.test(choice.value) ? `"${choice.value}"` : choice.value) }));
 }

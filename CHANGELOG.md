@@ -1,5 +1,19 @@
 # Changelog / 更新记录
 
+## 3.0.1 — 2026-10-13
+
+### English
+- Select DayView items with one click/tap and edit with a double click/tap on desktop and mobile; selected resize edges remain visible.
+- Fix native Ask context limits, long-conversation requests and reasoning-only responses; compact and deduplicate complete local records for analysis.
+- Include food records across entry types in dietary reviews. Fix mobile timer layout and capture recurrence/notes suggestions.
+- Include the pending capture, provider settings, history and device refinements validated by the complete test suite.
+
+### 简体中文
+- 桌面和移动端日视图统一为单击选中、双击编辑，选中后清晰显示调整边界。
+- 修复原生随心问上下文限制、长对话请求及仅返回思考内容的问题；分析上下文完整压缩、去重。
+- 饮食回顾检索跨类型记录；修复移动端计时布局、随心记重复截止显示及备注候选。
+- 纳入通过完整测试的随心记、模型设置、操作历史及设备功能优化。
+
 ## 0.3.0 — 2026-10-04
 
 ### English

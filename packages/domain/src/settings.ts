@@ -93,8 +93,22 @@ export type SharedSettings = Pick<ChronoEonSettings, typeof SHARED_SETTINGS_KEYS
 
 /** User catalogs travel with data; presentation, input and device behavior do not. */
 export function sharedSettings(settings: Partial<ChronoEonSettings>): Partial<SharedSettings> {
+  const source = { ...DEFAULT_CHRONOEON_SETTINGS, ...settings };
+  const english = localizeBuiltinSettings(source, "en");
+  const chinese = localizeBuiltinSettings(source, "zh");
+  const canonical = { ...settings, calendars: settings.calendars?.map((calendar, i) => {
+    const en = english.calendars[i], zh = chinese.calendars[i];
+    const name = (value: string, a: string, b: string) => value === a || value === b ? a : value;
+    return { ...calendar,
+      defaultBillSubCategoryId: name(calendar.defaultBillSubCategoryId, en.defaultBillSubCategoryId, zh.defaultBillSubCategoryId),
+      categories: calendar.categories.map((v, j) => ({ ...v, name: name(v.name, en.categories[j].name, zh.categories[j].name) })),
+      paymentMethods: calendar.paymentMethods.map((v, j) => ({ ...v, name: name(v.name, en.paymentMethods[j].name, zh.paymentMethods[j].name) })),
+      itemCategories: calendar.itemCategories.map((v, j) => ({ ...v, name: name(v.name, en.itemCategories[j].name, zh.itemCategories[j].name) })),
+      billCategories: calendar.billCategories.map((v, j) => ({ ...v, name: name(v.name, en.billCategories[j].name, zh.billCategories[j].name), sub: v.sub.map((sub, k) => name(sub, en.billCategories[j].sub[k], zh.billCategories[j].sub[k])) })),
+    };
+  }) };
   return Object.fromEntries(SHARED_SETTINGS_KEYS.filter(key => settings[key] !== undefined)
-    .map(key => [key, settings[key]])) as Partial<SharedSettings>;
+    .map(key => [key, canonical[key]])) as Partial<SharedSettings>;
 }
 
 export function mergeSharedSettings(local: ChronoEonSettings, remote: Partial<ChronoEonSettings>): ChronoEonSettings {
@@ -304,6 +318,12 @@ export function localizeBuiltinSettings(settings: ChronoEonSettings, locale: Loc
     language: locale,
     calendars: settings.calendars.map((calendar) => ({
       ...calendar,
+      defaultBillSubCategoryId: (() => {
+        const category = calendar.billCategories.find(v => v.id === calendar.defaultBillCategoryId);
+        if (!category?.builtin || !category.builtinSubKeys?.length) return calendar.defaultBillSubCategoryId;
+        const index = category.sub.indexOf(calendar.defaultBillSubCategoryId);
+        return billDefaults.find(v => v.builtinKey === category.builtinKey)?.sub[index] ?? calendar.defaultBillSubCategoryId;
+      })(),
       categories: calendar.categories.map((category) => category.builtin && category.builtinKey === "default"
         ? { ...category, name: DEFAULT_CATEGORY_NAME[locale] }
         : category),

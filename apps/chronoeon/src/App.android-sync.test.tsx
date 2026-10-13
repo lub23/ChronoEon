@@ -67,7 +67,7 @@ describe("mobile logical sync lifecycle",()=>{
 });
 
 
-it("rebuilds from Settings → Data and refreshes the recycle bin without reopening SQLite", async () => {
+it("preserves local history across snapshot rebuilds and previews without closing settings", async () => {
   act(() => root.render(<App />));
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
@@ -78,20 +78,33 @@ it("rebuilds from Settings → Data and refreshes the recycle bin without reopen
   const data = [...host.querySelectorAll<HTMLButtonElement>(".settings-nav button")].find((button) => button.textContent?.includes("数据"))!;
   await act(async () => { data.click(); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
-  expect(host.querySelector(".recycle-bin-list")?.textContent).toContain(stored.title);
+  expect(host.querySelector(".operation-history")?.textContent).toContain(stored.title);
+  expect(host.querySelector(".recycle-bin")).toBeNull();
   const generation = mobile.remote.index.snapshot.generation;
   const rebuild = host.querySelector<HTMLButtonElement>(".sync-rebuild-button")!;
   expect(rebuild.disabled).toBe(false);
   await act(async () => { rebuild.click(); });
   expect(mobile.remote.index.snapshot.generation).toBe(generation);
-  expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("清空回收站");
+  expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("不影响本机操作历史");
   await act(async () => {
     document.querySelector<HTMLButtonElement>('.confirm-actions .danger-button')!.click();
     await new Promise((resolve) => setTimeout(resolve, 150));
   });
   expect(mobile.remote.index.snapshot.generation).toBe(generation + 1);
   expect(await mobile.session.store.deletedEntries()).toHaveLength(1);
-  expect(host.querySelector(".recycle-bin-list")?.textContent).toContain(stored.title);
+  expect(host.querySelector(".operation-history")?.textContent).toContain(stored.title);
+  await act(async () => host.querySelector<HTMLButtonElement>(".history-title")!.click());
+  expect(host.querySelector(".settings-dialog")).toBeTruthy();
+  expect(document.querySelector(".composer-sheet")?.textContent).toContain("只读");
+  expect(document.querySelector(".composer-footer [type=submit]")).toBeNull();
+  await act(async () => document.querySelector<HTMLButtonElement>('.composer-header button[aria-label="关闭"]')!.click());
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)); });
+  await act(async () => host.querySelector<HTMLButtonElement>(".history-card .recovery-action")!.click());
+  await act(async () => document.querySelector<HTMLButtonElement>(".confirm-actions .primary-action")!.click());
+  expect((await mobile.session.store.get(stored.id))?.title).toBe(stored.title);
+  await act(async () => host.querySelector<HTMLButtonElement>(".history-title")!.click());
+  expect(host.querySelector(".settings-dialog")).toBeTruthy();
+  expect(document.querySelector(".composer-footer [type=submit]")).toBeTruthy();
   expect(host.querySelector(".sync-snapshot-schedule time")?.getAttribute("datetime")).toBe(new Date(Date.parse(mobile.remote.index.snapshot.createdAt) + 7 * 86400000).toISOString());
   expect(mobile.boots).toBe(1);
 }, 10000);

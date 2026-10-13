@@ -164,7 +164,7 @@ function entryToRow(entry: Entry, updatedAt: string | null = null): Record<strin
   };
 }
 
-function rowToEntry(row: EntryColumns, tags: string[], images: string[]): Entry {
+export function rowToEntry(row: EntryColumns, tags: string[], images: string[]): Entry {
   return {
     id: String(row.id),
     kind: row.modality as EntryKind,
@@ -771,6 +771,6 @@ export async function archiveEntryForRecovery(backend: PersistencePort, id: stri
   await backend.execute("INSERT INTO deleted_entries(id,payload_json,deleted_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,deleted_at=excluded.deleted_at", [id, JSON.stringify(payload), new Date().toISOString()]);
 }
 
-function attachmentReference(row: { id: string; sha256: string | null }): string {
+export function attachmentReference(row: { id: string; sha256: string | null }): string {
   return `attachments/${row.sha256 ?? `missing-${row.id}`}.webp`;
 }

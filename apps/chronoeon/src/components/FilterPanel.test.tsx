@@ -2,7 +2,7 @@
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDefaultSettings, type Entry } from "@chronoeon/domain";
+import { createDefaultSettings, draftToItem, type Entry } from "@chronoeon/domain";
 import { EMPTY_ENTRY_FILTER, entryMatchesFilter, type EntryFilter } from "../domain/entryFilter";
 import type { AgendaFilter } from "../domain/agendaTimeline";
 import { FilterPanel } from "./FilterPanel";
@@ -74,4 +74,16 @@ describe("unified entry filtering", () => {
     expect(apply).toHaveBeenLastCalledWith(""); expect(change).toHaveBeenLastCalledWith(EMPTY_ENTRY_FILTER);
     expect(document.querySelector(".filter-search-results")).toBeNull();
   });
+});
+
+it("shows matching assets in the filter popup and opens their preview", () => {
+  const item = draftToItem({ name: "相机", calendarId: "default", acquiredAt: "12:00", category: "electronics", acquisition: "gift", acquiredOn: "2026-10-05", cost: 0, currency: "CNY" });
+  const open = vi.fn(); const close = vi.fn();
+  act(() => root.render(<FilterPanel locale="zh" settings={createDefaultSettings("zh")} entries={[]} items={[item]} onOpenItem={open}
+    kind={["item"]} filter={EMPTY_ENTRY_FILTER} search="相机" scheduleCategories={[]} billCategories={[]} calendars={[]}
+    anchor={{ top: 12, bottom: 45, right: 390 }} onSearch={vi.fn()} onOpenEntry={vi.fn()} onKindChange={vi.fn()} onChange={vi.fn()} onClose={close} />));
+  const row = document.querySelector(".filter-result")!;
+  expect(row.textContent).toContain("相机");
+  expect(document.querySelector(".filter-empty")?.textContent).not.toContain("没有匹配");
+  click(row); expect(open).toHaveBeenCalledWith(item); expect(close).toHaveBeenCalledOnce();
 });

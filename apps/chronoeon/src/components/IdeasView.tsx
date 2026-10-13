@@ -1,8 +1,7 @@
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { format, formatDistanceToNow, parseISO } from "date-fns";
 import { enUS, zhCN } from "date-fns/locale";
 import { resolveEntryColors, type ChronoEonSettings } from "@chronoeon/domain";
-import { Virtuoso } from "react-virtuoso";
 import type { Entry, Locale } from "../domain/entry";
 import { titleFor } from "../domain/entry";
 import { calendarDisplayName, t } from "../i18n";
@@ -22,9 +21,6 @@ interface IdeasViewProps {
   onNew: () => void;
 }
 
-/** Small boards stay in natural flow. Long boards virtualize pairs of cards
- * as variable-height rows: a uniform-cell grid cannot measure diary paragraphs. */
-const VIRTUALIZE_ABOVE = 48;
 
 function calendarNameFor(entry: Entry, settings: ChronoEonSettings): string {
   const id = (entry.calendar ?? "").trim().toLocaleLowerCase();
@@ -43,9 +39,27 @@ function sealInitial(name: string): string {
 export function IdeasView({ entries, locale, settings, search, today, onEdit, onConvert, onNew }: IdeasViewProps) {
   const query = search.trim().toLowerCase();
   const ideas = useMemo(() => entries.filter((entry) => entry.kind === "idea" && (!query || entryMatchesSearch(entry, search, locale))), [entries, query, search, locale]);
-  const rows = useMemo(() => Array.from({ length: Math.ceil(ideas.length / 2) }, (_, index) => ideas.slice(index * 2, index * 2 + 2)), [ideas]);
   const dateLocale = locale === "zh" ? zhCN : enUS;
-  const virtualize = ideas.length > VIRTUALIZE_ABOVE;
+  const board = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = board.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const layout = () => {
+      for (const node of element.children) {
+        const card = node.firstElementChild;
+        if (node instanceof HTMLElement && card) {
+          node.style.gridRowEnd = "span " + Math.ceil(card.getBoundingClientRect().height + 24);
+          const right = node.offsetLeft > element.clientWidth / 2;
+          node.classList.toggle("is-right", right);
+          node.classList.toggle("is-left", !right);
+        }
+      }
+    };
+    const observer = new ResizeObserver(layout);
+    for (const node of element.children) if (node.firstElementChild) observer.observe(node.firstElementChild);
+    layout();
+    return () => observer.disconnect();
+  }, [ideas, locale]);
 
   const ideaCard = (entry: Entry, index: number) => {
     const colors = resolveEntryColors(entry, settings);
@@ -102,17 +116,7 @@ export function IdeasView({ entries, locale, settings, search, today, onEdit, on
 
       {ideas.length ? (
         <>
-          {virtualize ? (
-            <Virtuoso
-              className="ideas-scroll"
-              data={rows}
-              initialItemCount={12}
-              computeItemKey={(_index, row) => row[0].id}
-              itemContent={(index, row) => <div className="ideas-vine">{row.map((entry, column) => ideaCard(entry, index * 2 + column))}</div>}
-            />
-          ) : (
-            <div className="ideas-vine">{ideas.map((entry, index) => ideaCard(entry, index))}</div>
-          )}
+          <div ref={board} className="ideas-vine ideas-masonry">{ideas.map((entry, index) => ideaCard(entry, index))}</div>
           <button className="idea-new-card idea-vine-bud" type="button" onClick={onNew}>
             <span><Icon name="plus" size={21} /></span>
             <strong>{t("newEntry", locale)}</strong>

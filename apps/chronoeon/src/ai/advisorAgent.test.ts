@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Entry } from "../domain/entry";
-import { advisorToolResultForModel, advisorTools, executeAdvisorToolCall } from "./advisorAgent";
+import { advisorResultsForModel, compactAdvisorEntry, advisorToolResultForModel, advisorTools, executeAdvisorToolCall } from "./advisorAgent";
 
 function entry(id: string, partial: Partial<Entry> & Pick<Entry, "date">): Entry {
   return {
@@ -49,7 +49,7 @@ describe("local advisor tool executor", () => {
     expect(result.notes).toEqual([
       "count=2",
       "kinds=event=2",
-      "statuses=open=2",
+      "statuses=unspecified=2",
       "terms=饮食=1,睡眠=1",
       "dates=2026-09-17=1,2026-09-18=1",
     ]);
@@ -92,4 +92,30 @@ describe("local advisor tool executor", () => {
     expect(spending.notes.join(" ")).toContain("categories=personal:-42.00x1");
   });
 
+});
+
+describe("large advisor context", () => {
+  it("counts and returns every matching record instead of the first 80/60", () => {
+    const entries = Array.from({ length: 1095 }, (_, i) => entry(String(i), { date: "2026-09-18" }));
+    const result = executeAdvisorToolCall(toolCall("search_entries", { days: 365 }), entries, "2026-09-19");
+    expect(result.notes).toContain("count=1095");
+    expect(JSON.parse(advisorToolResultForModel(result)).entries).toHaveLength(1095);
+  });
+  it("omits empty fields but preserves zero amounts, money, notes and end dates", () => {
+    const compact = compactAdvisorEntry(entry("bill", { date: "2026-09-18", titleZh: "Entry", tags: [], location: "", note: " a   b ", amount: 0, currency: "CNY", endDate: "2026-09-19", priority: "high", urgency: "low" }));
+    expect(compact).toMatchObject({ amount: 0, currency: "CNY", note: "a b", endDate: "2026-09-19", importance: "high", urgency: "low" });
+    expect(compact).not.toHaveProperty("location");
+    expect(compact).not.toHaveProperty("tags");
+    expect(compact).not.toHaveProperty("titleZh");
+  });
+});
+
+it("shares records across overlapping tool results without losing per-tool scope", () => {
+  const entries = [entry("one", { date: "2026-09-18", kind: "bill", amount: -20 })];
+  const search = executeAdvisorToolCall(toolCall("search_entries", { days: 365 }), entries, "2026-09-19");
+  const spending = executeAdvisorToolCall(toolCall("spending_summary", { start_date: "2026-01-01", end_date: "2026-09-19" }), entries, "2026-09-19");
+  const data = JSON.parse(advisorResultsForModel([search, spending]));
+  expect(data.entries).toHaveLength(1);
+  expect(data.results.map((result: any) => result.entry_ids)).toEqual([["one"], ["one"]]);
+  expect(data.results[1].notes).toContain("expense=20.00");
 });

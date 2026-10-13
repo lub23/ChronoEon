@@ -3,7 +3,7 @@ import { createMotionPortal as createPortal } from "./MotionPresence";
 import { EMPTY_ENTRY_FILTER, filterActive, toggleValue, type EntryFilter } from "../domain/entryFilter";
 import type { AgendaFilter, FilterKind } from "../domain/agendaTimeline";
 import type { Entry, Locale } from "../domain/entry";
-import type { ChronoEonSettings, EntryCategoryOption } from "@chronoeon/domain";
+import type { ChronoEonSettings, EntryCategoryOption, Item } from "@chronoeon/domain";
 import { calendarDisplayName, t } from "../i18n";
 import { Icon } from "./Icon";
 import { SearchResults } from "./SearchResults";
@@ -19,6 +19,8 @@ interface FilterPanelProps {
   anchor: { top: number; bottom: number; right: number };
   settings: ChronoEonSettings;
   entries: Entry[];
+  items?: Item[];
+  onOpenItem?: (item: Item) => void;
   search: string;
   focusSearch?: boolean;
   onSearch: (value: string) => void;
@@ -35,7 +37,7 @@ const KIND_OPTIONS: Array<{ id: FilterKind; label: "tasks" | "events" | "bills" 
 
 /** One surface for text, calendars, kinds, photos and category filters. */
 export function FilterPanel({ locale, kind, filter, scheduleCategories, billCategories, calendars, anchor,
-  settings, entries, search, focusSearch, onSearch, onOpenEntry, onKindChange, onChange, onClose }: FilterPanelProps) {
+  settings, entries, items = [], onOpenItem, search, focusSearch, onSearch, onOpenEntry, onKindChange, onChange, onClose }: FilterPanelProps) {
   const [query, setQuery] = useState(search);
   const inputRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef(onClose); closeRef.current = onClose;
@@ -113,7 +115,7 @@ export function FilterPanel({ locale, kind, filter, scheduleCategories, billCate
             onChange={event => setQuery(event.target.value)} placeholder={t("filterSearchHint", locale)} aria-label={t("filterSearch", locale)} /></label>
           <button type="submit" className="filter-search-submit">{t("filterSearch", locale)}</button>
         </form>
-        <SearchResults entries={entries} search={search} settings={settings} locale={locale} onOpen={entry => { onClose(); onOpenEntry(entry); }} />
+        <SearchResults items={items} onOpenItem={item => { onClose(); onOpenItem?.(item); }} entries={entries} search={search} settings={settings} locale={locale} onOpen={entry => { onClose(); onOpenEntry(entry); }} />
       </div>
       <div className="filter-section">
         <p className="filter-label">{t("filterCalendars", locale)}</p>

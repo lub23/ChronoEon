@@ -1,6 +1,6 @@
 {
   "name": "@chronoeon/app",
-  "version": "0.3.0",
+  "version": "3.0.1",
   "private": true,
   "description": "ChronoEon (时元) primary Tauri application for desktop and future mobile shells.",
   "type": "module",
@@ -33,6 +33,7 @@
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-sql": "^2.3.1",
     "date-fns": "^4.1.0",
+    "eventsource-parser": "^4.1.2",
     "lunar-javascript": "^1.7.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

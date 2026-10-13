@@ -73,6 +73,7 @@ interface EntryComposerProps {
   onCreateItemFromBill?: (entry: Entry, category: Item["category"]) => void | Promise<void>;
   onSaveItem?: (draft: ItemDraft, id?: string) => Promise<void>;
   onDeleteItem?: (id: string) => void | Promise<void>;
+  readOnly?: boolean;
 }
 
 function normalizeScheduleTimes(draft: EntryDraft, timeScale: ChronoEonSettings["timeScale"]): EntryDraft {
@@ -182,6 +183,7 @@ export function EntryComposer({
   initialItemDraft = null,
   onSaveItem,
   onDeleteItem,
+  readOnly = false,
 }: EntryComposerProps) {
   const occurrence = Boolean(editing?.recurrenceSourceId && editing.occurrenceDate);
   const source = sourceEntry ?? editing;
@@ -212,6 +214,8 @@ export function EntryComposer({
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false); // ref so the guard holds even inside one render tick
   const [itemBusy, setItemBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const deletingRef = useRef(false);
   const itemBusyRef = useRef(false);
   const [locating, setLocating] = useState(false);
   const locationInput = useRef<HTMLInputElement | null>(null);
@@ -248,10 +252,10 @@ export function EntryComposer({
   }, [itemDraft?.name, itemDraft?.calendarId, itemHistory, itemSuggestions, editingItem, settings]);
   const [statusMenu, setStatusMenu] = useState<{ left: number; top: number } | null>(null);
   const locationSuggestions = useMemo(
-    () => settings.locationAutofill && draft.title.trim() && activeKind !== "item"
+    () => settings.locationAutofill && activeKind !== "item" && !readOnly
       ? locationFieldCandidates(draft.title, draft.location, localHistory, draft.date)
       : [],
-    [activeKind, draft.date, draft.location, draft.title, localHistory, settings.locationAutofill],
+    [activeKind, draft.date, draft.location, draft.title, localHistory, settings.locationAutofill, readOnly],
   );
   // The draft at open time is the discard baseline: Esc (or the close button)
   // with unsaved changes asks before losing them.
@@ -259,7 +263,7 @@ export function EntryComposer({
   const dirty = activeKind === "item" ? JSON.stringify(itemDraft) !== itemPristineRef.current : JSON.stringify(draft) !== pristineRef.current;
 
   const requestClose = useCallback(() => {
-    if (!dirty) {
+    if (readOnly || !dirty) {
       onClose();
       return;
     }
@@ -273,7 +277,7 @@ export function EntryComposer({
       confirmLabel: t("discardConfirm", locale),
       tone: "danger",
     }).then((accepted) => { if (accepted) onClose(); });
-  }, [dirty, locale, onClose, onConfirm]);
+  }, [dirty, locale, onClose, onConfirm, readOnly]);
 
   // Escape is owned on the shared modal bus (newest modal wins). The composer
   // registers once on mount; a confirm it opens registers later, so one Escape
@@ -323,9 +327,9 @@ export function EntryComposer({
   // calendar distance and stop as soon as the user owns the location field.
   useEffect(() => {
     if (!settings.locationAutofill || locationTouchedRef.current) return;
-    const location = locationSuggestions[0]?.value;
+    const location = draft.title.trim() ? inferLocationCandidates(draft.title, localHistory, draft.date)[0]?.value : undefined;
     if (location !== draft.location) update("location", location);
-  }, [draft.location, locationSuggestions, settings.locationAutofill]);
+  }, [draft.title, draft.date, draft.location, localHistory, settings.locationAutofill]);
 
   const categoryOptions = useMemo(
     () => withCurrentOption(categoryOptionsForKind(draft.kind, settings, draft.calendar), draft.category),
@@ -499,6 +503,7 @@ export function EntryComposer({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (readOnly || deletingRef.current) return;
     if (activeKind === "item") {
       await submitItem();
       return;
@@ -550,19 +555,27 @@ export function EntryComposer({
     }
   }
 
-  function remove() {
-    if (!source) return;
+  async function remove() {
+    const target = activeKind === "item" ? editingItem : source;
+    if (!target || readOnly || deletingRef.current || submittingRef.current || itemBusyRef.current) return;
+    deletingRef.current = true;
+    setDeleting(true);
     const request: ConfirmRequest = {
-      title: t(recurringSeries ? "deleteSeriesConfirm" : "deleteConfirm", locale),
-      detail: source.title,
+      title: t(activeKind !== "item" && recurringSeries ? "deleteSeriesConfirm" : "deleteConfirm", locale),
+      detail: activeKind === "item" ? editingItem?.name : source?.title,
       confirmLabel: t("delete", locale),
       tone: "danger",
     };
-    if (!onConfirm) {
-      void onDelete(source.id);
-      return;
+    try {
+      if (onConfirm && !await onConfirm(request)) return;
+      if (activeKind === "item") await onDeleteItem?.(target.id);
+      else await onDelete(target.id);
+    } catch {
+      setError(activeKind === "item" ? "itemSaveFailed" : "entrySaveFailed");
+    } finally {
+      deletingRef.current = false;
+      setDeleting(false);
     }
-    void onConfirm(request).then((accepted) => { if (accepted) void onDelete(source.id); });
   }
 
   return (
@@ -579,8 +592,8 @@ export function EntryComposer({
       >
         <i className="composer-handle" aria-hidden="true" style={{ width: 37, height: 4 }} />
         <header className="composer-header">
-          <div className={`composer-title-line${activeKind === "item" ? " composer-title-line--item" : ""}`}>
-            <h2 id="composer-title">{activeKind === "item" ? (editingItem ? t("editTitle", locale) : t("createTitle", locale)) : editing ? t("editTitle", locale) : t("createTitle", locale)}</h2>
+          <fieldset disabled={readOnly} className={`composer-title-line${activeKind === "item" ? " composer-title-line--item" : ""}`}>
+            <h2 id="composer-title">{readOnly ? (locale === "zh" ? "只读预览" : "Read only") : activeKind === "item" ? (editingItem ? t("editTitle", locale) : t("createTitle", locale)) : editing ? t("editTitle", locale) : t("createTitle", locale)}</h2>
             <div className="composer-category-field composer-category-field--top">
               <GlassSelect
                 value={activeKind === "item" ? itemDraft?.category ?? defaultItemCategoryForCalendar(settings, itemDraft?.calendarId ?? draft.calendar) : draft.category}
@@ -635,14 +648,14 @@ export function EntryComposer({
                 <span className="visually-hidden">{t("allDay", locale)}</span>
               </label>
             ) : null}
-            </div>
-          <button className="icon-button" type="button" onClick={requestClose} aria-label={t("close", locale)}><Icon name="close" /></button>
+            </fieldset>
+          <button className="icon-button" type="button" onClick={requestClose} autoFocus={readOnly} aria-label={t("close", locale)}><Icon name="close" /></button>
         </header>
 
         <div className="composer-kind-bar">
           <div className="kind-switcher" role="tablist" aria-label={t("type", locale)}>
             {composerKinds.map((kind) => (
-              <button key={kind} disabled={occurrenceOnly} type="button" role="tab" aria-selected={activeKind === kind} className={activeKind === kind ? `is-active kind-${kind}` : ""} onClick={() => changeKind(kind)}>
+              <button key={kind} disabled={occurrenceOnly || readOnly} type="button" role="tab" aria-selected={activeKind === kind} className={activeKind === kind ? `is-active kind-${kind}` : ""} onClick={() => changeKind(kind)}>
                 {kind === "item" ? <Icon name="box" size={17} /> : <EntryGlyph kind={kind} size={17} />}{t(kind === "item" ? "items" : kind, locale)}
               </button>
             ))}
@@ -650,6 +663,7 @@ export function EntryComposer({
           </div>
 
         <form className="composer-form" onSubmit={submit}>
+          <fieldset className="composer-fields" disabled={readOnly}>
           {occurrence && (
             <section className="recurrence-scope" aria-label={t("recurrenceOccurrence", locale)}>
               <div className="scope-switcher" role="group">
@@ -872,7 +886,7 @@ export function EntryComposer({
                     </label>
                   </div>
                   {/* A narrow repeat-until date beside the weekday strip. */}
-                  {draft.recurrence !== "none" && (
+                  {draft.recurrence && draft.recurrence !== "none" && (
                     <div className="recurrence-detail-row">
                       <label className="field-label">
                         <span>{t("repeatUntil", locale)}</span>
@@ -943,18 +957,14 @@ export function EntryComposer({
                 </div>
               </div>
 
-              <AttachmentField
-                locale={locale}
-                settings={settings}
-                entryDate={draft.date}
-                icon={<EntryGlyph kind={draft.kind} status={draft.status} size={20} />}
-                value={draft.images ?? []}
-                onChange={(next) => update("images", next.length ? next : undefined)}
-                onNotice={onNotice}
-              />
             </>
           )}
 
+          </fieldset>
+          {activeKind !== "item" && <AttachmentField locale={locale} settings={settings} entryDate={draft.date}
+            icon={<EntryGlyph kind={draft.kind} status={draft.status} size={20} />}
+            value={draft.images ?? []} disabled={readOnly}
+            onChange={next => { if (!readOnly) update("images", next.length ? next : undefined); }} onNotice={onNotice} />}
           {activeKind === "item" && itemDraft && (
             <>
               <ItemPhotoField
@@ -963,8 +973,8 @@ export function EntryComposer({
                 settings={settings}
                 entryDate={itemDraft.acquiredOn}
                 busy={itemBusy}
-                disabled={itemBusy}
-                onChange={images => patchItem({ images })}
+                disabled={itemBusy || readOnly}
+                onChange={images => { if (!readOnly) patchItem({ images }); }}
                 onNotice={message => setError(message as MessageKey)}
               />
               {error && <p className="form-error" role="alert">{t(error, locale)}</p>}
@@ -972,12 +982,14 @@ export function EntryComposer({
           )}
 
           <footer className="composer-footer">
+            {readOnly ? <p className="settings-footnote">{locale === "zh" ? "撤销删除后可编辑。" : "Undo deletion to edit."}</p> : <>
             {activeKind === "item"
               ? editingItem && onDeleteItem
-                ? <button className="danger-button" type="button" onClick={() => { void onDeleteItem(editingItem.id); }}><Icon name="trash" size={16} />{t("delete", locale)}</button>
+                ? <button className="danger-button" type="button" disabled={deleting || itemBusy} onClick={() => void remove()}><Icon name="trash" size={16} />{t("delete", locale)}</button>
                 : <span />
-              : source ? <button className="danger-button" type="button" onClick={remove}><Icon name="trash" size={16} />{t(recurringSeries ? "deleteSeries" : "delete", locale)}</button> : <span />}
-            <div><button className="primary-action" type="submit" disabled={activeKind === "item" ? itemBusy : submitting}>{t(occurrenceOnly ? "moveOccurrence" : "save", locale)}<Icon name="arrow-right" size={16} /></button></div>
+              : source ? <button className="danger-button" type="button" disabled={deleting || submitting} onClick={() => void remove()}><Icon name="trash" size={16} />{t(recurringSeries ? "deleteSeries" : "delete", locale)}</button> : <span />}
+            <div><button className="primary-action" type="submit" disabled={deleting || (activeKind === "item" ? itemBusy : submitting)}>{t(occurrenceOnly ? "moveOccurrence" : "save", locale)}<Icon name="arrow-right" size={16} /></button></div>
+            </>}
           </footer>
         </form>
       </section>

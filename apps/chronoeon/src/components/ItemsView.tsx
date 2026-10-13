@@ -111,7 +111,7 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
           aria-label={sortDirection === "asc" ? t("sortAscending", locale) : t("sortDescending", locale)}
           title={sortDirection === "asc" ? t("sortAscending", locale) : t("sortDescending", locale)}
           onClick={() => setSortDirection(current => current === "asc" ? "desc" : "asc")}>
-          <i aria-hidden="true"><b className="is-down" /><b className="is-up" /></i>
+          <i aria-hidden="true"><b className="is-up" /><b className="is-down" /></i>
         </button>
         <button type="button" className="primary-button items-add-button" onClick={onAdd} disabled={!onAdd} aria-label={t("itemAdd", locale)}><Icon name="plus" size={16} /></button>
       </div>

@@ -182,10 +182,42 @@ describe("EntryComposer defaults", () => {
     const location = host.querySelector<HTMLInputElement>(".location-input-wrap input")!;
     act(() => location.focus());
     await act(async () => setInputValue(location, "Of"));
-    const candidate = host.querySelector<HTMLButtonElement>(".field-suggestion-menu button")!;
+    const candidate = document.querySelector<HTMLButtonElement>(".field-suggestion-menu button")!;
     expect(candidate.textContent).toBe("Office");
-    await act(async () => candidate.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true })));
+    await act(async () => candidate.click());
     expect(location.value).toBe("Office");
+  });
+  it("offers location candidates before a title is entered without autofilling", () => {
+    const history = [{ kind: "event" as const, title: "Trip", category: "default", location: "辽宁开原酒店", date: "2026-10-04" }];
+    act(() => root.render(<EntryComposer locale="en" selectedDate="2026-10-04" editing={null} history={history} onClose={vi.fn()} onSave={vi.fn()} onDelete={vi.fn()} />));
+    const input = host.querySelector<HTMLInputElement>(".location-input-wrap input")!;
+    expect(input.value).toBe("");
+    act(() => input.focus());
+    expect(document.querySelector('[role="option"]')?.textContent).toBe("辽宁开原酒店");
+  });
+  it("prevents writes for deleted previews but permits closing", async () => {
+    const onSave = vi.fn(), onDelete = vi.fn(), onClose = vi.fn();
+    const entry: Entry = { id: "old", title: "Deleted", kind: "event", date: "2026-10-04", category: "default", color: "#777", createdAt: "2026-10-04T00:00:00Z" };
+    act(() => root.render(<EntryComposer locale="en" selectedDate={entry.date} editing={entry} readOnly onClose={onClose} onSave={onSave} onDelete={onDelete} />));
+    expect(host.querySelector("input")?.matches(":disabled")).toBe(true);
+    expect(host.querySelector(".composer-footer .danger-button")).toBeNull();
+    await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onDelete).not.toHaveBeenCalled();
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true })));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+  it("waits for deletion confirmation and avoids duplicate deletes", async () => {
+    let resolve!: (value: boolean) => void;
+    const onConfirm = vi.fn(() => new Promise<boolean>(yes => { resolve = yes; }));
+    const onDelete = vi.fn();
+    const entry: Entry = { id: "saved", title: "Saved", kind: "event", date: "2026-10-04", category: "default", color: "#777", createdAt: "2026-10-04T00:00:00Z" };
+    act(() => root.render(<EntryComposer locale="en" selectedDate={entry.date} editing={entry} onClose={vi.fn()} onSave={vi.fn()} onDelete={onDelete} onConfirm={onConfirm} />));
+    act(() => host.querySelector<HTMLButtonElement>(".composer-footer .danger-button")!.click());
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(host.querySelector<HTMLButtonElement>(".composer-footer .danger-button")!.disabled).toBe(true);
+    await act(async () => resolve(true));
+    expect(onDelete).toHaveBeenCalledExactlyOnceWith("saved");
   });
 
   it("sets both times with the wheel instead of a free-text clock field", async () => {

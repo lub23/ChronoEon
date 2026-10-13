@@ -29,6 +29,8 @@ class GeocodeArgs { var latitude: Double = Double.NaN; var longitude: Double = D
 class BackgroundArgs { var action: String = ""; var database: String = ""; var language: String = "en"; var remindersEnabled: Boolean = false; var keys: Array<String> = emptyArray() }
 @InvokeArg
 class InstallArgs { var path: String = "" }
+@InvokeArg
+class CredentialArgs { var action: String = ""; var id: String = ""; var value: String? = null }
 
 @TauriPlugin(permissions = [
     Permission(alias = "location", strings = [Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION])
@@ -45,6 +47,55 @@ class DevicePlugin(private val activity: Activity) : Plugin(activity) {
     private var cancelLocation: (() -> Unit)? = null
     private fun granted(permission: String) = ContextCompat.checkSelfPermission(activity, permission) == PackageManager.PERMISSION_GRANTED
     private fun canLocate() = granted(Manifest.permission.ACCESS_COARSE_LOCATION) || granted(Manifest.permission.ACCESS_FINE_LOCATION)
+
+    @Command
+    fun credentials(invoke: Invoke) = backgroundWorker.execute {
+        try {
+            val args = invoke.parseArgs(CredentialArgs::class.java)
+            require(args.id.matches(Regex("[a-zA-Z0-9-]{1,80}")))
+            val directory = java.io.File(activity.noBackupFilesDir, "ai-credentials").apply { mkdirs() }
+            val file = android.util.AtomicFile(java.io.File(directory, args.id))
+            if (args.action == "delete") {
+                file.delete()
+                invoke.resolve(JSObject())
+                return@execute
+            }
+            val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val alias = "chronoeon-ai-credentials"
+            val key = (keyStore.getKey(alias, null) as? javax.crypto.SecretKey) ?: run {
+                val generator = javax.crypto.KeyGenerator.getInstance("AES", "AndroidKeyStore")
+                generator.init(android.security.keystore.KeyGenParameterSpec.Builder(alias,
+                    android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT)
+                    .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE).build())
+                generator.generateKey()
+            }
+            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            val result = JSObject()
+            when (args.action) {
+                "save" -> {
+                    val value = requireNotNull(args.value).toByteArray(Charsets.UTF_8)
+                    require(value.size <= 65536)
+                    cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key)
+                    cipher.updateAAD(args.id.toByteArray(Charsets.UTF_8))
+                    val stream = file.startWrite()
+                    try {
+                        stream.write(cipher.iv + cipher.doFinal(value))
+                        file.finishWrite(stream)
+                    } catch (error: Exception) { file.failWrite(stream); throw error }
+                }
+                "read" -> if (file.baseFile.exists()) {
+                    val bytes = file.readFully()
+                    require(bytes.size in 28..65564)
+                    cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
+                    cipher.updateAAD(args.id.toByteArray(Charsets.UTF_8))
+                    result.put("value", String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8))
+                }
+                else -> error("Unknown credential operation")
+            }
+            invoke.resolve(result)
+        } catch (_: Exception) { invoke.reject("Could not access secure AI credentials") }
+    }
 
     @Command
     fun locate(invoke: Invoke) = activity.runOnUiThread {

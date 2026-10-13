@@ -79,12 +79,12 @@ describe("variable-height ideas", () => {
 });
 
 
-it("virtualizes paired rows without flattening multiline diary text", async () => {
+it("packs independent cards without flattening multiline diary text", async () => {
   const entries=Array.from({length:50},(_,index)=>idea(`idea-${index}`,`Diary ${index}`,index===0?"First line\nSecond line\n\nThird line":"Short note"));
   act(()=>root.render(<IdeasView entries={entries} locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} search="" today="2026-08-10" onEdit={()=>{}} onConvert={()=>{}} onNew={()=>{}}/>));
-  expect(host.querySelector(".ideas-scroll")).not.toBeNull();
+  expect(host.querySelector(".ideas-masonry")).not.toBeNull();
   expect([...host.querySelectorAll(".idea-body p")].slice(0, 3).map((node) => node.textContent)).toEqual(["First line", "Second line", "Third line"]);
-  expect(host.querySelector(".ideas-vine")?.querySelectorAll(".idea-card")).toHaveLength(2);
+  expect(host.querySelector(".ideas-vine")?.querySelectorAll(".idea-card")).toHaveLength(50);
 });
 
 describe("idea card presentation", () => {
@@ -127,4 +127,15 @@ describe("idea card presentation", () => {
     expect(host.querySelector(".idea-divider")).toBeNull();
     expect(host.querySelector(".idea-gallery")).toBeNull();
   });
+});
+
+it("measures each card independently for masonry track spans", () => {
+ const measure = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function(this: Element) {
+  const height = this.textContent?.includes("Tall") ? 400 : 166;
+  return { x: 0, y: 0, width: 300, height, top: 0, left: 0, right: 300, bottom: height, toJSON: () => ({}) };
+ });
+ try {
+  act(() => root.render(<IdeasView entries={[idea("tall", "Tall"), idea("short", "Short")]} locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} search="" today="2026-10-05" onEdit={()=>{}} onConvert={()=>{}} onNew={()=>{}} />));
+  expect([...host.querySelectorAll<HTMLElement>(".idea-vine-node")].map(node => node.style.gridRowEnd)).toEqual(["span 424", "span 190"]);
+ } finally { measure.mockRestore(); }
 });

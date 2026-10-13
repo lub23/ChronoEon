@@ -52,7 +52,8 @@ export interface ItemChipProps {
   detailLines?: 1 | 2 | 3 | 4;
   /** The rendered segment lies before the current moment; unfinished tasks opt out. */
   past?: boolean;
-  onOpen?: (entry: Entry) => void;
+  onOpen?: (entry: Entry, event?: React.SyntheticEvent) => void;
+  onDoubleOpen?: (entry: Entry) => void;
   onStatusToggle?: (entry: Entry) => void;
   onMenu?: (entry: Entry, event: ReactMouseEvent) => void;
   onPointerDown?: (event: ReactPointerEvent<HTMLElement>) => void;
@@ -106,6 +107,7 @@ export function ItemChip({
   detailLines,
   past = false,
   onOpen,
+  onDoubleOpen,
   onStatusToggle,
   onMenu,
   onPointerDown,
@@ -229,9 +231,10 @@ export function ItemChip({
         title: hoverTitle,
         onPointerDown,
         onContextMenu: onMenu ? (event: ReactMouseEvent) => { event.preventDefault(); event.stopPropagation(); onMenu(entry, event); } : undefined,
-        onClick: onOpen ? (event: ReactMouseEvent) => { event.stopPropagation(); onOpen(entry); } : undefined,
+        onClick: onOpen ? (event: ReactMouseEvent) => { event.stopPropagation(); onOpen(entry, event); } : undefined,
+        onDoubleClick: (event: ReactMouseEvent) => { event.stopPropagation(); onDoubleOpen?.(entry); },
         onKeyDown: onOpen ? (event: React.KeyboardEvent) => {
-          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(entry); }
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); onOpen(entry, event); }
         } : undefined,
         tabIndex: 0,
         role: "button" as const,

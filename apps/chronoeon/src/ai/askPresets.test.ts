@@ -29,10 +29,9 @@ describe("Ask preset tool plans", () => {
 
     const diet = askPresetToolPlan(prompt("dietPattern"), "zh", "2026-09-21")!;
     expect(diet.calls[0].arguments).toEqual({
-      query: "breakfast lunch dinner snack supper 早餐 午餐 晚餐 下午茶 夜宵",
+      query: "breakfast lunch dinner snack supper food 饮食 吃饭 早餐 午餐 晚餐 下午茶 夜宵 零食 饮料",
       start_date: "2026-09-08",
       end_date: "2026-09-21",
-      kinds: ["event"],
     });
   });
 

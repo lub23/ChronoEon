@@ -1,280 +1,136 @@
-import { useEffect, useState } from "react";
-import type { AIProviderConfig, Locale } from "@chronoeon/domain";
+import { useRef, useState } from "react";
+import { createEntryId, type AIProviderConfig, type Locale } from "@chronoeon/domain";
 import {
-  activeAIProvider,
-  fetchAIModels,
-  normalizeAIBaseUrl,
-  type AICustomHeader,
-  type AIModelInfo,
-  type AIProviderChoice,
-  type AIProviderPreferences,
+  AI_PROVIDER_PRESETS, DEFAULT_AI_PROVIDER, deleteAIProviderCredentials, fetchAIModels,
+  normalizeAIBaseUrl, readAIProviderCredentials, saveAIProviderCredentials,
+  type AIProviderCredentials, type AIProviderPreferences, type AIProviderPreset, type AIProviderProfile,
 } from "../ai/provider";
 import { isTauri } from "../platform/desktop";
 import { t } from "../i18n";
+import { GlassSelect } from "./GlassSelect";
 import { Icon } from "./Icon";
+import { useConfirmDialog } from "./ConfirmDialog";
 
-interface AISettingsPanelProps {
+interface Props {
   locale: Locale;
   preferences: AIProviderPreferences;
-  localKeyStored: boolean;
-  remoteKeyStored: boolean;
-  localHeaders: AICustomHeader[];
   onChange: (preferences: AIProviderPreferences) => void;
-  onSaveLocalKey: (value: string) => Promise<void>;
-  onClearLocalKey: () => Promise<void>;
-  onSaveRemoteKey: (value: string) => Promise<void>;
-  onClearRemoteKey: () => Promise<void>;
-  onSaveLocalHeaders: (headers: AICustomHeader[]) => Promise<AICustomHeader[]>;
   onTest: (provider: AIProviderConfig) => Promise<void>;
-  onOpenArchived: () => void;
 }
 
-/**
- * 随心问's endpoint form. Local compatible endpoints can require Bearer auth
- * and custom headers; 随心记 does not use an endpoint at all.
- */
-function AIEndpointFields({ locale, choice, onChange, onTest }: {
-  locale: Locale;
-  choice: AIProviderChoice;
-  onChange: (choice: AIProviderChoice) => void;
-  onTest: (provider: AIProviderConfig) => Promise<void>;
-}) {
-  const [busy, setBusy] = useState<"test" | "models" | null>(null);
+export function AISettingsPanel({ locale, preferences, onChange, onTest }: Props) {
+  const zh = locale === "zh";
+  const [draft, setDraft] = useState<AIProviderProfile | null>(null);
+  const [credentials, setCredentials] = useState<AIProviderCredentials>({ apiKey: "", headers: [] });
+  const [models, setModels] = useState<string[]>([]);
+  const [busy, setBusy] = useState("");
+  const busyRef = useRef(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
-  const [models, setModels] = useState<AIModelInfo[] | null>(null);
-  const provider = activeAIProvider(choice);
-  const insecure = choice.backend === "remote"
-    && /^http:\/\//i.test(provider.baseUrl)
-    && !/^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::|\/|$)/i.test(provider.baseUrl);
-
-  const patch = (next: Partial<AIProviderConfig>) => {
-    onChange({ ...choice, [choice.backend]: { ...provider, ...next } });
-    setResult(null);
-    setModels(null);
+  const latest = useRef(preferences);
+  latest.current = preferences;
+  const { confirm, dialog } = useConfirmDialog(locale);
+  const patch = (change: Partial<AIProviderProfile>) => { setDraft(value => value ? { ...value, ...change } : null); setModels([]); setResult(null); };
+  const run = async (key: string, action: () => Promise<void>) => {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy(key); setResult(null);
+    try { await action(); }
+    catch (error) { setResult({ ok: false, text: error instanceof Error ? error.message : String(error) }); }
+    finally { busyRef.current = false; setBusy(""); }
   };
+  const add = () => {
+    setDraft({ ...DEFAULT_AI_PROVIDER, ...AI_PROVIDER_PRESETS.compatible, id: createEntryId(), name: "", preset: "compatible" });
+    setCredentials({ apiKey: "", headers: [] }); setModels([]); setResult(null);
+  };
+  const edit = (profile: AIProviderProfile) => void run(profile.id, async () => {
+    const secret = await readAIProviderCredentials(profile.id);
+    setDraft({ ...profile }); setCredentials(secret); setModels([]);
+  });
+  const save = () => void run("save", async () => {
+    if (!draft) return;
+    const profile = { ...draft, name: draft.name.trim(), model: draft.model.trim(), baseUrl: normalizeAIBaseUrl(draft.baseUrl) };
+    if (!profile.name || !profile.model) throw new Error(zh ? "请输入名称和模型。" : "Name and model are required.");
+    await saveAIProviderCredentials(profile.id, credentials);
+    const current = latest.current;
+    const providers = current.providers.some(value => value.id === profile.id)
+      ? current.providers.map(value => value.id === profile.id ? profile : value) : [...current.providers, profile];
+    onChange({ ...current, providers, activeProviderId: current.activeProviderId === profile.id ? null : current.activeProviderId });
+    setDraft(null);
+    setResult({ ok: true, text: zh ? "已保存，激活前会测试连接。" : "Saved. Activation tests the connection." });
+  });
+  const activate = (profile: AIProviderProfile) => void run(profile.id, async () => {
+    await onTest(profile);
+    onChange({ ...latest.current, enabled: true, activeProviderId: profile.id });
+    setResult({ ok: true, text: zh ? `已激活 ${profile.name}` : `${profile.name} is active` });
+  });
+  const remove = (profile: AIProviderProfile) => void run(profile.id, async () => {
+    if (!await confirm({ title: zh ? "删除服务？" : "Delete provider?", detail: profile.name, tone: "danger", confirmLabel: t("delete", locale) })) return;
+    await deleteAIProviderCredentials(profile.id);
+    const current = latest.current;
+    onChange({ ...current, providers: current.providers.filter(value => value.id !== profile.id), activeProviderId: current.activeProviderId === profile.id ? null : current.activeProviderId });
+    if (draft?.id === profile.id) setDraft(null);
+  });
 
-  async function run(kind: "test" | "models") {
-    setBusy(kind);
-    setResult(null);
-    try {
-      normalizeAIBaseUrl(provider.baseUrl);
-      if (kind === "test") {
-        await onTest(provider);
-        setResult({ ok: true, text: t("aiTestOk", locale) });
-      } else {
-        const list = await fetchAIModels(provider);
-        setModels(list);
-        setResult({
-          ok: true,
-          text: (locale === "zh" ? "已获取 {count} 个模型" : "Loaded {count} models").replace("{count}", String(list.length)),
-        });
-      }
-    } catch (error) {
-      if (kind === "models") setModels(null);
-      setResult({ ok: false, text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  return (
-    <>
-      <div className="settings-option">
-        <span className="settings-option-copy"><strong>{t("aiProvider", locale)}</strong><small>{choice.backend === "remote" ? t("aiRemote", locale) : t("aiLocal", locale)}</small></span>
-        <div className="settings-segmented" role="group">
-          {(["remote", "local"] as const).map((backend) => (
-            <button
-              key={backend}
-              type="button"
-              className={choice.backend === backend ? "is-active" : ""}
-              onClick={() => { onChange({ ...choice, backend }); setResult(null); setModels(null); }}
-              aria-pressed={choice.backend === backend}
-            >
-              {t(backend === "remote" ? "aiRemote" : "aiLocal", locale)}
-            </button>
-          ))}
-        </div>
-      </div>
-      <label className="settings-field ai-settings-field">
-        <span><strong>{t("aiEndpoint", locale)}</strong><small>{t("aiEndpointHint", locale)}</small></span>
-        <input value={provider.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} placeholder={choice.backend === "local" ? "http://127.0.0.1:8080/v1" : "https://…/v1"} inputMode="url" spellCheck={false} />
-      </label>
-      <label className="settings-field ai-settings-field">
-        <span><strong>{t("aiModel", locale)}</strong><small>{locale === "zh" ? "可先读取模型列表" : "Load the model list first"}</small></span>
-        <div className="ai-model-controls">
-          <input value={provider.model} onChange={(event) => patch({ model: event.target.value })} placeholder="model-name" spellCheck={false} />
-          <button type="button" className="secondary-button" disabled={busy !== null || !provider.baseUrl.trim()} onClick={() => void run("models")}>
-            <Icon name="refresh" size={13} />{locale === "zh" ? "获取" : "Load"}
-          </button>
-        </div>
-      </label>
-      <div className="ai-settings-actions">
-        <button type="button" className="secondary-button" disabled={busy !== null || !provider.baseUrl.trim()} onClick={() => void run("test")}><Icon name="sparkle" size={14} />{t(busy === "test" ? "aiTesting" : "aiTest", locale)}</button>
-        {result && <span className={result.ok ? "is-success" : "is-error"} role="status">{result.text}</span>}
-      </div>
-      {insecure && <p className="settings-inline-warning"><Icon name="sparkle" size={13} />{t("aiInsecureEndpoint", locale)}</p>}
-      {models?.length ? (
-        <ul className="ai-model-list" aria-label={t("aiModel", locale)}>
-          {models.slice(0, 8).map((model) => (
-            <li key={model.id}>
-              <button type="button" className={provider.model === model.id ? "is-active" : ""} onClick={() => patch({ model: model.id })}>
-                <span>{model.id}</span>
-                {provider.model === model.id && <Icon name="check" size={13} />}
-              </button>
-            </li>
-          ))}
-          {models.length > 8 && <li className="ai-model-more">+{models.length - 8}</li>}
-        </ul>
-      ) : null}
-    </>
-  );
-}
-
-export function AISettingsPanel({
-  locale, preferences, localKeyStored, remoteKeyStored, onChange,
-  localHeaders, onSaveLocalKey, onClearLocalKey, onSaveRemoteKey, onClearRemoteKey,
-  onSaveLocalHeaders, onTest, onOpenArchived,
-}: AISettingsPanelProps) {
-  const [keyDrafts, setKeyDrafts] = useState({ remote: "", local: "" });
-  const [headerDrafts, setHeaderDrafts] = useState<AICustomHeader[]>(localHeaders);
-  const [busy, setBusy] = useState<"key" | "headers" | null>(null);
-  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
-  const ask = preferences.ask;
-
-  useEffect(() => { setHeaderDrafts(localHeaders); }, [localHeaders]);
-
-  async function saveKey(kind: "remote" | "local") {
-    setBusy("key");
-    setResult(null);
-    try {
-      if (kind === "remote") await onSaveRemoteKey(keyDrafts.remote);
-      else await onSaveLocalKey(keyDrafts.local);
-      setKeyDrafts((current) => ({ ...current, [kind]: "" }));
-      setResult({ ok: true, text: t("aiApiKeyStored", locale) });
-    } catch (error) {
-      setResult({ ok: false, text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function clearKey(kind: "remote" | "local") {
-    setBusy("key");
-    setResult(null);
-    try {
-      if (kind === "remote") await onClearRemoteKey();
-      else await onClearLocalKey();
-      setKeyDrafts((current) => ({ ...current, [kind]: "" }));
-    } catch (error) {
-      setResult({ ok: false, text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function saveHeaders() {
-    setBusy("headers");
-    setResult(null);
-    try {
-      const saved = await onSaveLocalHeaders(headerDrafts);
-      setHeaderDrafts(saved);
-      setResult({ ok: true, text: t("aiHeadersStored", locale) });
-    } catch (error) {
-      setResult({ ok: false, text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  return (
-    <>
-      <header className="settings-section-heading"><h3>{t("settingsAI", locale)}</h3><p>{t("aiSettingsDetail", locale)}</p></header>
-      <div className="settings-card ai-settings-card">
-        <label className="settings-toggle-row">
-          <span className="settings-option-copy"><strong>{t("aiEnabled", locale)}</strong><small>{t("aiEnabledDetail", locale)}</small></span>
-          <span className={preferences.enabled ? "settings-switch is-on" : "settings-switch"} aria-hidden="true"><i /></span>
-          <input type="checkbox" checked={preferences.enabled} onChange={(event) => { onChange({ ...preferences, enabled: event.target.checked }); setResult(null); }} aria-label={t("aiEnabled", locale)} />
+  return <>
+    <header className="settings-section-heading ai-provider-heading">
+      <h3>{zh ? "AI 服务" : "Providers"}</h3>
+      <button type="button" className="secondary-button" disabled={Boolean(busy) || Boolean(draft)} onClick={add}><Icon name="plus" size={14} />{zh ? "添加服务" : "Add"}</button>
+    </header>
+    <p className="settings-footnote">{isTauri()
+      ? (zh ? "服务配置仅用于本机，密钥和请求头加密保存。" : "Device-only. Keys and headers are stored securely.")
+      : (zh ? "浏览器中的密钥和请求头仅保留到页面关闭。" : "Browser keys and headers last only for this session.")}</p>
+    <ul className="ai-provider-list">
+      {preferences.providers.map(profile => <li key={profile.id}>
+        <button type="button" className="icon-button ai-provider-activate" disabled={Boolean(busy) || Boolean(draft)}
+          aria-label={`${zh ? "激活" : "Activate"} ${profile.name}`} aria-pressed={preferences.activeProviderId === profile.id}
+          title={preferences.activeProviderId === profile.id ? (zh ? "已激活" : "Active") : (zh ? "测试并激活" : "Test & activate")}
+          onClick={() => activate(profile)}><Icon name={preferences.activeProviderId === profile.id ? "check" : "play"} size={15} /></button>
+        <div className="ai-provider-copy"><strong>{profile.name}</strong><small>{profile.model}</small><small>{profile.baseUrl}</small></div>
+        <button type="button" className="icon-button" disabled={Boolean(busy)} aria-label={`${t("edit", locale)} ${profile.name}`} title={t("edit", locale)} onClick={() => edit(profile)}><Icon name="edit" size={14} /></button>
+        <button type="button" className="icon-button" disabled={Boolean(busy)} aria-label={`${t("delete", locale)} ${profile.name}`} title={t("delete", locale)} onClick={() => remove(profile)}><Icon name="trash" size={14} /></button>
+      </li>)}
+    </ul>
+    {!preferences.providers.length && !draft && <p className="settings-footnote">{zh ? "尚未添加 AI 服务" : "No providers"}</p>}
+    {draft && <form className="ai-provider-form" onSubmit={event => { event.preventDefault(); save(); }}>
+      <fieldset disabled={Boolean(busy)}>
+        <label className="settings-field"><span>{zh ? "类型" : "Type"}</span>
+          <GlassSelect value={draft.preset} ariaLabel={zh ? "服务类型" : "Provider type"}
+            options={Object.entries(AI_PROVIDER_PRESETS).map(([value, preset]) => ({ value, label: value === "local" && zh ? "自定义本地模型" : preset.name }))}
+            onChange={value => { const preset = AI_PROVIDER_PRESETS[value as AIProviderPreset]; patch({ ...preset, preset: value as AIProviderPreset }); }} />
         </label>
-      </div>
-
-      <header className="settings-section-heading settings-subheading"><h3>{t("aiChatTitle", locale)}</h3><p>{t("aiAskDetail", locale)}</p></header>
-      <div className="settings-card ai-settings-card">
-        <AIEndpointFields locale={locale} choice={ask} onChange={(choice) => { onChange({ ...preferences, ask: { ...ask, ...choice } }); setResult(null); }} onTest={onTest} />
-        {ask.backend === "remote" && (
-          <div className="settings-option ai-key-row">
-            <span className="settings-option-copy"><strong>{t("aiRemoteApiKey", locale)}</strong><small>{isTauri() ? t(remoteKeyStored ? "aiApiKeyStored" : "aiRemoteApiKeyMissing", locale) : t("aiRemoteApiKeySession", locale)}</small></span>
-            <div className="ai-key-controls">
-              <input type="password" value={keyDrafts.remote} onChange={(event) => setKeyDrafts((current) => ({ ...current, remote: event.target.value }))} placeholder={remoteKeyStored ? "••••••••" : "sk-..."} autoComplete="new-password" />
-              <button type="button" className="secondary-button" disabled={busy !== null || !keyDrafts.remote.trim()} onClick={() => void saveKey("remote")}><Icon name="check" size={13} />{t("aiSaveKey", locale)}</button>
-              {(remoteKeyStored || keyDrafts.remote) && <button type="button" className="icon-button" disabled={busy !== null} onClick={() => void clearKey("remote")} title={t("aiClearKey", locale)} aria-label={t("aiClearKey", locale)}><Icon name="close" size={14} /></button>}
-            </div>
-          </div>
-        )}
-        {ask.backend === "local" && (
-          <div className="settings-option ai-key-row">
-            <span className="settings-option-copy"><strong>{t("aiLocalApiKey", locale)}</strong><small>{isTauri() ? t(localKeyStored ? "aiApiKeyStored" : "aiLocalApiKeyMissing", locale) : t("aiLocalApiKeySession", locale)}</small></span>
-            <div className="ai-key-controls">
-              <input type="password" value={keyDrafts.local} onChange={(event) => setKeyDrafts((current) => ({ ...current, local: event.target.value }))} placeholder={localKeyStored ? "••••••••" : "sk-..."} autoComplete="new-password" />
-              <button type="button" className="secondary-button" disabled={busy !== null || !keyDrafts.local.trim()} onClick={() => void saveKey("local")}><Icon name="check" size={13} />{t("aiSaveKey", locale)}</button>
-              {(localKeyStored || keyDrafts.local) && <button type="button" className="icon-button" disabled={busy !== null} onClick={() => void clearKey("local")} title={t("aiClearKey", locale)} aria-label={t("aiClearKey", locale)}><Icon name="close" size={14} /></button>}
-            </div>
-          </div>
-        )}
-        {ask.backend === "local" && (
-          <div className="settings-option ai-key-row">
-            <span className="settings-option-copy">
-              <strong>{t("aiLocalCustomHeaders", locale)}</strong>
-              <small>{t("aiLocalCustomHeadersDetail", locale)}</small>
-            </span>
-            <div className="ai-header-list">
-              {headerDrafts.map((header, index) => (
-                <div className="ai-header-row" key={index}>
-                  <input value={header.name} placeholder={t("aiHeaderName", locale)} spellCheck={false}
-                    aria-label={t("aiHeaderName", locale)}
-                    onChange={(event) => setHeaderDrafts((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, name: event.target.value } : row))} />
-                  <input value={header.value} placeholder={t("aiHeaderValue", locale)} spellCheck={false}
-                    aria-label={t("aiHeaderValue", locale)}
-                    onChange={(event) => setHeaderDrafts((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, value: event.target.value } : row))} />
-                  <button type="button" className="icon-button" disabled={busy !== null}
-                    title={t("aiRemoveHeader", locale)} aria-label={t("aiRemoveHeader", locale)}
-                    onClick={() => setHeaderDrafts((current) => current.filter((_, rowIndex) => rowIndex !== index))}>
-                    <Icon name="close" size={14} />
-                  </button>
-                </div>
-              ))}
-              <div className="ai-header-actions">
-                <button type="button" className="secondary-button" disabled={busy !== null || headerDrafts.length >= 10} onClick={() => setHeaderDrafts((current) => [...current, { name: "", value: "" }])}>
-                  <Icon name="plus" size={13} />{t("aiAddHeader", locale)}
-                </button>
-                <button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void saveHeaders()}>
-                  <Icon name="check" size={13} />{t("aiSaveHeaders", locale)}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        <label className="settings-toggle-row">
-          <span className="settings-option-copy"><strong>{t("aiAskThinking", locale)}</strong><small>{t("aiAskThinkingDetail", locale)}</small></span>
-          <span className={ask.thinking ? "settings-switch is-on" : "settings-switch"} aria-hidden="true"><i /></span>
-          <input type="checkbox" checked={ask.thinking} onChange={(event) => onChange({ ...preferences, ask: { ...ask, thinking: event.target.checked } })} aria-label={t("aiAskThinking", locale)} />
-        </label>
-        {result && <p className={result.ok ? "settings-footnote is-success" : "settings-footnote is-error"} role="status">{result.text}</p>}
-      </div>
-
-      <header className="settings-section-heading settings-subheading"><h3>{t("quickNote", locale)}</h3><p>{t("aiCaptureDetail", locale)}</p></header>
-      <div className="settings-card ai-settings-card">
-        <div className="settings-option">
-          <span className="settings-option-copy"><strong>{t("aiChatArchived", locale)}</strong><small>{locale === "zh" ? "查看或恢复已归档的对话。" : "Review or restore archived conversations."}</small></span>
-          <button type="button" className="secondary-button" onClick={onOpenArchived}><Icon name="folder" size={14} />{t("aiChatArchived", locale)}</button>
+        <label className="settings-field"><span>{zh ? "名称" : "Name"}</span><input required value={draft.name} onChange={event => patch({ name: event.target.value })} /></label>
+        <label className="settings-field"><span>{zh ? "API 地址" : "API URL"}</span><input required type="url" spellCheck={false} value={draft.baseUrl} onChange={event => patch({ baseUrl: event.target.value })} placeholder="https://example.com/v1" /></label>
+        <label className="settings-field"><span>{zh ? "密钥" : "API key"}</span><input type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials(current => ({ ...current, apiKey: event.target.value }))} /></label>
+        <div className="ai-provider-headers">
+          <header><strong>{zh ? "请求头" : "Headers"}</strong><button type="button" className="icon-button" title={zh ? "添加请求头" : "Add header"} aria-label={zh ? "添加请求头" : "Add header"} disabled={credentials.headers.length >= 10} onClick={() => setCredentials(current => ({ ...current, headers: [...current.headers, { name: "", value: "" }] }))}><Icon name="plus" size={14} /></button></header>
+          {credentials.headers.map((header, index) => <div key={index} className="ai-header-row">
+            <input value={header.name} placeholder="X-Header" aria-label={zh ? "请求头名称" : "Header name"} spellCheck={false} onChange={event => setCredentials(current => ({ ...current, headers: current.headers.map((row, i) => i === index ? { ...row, name: event.target.value } : row) }))} />
+            <input type="password" value={header.value} aria-label={zh ? "请求头值" : "Header value"} spellCheck={false} autoComplete="new-password" onChange={event => setCredentials(current => ({ ...current, headers: current.headers.map((row, i) => i === index ? { ...row, value: event.target.value } : row) }))} />
+            <button type="button" className="icon-button" title={t("delete", locale)} aria-label={t("delete", locale)} onClick={() => setCredentials(current => ({ ...current, headers: current.headers.filter((_, i) => i !== index) }))}><Icon name="close" size={14} /></button>
+          </div>)}
         </div>
-        <div className="settings-option">
-          <span className="settings-option-copy">
-            <strong>{t("aiCaptureMode", locale)}</strong>
-            <small>{t("aiCaptureOfflineDetail", locale)}</small>
-          </span>
-          <span className="settings-segmented"><button type="button" className="is-active" disabled>{t("aiCaptureOffline", locale)}</button></span>
+        <label className="settings-field"><span>{zh ? "模型" : "Model"}</span><div className="ai-model-controls">
+          <input required value={draft.model} onChange={event => setDraft({ ...draft, model: event.target.value })} spellCheck={false} />
+          <button type="button" className="icon-button" title={zh ? "获取模型" : "Load models"} aria-label={zh ? "获取模型" : "Load models"} disabled={!draft.baseUrl.trim()} onClick={() => void run("models", async () => setModels((await fetchAIModels(draft, undefined, credentials)).map(model => model.id)))}><Icon name="refresh" size={14} /></button>
+        </div></label>
+        {models.length > 0 && <ul className="ai-model-list">{models.map(model => <li key={model}><button type="button" onClick={() => setDraft({ ...draft, model })} className={draft.model === model ? "is-active" : ""}>{model}</button></li>)}</ul>}
+        <footer><button type="button" className="secondary-button" onClick={() => setDraft(null)}>{t("cancel", locale)}</button><button type="submit" className="primary-action"><Icon name="check" size={14} />{t("save", locale)}</button></footer>
+      </fieldset>
+    </form>}
+    {busy && <p role="status" className="settings-footnote">{zh ? "处理中…" : "Working…"}</p>}
+    {result && <p role={result.ok ? "status" : "alert"} className={`settings-footnote ${result.ok ? "is-success" : "is-error"}`}>{result.text}</p>}
+    <div className="ai-parsing-settings">
+      {(["capture", "ask"] as const).map(surface => <div className="settings-option" key={surface}>
+        <strong>{t(surface === "capture" ? "quickNote" : "aiChatTitle", locale)}</strong>
+        <div className="settings-segmented" role="group" aria-label={t(surface === "capture" ? "quickNote" : "aiChatTitle", locale)}>
+          <button type="button" disabled={surface !== "capture"} className={surface === "capture" ? "is-active" : ""} aria-pressed={surface === "capture"}>{zh ? "离线解析" : "Offline"}</button>
+          <button type="button" disabled={surface !== "ask"} className={surface === "ask" ? "is-active" : ""} aria-pressed={surface === "ask"}>{zh ? "AI 解析" : "AI"}</button>
         </div>
-      </div>
-    </>
-  );
+      </div>)}
+      <label className="settings-toggle-row"><span className="settings-option-copy"><strong>{t("aiAskThinking", locale)}</strong></span>
+        <span className={preferences.ask.thinking ? "settings-switch is-on" : "settings-switch"} aria-hidden="true"><i /></span>
+        <input type="checkbox" checked={preferences.ask.thinking} onChange={event => onChange({ ...preferences, ask: { ...preferences.ask, thinking: event.target.checked } })} aria-label={t("aiAskThinking", locale)} />
+      </label>
+    </div>
+    {dialog}
+  </>;
 }

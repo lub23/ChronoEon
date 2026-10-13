@@ -20,9 +20,12 @@ interface ChatContextPickerProps {
   onRangeChange: (range: ChatContextRange) => void;
   onCustomRangeChange: (range: Partial<StatsRange>) => void;
   onToggle: (id: string) => void;
+  onSelectAll: () => void;
   onClear: () => void;
   onClose: () => void;
 }
+
+const VISIBLE_CANDIDATE_LIMIT = 120;
 
 const contextKinds: EntryKind[] = ["task", "event", "bill", "idea"];
 const contextRanges: Array<{ key: ChatContextRange; label: "all" | "range7d" | "range1m" | "customDateRange" }> = [
@@ -46,9 +49,12 @@ export function ChatContextPicker({
   onRangeChange,
   onCustomRangeChange,
   onToggle,
+  onSelectAll,
   onClear,
   onClose,
 }: ChatContextPickerProps) {
+  const selected = new Set(selectedIds);
+  const allSelected = candidates.every(entry => selected.has(entry.id));
   return (
     <section className="chat-context-panel" aria-label={t("aiChatContext", locale)}>
       <header>
@@ -147,15 +153,22 @@ export function ChatContextPicker({
           </div>
         )}
       </div>
+      <div className="chat-context-selection">
+        <div className="chat-context-actions">
+          <button type="button" onClick={onSelectAll} disabled={allSelected}>{t("aiChatContextSelectAll", locale)}</button>
+        </div>
+        <small role="status">{t(candidates.length > VISIBLE_CANDIDATE_LIMIT ? "aiChatContextMatchesLimited" : "aiChatContextMatches", locale)
+          .replace("{count}", String(candidates.length)).replace("{limit}", String(VISIBLE_CANDIDATE_LIMIT))}</small>
+      </div>
       <div className="chat-context-list">
-        {candidates.map((entry) => (
+        {candidates.slice(0, VISIBLE_CANDIDATE_LIMIT).map((entry) => (
           <label
             key={entry.id}
-            className={selectedIds.includes(entry.id) ? "chat-context-item is-selected" : "chat-context-item"}
+            className={selected.has(entry.id) ? "chat-context-item is-selected" : "chat-context-item"}
           >
             <input
               type="checkbox"
-              checked={selectedIds.includes(entry.id)}
+              checked={selected.has(entry.id)}
               onChange={() => onToggle(entry.id)}
               aria-label={entry.title}
             />

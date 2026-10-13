@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultSettings } from "../settings";
-import { CaptureDecisionIndex, completeCapture, parseAssetCapture, parseCapture, splitCaptureItems } from "./index";
+import { CaptureDecisionIndex, completeCapture, captureMatchPositions, parseAssetCapture, parseCapture, splitCaptureItems } from "./index";
 const settings = createDefaultSettings("en");
 settings.calendars[0].categories.push({ id: "work", name: "Deep Work", color: "#123456" });
 const options = { settings, now: new Date(2026, 9, 4, 9), locale: "en" as const };
@@ -44,6 +44,12 @@ describe("explicit local capture", () => {
   it("completes only the active token and quotes spaces", () => {
     expect(completeCapture("Review @Mee", { categories: [], locations: ["Meeting room", "Home"], tags: [] })).toEqual([{ value: '@"Meeting room"', label: "Meeting room" }]);
     expect(completeCapture("text /as", { categories: [], locations: [], tags: [] })[0].value).toBe("/asset");
+  });
+  it("matches ordered fragments and keeps results beyond the five visible rows", () => {
+    const locations = ["辽宁开原酒店", ...Array.from({ length: 8 }, (_, i) => `辽宁沈阳酒店${i}`), "上海酒店"];
+    expect(completeCapture("@辽宁酒店", { categories: [], locations, tags: [] })).toHaveLength(9);
+    expect(captureMatchPositions("辽宁开原酒店", "辽宁酒店")).toEqual([0, 1, 4, 5]);
+    expect(captureMatchPositions("辽宁开原酒店", "酒店辽宁")).toBeNull();
   });
   it("does not prefill weak, conflicting, cross-calendar history or old notes", () => {
     const history = [

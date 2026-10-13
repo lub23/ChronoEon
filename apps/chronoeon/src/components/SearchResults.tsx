@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { resolveEntryColors, type ChronoEonSettings } from "@chronoeon/domain";
+import { resolveEntryColors, type ChronoEonSettings, type Item } from "@chronoeon/domain";
 import { titleFor, type Entry, type Locale } from "../domain/entry";
 import { entrySearchMatches, searchExcerpt } from "../domain/search";
 import { categoryLabel, localeTag, t } from "../i18n";
@@ -19,7 +19,8 @@ function Highlight({ text, needle, locale }: { text: string; needle: string; loc
   return <>{parts}</>;
 }
 
-export function SearchResults({ entries, search, locale, settings, onOpen }: {
+export function SearchResults({ entries, items = [], onOpenItem, search, locale, settings, onOpen }: {
+  items?: Item[]; onOpenItem?: (item: Item) => void;
   entries: Entry[]; search: string; locale: Locale; settings: ChronoEonSettings; onOpen: (entry: Entry) => void;
 }) {
   const [active, setActive] = useState(0);
@@ -27,20 +28,23 @@ export function SearchResults({ entries, search, locale, settings, onOpen }: {
     const hits = entrySearchMatches(entry, search, locale, settings);
     return hits.length ? [{ entry, hits }] : [];
   }).sort((a, b) => (b.entry.date + (b.entry.start ?? "")).localeCompare(a.entry.date + (a.entry.start ?? ""))), [entries, search, locale, settings]);
+  const itemMatches = items.filter(item => [item.name, item.notes, item.location].some(value => value?.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())));
   const results = matches.slice(0, 24);
   useEffect(() => setActive(0), [search]);
   if (!search.trim()) return null;
   return <div className="filter-search-results" aria-label={t("searchResults", locale)}>
-    <div className="filter-results-heading" role="status"><span>{t("searchResults", locale)}</span><small>{matches.length} {t("filterSearchCount", locale)}</small></div>
-    {!results.length && <p className="filter-empty"><Icon name="search" size={14} />{t("filterNoResults", locale)}</p>}
+    <div className="filter-results-heading" role="status"><span>{t("searchResults", locale)}</span><small>{matches.length + itemMatches.length} {t("filterSearchCount", locale)}</small></div>
+    {!results.length && !itemMatches.length && <p className="filter-empty"><Icon name="search" size={14} />{t("filterNoResults", locale)}</p>}
     <div className="filter-result-list" onKeyDown={event => {
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-      if (!results.length) return;
+      const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>(".filter-result");
+      if (!buttons.length) return;
       event.preventDefault();
-      const next = (active + (event.key === "ArrowDown" ? 1 : -1) + results.length) % results.length;
-      setActive(next); event.currentTarget.querySelectorAll<HTMLButtonElement>(".filter-result")[next]?.focus({ preventScroll: true });
+      const next = (active + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+      setActive(next); buttons[next]?.focus({ preventScroll: true });
       event.currentTarget.querySelectorAll<HTMLButtonElement>(".filter-result")[next]?.scrollIntoView?.({ block: "nearest" });
     }}>
+      {itemMatches.slice(0, 24).map(item => <button key={`item:${item.id}`} className="filter-result" type="button" onClick={() => onOpenItem?.(item)}><Icon name="box" size={16} /><span className="filter-result-content"><strong>{item.name}</strong><span className="filter-result-meta">{t("items", locale)} · {item.acquiredOn}</span></span><Icon name="chevron-right" size={12} /></button>)}
       {results.map(({ entry, hits }, index) => {
         const colors = resolveEntryColors(entry, settings);
         const title = titleFor(entry, locale);

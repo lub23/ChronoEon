@@ -60,8 +60,7 @@ describe("capture field decision index", () => {
     const index = new CaptureDecisionIndex(history);
     const decisions = index.decide("工作", { kind: "event" });
     expect(decisions.location.options.map((option) => option.value)).toEqual(["家里", "办公室"]);
-    expect(decisions.note.options.map((option) => option.value)).toEqual(["带工牌"]);
-    expect(decisions.note.selected).toBeUndefined();
+    expect(decisions).not.toHaveProperty("note");
   });
 
   it("syncs one new record without a fresh index", () => {

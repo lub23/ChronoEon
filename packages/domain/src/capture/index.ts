@@ -1,5 +1,5 @@
 import { extractExplicit, extractScheduleFields, type CaptureIssue } from "./explicit";
-export { completeCapture, CAPTURE_COMMANDS, type CaptureIssue } from "./explicit";
+export { completeCapture, captureMatchPositions, CAPTURE_COMMANDS, type CaptureIssue } from "./explicit";
 import type { ItemDraft } from "../item";
 import { defaultItemCategoryForCalendar } from "../settings";
 import type { EntryDraft, EntryKind, Locale } from "../entry";

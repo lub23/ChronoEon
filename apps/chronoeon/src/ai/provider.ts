@@ -1,21 +1,13 @@
 import type { AIChatMessage, AIProviderConfig, AIToolCall, AIToolDefinition } from "@chronoeon/domain";
+import { readAIStream } from "./streaming";
 import { isTauri } from "../platform/desktop";
 
 /** How a quick note is turned into drafts. */
 export type CaptureParseMode = "offline";
 
-/** The remote endpoint used by a surface. */
-export interface AIProviderChoice {
-  backend: "remote" | "local";
-  remote: AIProviderConfig;
-  local: AIProviderConfig;
-}
-
-/** 随心问 (Ask): the model that answers questions. */
-export interface AIAskPreferences extends AIProviderChoice {
-  /** Let the model think before it answers. Off keeps advice immediate. */
-  thinking: boolean;
-}
+export type AIProviderPreset = "compatible" | "openai" | "deepseek" | "gemini" | "groq" | "ollama" | "local";
+export interface AIProviderProfile extends AIProviderConfig { id: string; name: string; preset: AIProviderPreset; }
+export interface AIAskPreferences { thinking: boolean; mode: "ai"; }
 
 /** 随心记 is always the on-device parser. */
 export interface AICapturePreferences {
@@ -24,6 +16,8 @@ export interface AICapturePreferences {
 
 export interface AIProviderPreferences {
   enabled: boolean;
+  providers: AIProviderProfile[];
+  activeProviderId: string | null;
   ask: AIAskPreferences;
   capture: AICapturePreferences;
 }
@@ -45,34 +39,26 @@ export interface AIModelInfo {
 export interface AICompletionOptions {
   tools?: AIToolDefinition[];
   toolChoice?: "auto" | "none";
+  stream?: boolean;
   disableReasoning?: boolean;
   maxTokens?: number;
+  credentials?: AIProviderCredentials;
 }
 
-export const AI_PROVIDER_STORAGE_KEY = "chronoeon.ai.provider.v2";
-const DEFAULT_REMOTE_PROVIDER: AIProviderConfig = {
+export const AI_PROVIDER_STORAGE_KEY = "chronoeon.ai.providers";
+export const DEFAULT_AI_PROVIDER: AIProviderConfig = {
   kind: "openai-compatible",
-  baseUrl: "http://183.173.65.181:8080/v1",
-  model: "Qwen3.8-27B",
+  baseUrl: "",
+  model: "",
   timeoutMs: 90_000,
   maxTokens: 4096,
   temperature: 0.1,
 };
 export const DEFAULT_AI_PROVIDER_PREFERENCES: AIProviderPreferences = {
   enabled: true,
-  ask: {
-    backend: "remote",
-    thinking: false,
-    remote: { ...DEFAULT_REMOTE_PROVIDER },
-    local: {
-      kind: "local-openai-compatible",
-      baseUrl: "http://127.0.0.1:8080/v1",
-      model: "Qwen3.5-0.8B",
-      timeoutMs: 90_000,
-      maxTokens: 4096,
-      temperature: 0.1,
-    },
-  },
+  providers: [],
+  activeProviderId: null,
+  ask: { thinking: false, mode: "ai" },
   capture: { mode: "offline" },
 };
 
@@ -80,13 +66,21 @@ export interface AICustomHeader {
   name: string;
   value: string;
 }
+export interface AIProviderCredentials { apiKey: string; headers: AICustomHeader[]; }
+export const AI_PROVIDER_PRESETS: Record<AIProviderPreset, { name: string; baseUrl: string; kind: AIProviderConfig["kind"] }> = {
+  compatible: { name: "OpenAI Compatible", baseUrl: "", kind: "openai-compatible" },
+  openai: { name: "OpenAI", baseUrl: "https://api.openai.com/v1", kind: "openai-compatible" },
+  deepseek: { name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", kind: "openai-compatible" },
+  gemini: { name: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", kind: "openai-compatible" },
+  groq: { name: "Groq", baseUrl: "https://api.groq.com/openai/v1", kind: "openai-compatible" },
+  ollama: { name: "Ollama", baseUrl: "http://localhost:11434/v1", kind: "local-openai-compatible" },
+  local: { name: "Local", baseUrl: "http://127.0.0.1:8080/v1", kind: "local-openai-compatible" },
+};
 
 // Browser builds have no OS keychain. Keys may be used for the current page,
 // but are deliberately held only in module memory: never localStorage, exports,
 // logs, URLs, or tracked source.
-let browserLocalApiKey = "";
-let browserRemoteApiKey = "";
-let browserLocalHeaders: AICustomHeader[] = [];
+const browserCredentials = new Map<string, AIProviderCredentials>();
 
 function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -106,6 +100,7 @@ export function normalizeAIBaseUrl(value: string): string {
 function normalizeProvider(value: unknown, fallback: AIProviderConfig): AIProviderConfig {
   const input = value && typeof value === "object" ? value as Partial<AIProviderConfig> : {};
   return {
+    id: typeof input.id === "string" ? input.id : undefined,
     kind: input.kind === "local-openai-compatible" ? input.kind : fallback.kind,
     baseUrl: typeof input.baseUrl === "string" ? input.baseUrl.trim() : fallback.baseUrl,
     model: typeof input.model === "string" ? input.model.trim() : fallback.model,
@@ -117,22 +112,24 @@ function normalizeProvider(value: unknown, fallback: AIProviderConfig): AIProvid
   };
 }
 
-function normalizeChoice(value: unknown, fallback: AIProviderChoice): AIProviderChoice {
-  const input = value && typeof value === "object" ? value as Partial<AIProviderChoice> : {};
-  return {
-    backend: input.backend === "local" ? "local" : "remote",
-    remote: normalizeProvider(input.remote, fallback.remote),
-    local: normalizeProvider(input.local, fallback.local),
-  };
-}
-
 export function normalizeAIProviderPreferences(value: unknown): AIProviderPreferences {
   const input = value && typeof value === "object" ? value as Partial<AIProviderPreferences> : {};
   const ask = input.ask && typeof input.ask === "object" ? input.ask : undefined;
+  const seen = new Set<string>();
+  const providers = (Array.isArray(input.providers) ? input.providers : []).filter(profile => {
+    if (!profile || typeof profile.id !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(profile.id) || seen.has(profile.id)) return false;
+    seen.add(profile.id); return true;
+  }).map(profile => ({
+    ...normalizeProvider(profile, DEFAULT_AI_PROVIDER), id: profile.id,
+    name: typeof profile.name === "string" ? profile.name.trim() : "",
+    preset: Object.hasOwn(AI_PROVIDER_PRESETS, profile.preset) ? profile.preset : "compatible" as const,
+  }));
   return {
     enabled: typeof input.enabled === "boolean" ? input.enabled : DEFAULT_AI_PROVIDER_PREFERENCES.enabled,
+    providers,
+    activeProviderId: providers.some(profile => profile.id === input.activeProviderId) ? input.activeProviderId! : null,
     ask: {
-      ...normalizeChoice(ask, DEFAULT_AI_PROVIDER_PREFERENCES.ask),
+      mode: "ai",
       thinking: ask?.thinking === true,
     },
     capture: { mode: "offline" },
@@ -153,64 +150,35 @@ export function writeAIProviderPreferences(value: AIProviderPreferences): void {
   window.localStorage.setItem(AI_PROVIDER_STORAGE_KEY, JSON.stringify(normalizeAIProviderPreferences(value)));
 }
 
-export function activeAIProvider(choice: AIProviderChoice): AIProviderConfig {
-  return choice.backend === "local" ? choice.local : choice.remote;
-}
-
-function choiceIsConfigured(enabled: boolean, choice: AIProviderChoice): boolean {
-  const provider = activeAIProvider(choice);
-  return enabled && Boolean(provider.baseUrl.trim() && provider.model.trim());
+export function activeAIProvider(preferences: AIProviderPreferences): AIProviderProfile | undefined {
+  return preferences.providers.find(profile => profile.id === preferences.activeProviderId);
 }
 
 /** 随心问 can reach a model. */
 export function askIsReady(preferences: AIProviderPreferences): boolean {
-  return choiceIsConfigured(preferences.enabled, preferences.ask);
+  const provider = activeAIProvider(preferences);
+  return preferences.enabled && Boolean(provider?.baseUrl.trim() && provider.model.trim());
 }
 
-export async function hasRemoteAIKey(): Promise<boolean> {
-  if (!isTauri()) return Boolean(browserRemoteApiKey);
+export async function readAIProviderCredentials(providerId: string): Promise<AIProviderCredentials> {
+  if (!isTauri()) return structuredClone(browserCredentials.get(providerId) ?? { apiKey: "", headers: [] });
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<boolean>("ai_api_key_status", { providerKind: "openai-compatible" });
+  return invoke<AIProviderCredentials>("ai_provider_credentials", { providerId });
 }
 
-export async function saveRemoteAIKey(value: string): Promise<void> {
-  const normalized = value.trim();
-  if (!isTauri()) {
-    browserRemoteApiKey = normalized;
-    return;
-  }
+export async function saveAIProviderCredentials(providerId: string, credentials: AIProviderCredentials): Promise<void> {
+  const normalized = { apiKey: credentials.apiKey.trim(), headers: normalizeAICustomHeaders(credentials.headers) };
+  if (/[\r\n\0]/.test(normalized.apiKey)) throw new Error("Invalid API key");
+  if (!isTauri()) { browserCredentials.set(providerId, normalized); return; }
   const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("set_ai_api_key", { providerKind: "openai-compatible", value: normalized });
+  await invoke("save_ai_provider_credentials", { providerId, credentials: normalized });
 }
 
-export async function clearRemoteAIKey(): Promise<void> {
-  browserRemoteApiKey = "";
+export async function deleteAIProviderCredentials(providerId: string): Promise<void> {
+  browserCredentials.delete(providerId);
   if (!isTauri()) return;
   const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("clear_ai_api_key", { providerKind: "openai-compatible" });
-}
-
-export async function hasLocalAIKey(): Promise<boolean> {
-  if (!isTauri()) return Boolean(browserLocalApiKey);
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<boolean>("ai_api_key_status", { providerKind: "local-openai-compatible" });
-}
-
-export async function saveLocalAIKey(value: string): Promise<void> {
-  const normalized = value.trim();
-  if (!isTauri()) {
-    browserLocalApiKey = normalized;
-    return;
-  }
-  const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("set_ai_api_key", { providerKind: "local-openai-compatible", value: normalized });
-}
-
-export async function clearLocalAIKey(): Promise<void> {
-  browserLocalApiKey = "";
-  if (!isTauri()) return;
-  const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("clear_ai_api_key", { providerKind: "local-openai-compatible" });
+  await invoke("delete_ai_provider_credentials", { providerId });
 }
 
 export function normalizeAICustomHeaders(value: unknown): AICustomHeader[] {
@@ -232,18 +200,12 @@ export function normalizeAICustomHeaders(value: unknown): AICustomHeader[] {
   return headers;
 }
 
-export async function readLocalAIHeaders(): Promise<AICustomHeader[]> {
-  if (!isTauri()) return browserLocalHeaders;
-  const { invoke } = await import("@tauri-apps/api/core");
-  return normalizeAICustomHeaders(await invoke<AICustomHeader[]>("ai_custom_headers"));
-}
-
-export async function saveLocalAIHeaders(value: AICustomHeader[]): Promise<AICustomHeader[]> {
-  const headers = normalizeAICustomHeaders(value);
-  browserLocalHeaders = headers;
-  if (!isTauri()) return headers;
-  const { invoke } = await import("@tauri-apps/api/core");
-  return normalizeAICustomHeaders(await invoke<AICustomHeader[]>("set_ai_custom_headers", { headers }));
+function browserHeaders(provider: AIProviderConfig, credentials?: AIProviderCredentials): Headers {
+  const secret = credentials ?? (provider.id ? browserCredentials.get(provider.id) : undefined);
+  const headers = new Headers({ Accept: "application/json" });
+  if (secret?.apiKey) headers.set("Authorization", `Bearer ${secret.apiKey}`);
+  for (const header of secret?.headers ?? []) headers.set(header.name, header.value);
+  return headers;
 }
 
 function completionContent(payload: unknown): string {
@@ -254,13 +216,7 @@ function completionContent(payload: unknown): string {
     : Array.isArray(content)
       ? content.map((part: unknown) => typeof (part as any)?.text === "string" ? (part as any).text : "").join("")
       : "";
-  const trimmed = text.trim();
-  if (trimmed) return trimmed;
-  // Reasoning models (Qwen3 …) can spend the whole token budget inside the
-  // hidden reasoning channel, leaving content empty; surface that text
-  // instead of reporting a dead reply.
-  const reasoning = value.choices?.[0]?.message?.reasoning_content;
-  return typeof reasoning === "string" ? reasoning.trim() : "";
+  return text.trim();
 }
 
 function completionReasoning(payload: unknown): string | undefined {
@@ -280,10 +236,11 @@ async function browserCompletion(
   const body: Record<string, unknown> = {
     model: provider.model.trim(),
     messages,
-    stream: false,
+    stream: options?.stream ?? false,
     temperature: provider.temperature ?? 0.1,
     max_tokens: options?.maxTokens ?? provider.maxTokens ?? 1600,
   };
+  if (options?.stream) body.stream_options = { include_usage: true };
   if (responseSchema) body.response_format = { type: "json_schema", json_schema: { name: "chronoeon_entries", strict: true, schema: responseSchema } };
   if (options?.tools?.length) {
     body.tools = options.tools;
@@ -301,20 +258,19 @@ async function browserCompletion(
     if (signal.aborted) requestController.abort();
     else signal.addEventListener("abort", abortFromCaller, { once: true });
   }
-  const timeout = globalThis.setTimeout(() => requestController.abort(), provider.timeoutMs ?? 90_000);
-  const credentialHeaders: Record<string, string> = {};
-  if (provider.kind === "local-openai-compatible" && browserLocalApiKey) credentialHeaders.Authorization = `Bearer ${browserLocalApiKey}`;
-  else if (provider.kind === "openai-compatible" && browserRemoteApiKey) credentialHeaders["X-Api-Key"] = browserRemoteApiKey;
+  let timeout: ReturnType<typeof globalThis.setTimeout> | undefined;
+  const progress = () => {
+    globalThis.clearTimeout(timeout);
+    timeout = globalThis.setTimeout(() => requestController.abort(), provider.timeoutMs ?? 90_000);
+  };
+  progress();
+  const headers = browserHeaders(provider, options?.credentials);
+  headers.set("Content-Type", "application/json");
+  if (options?.stream) headers.set("Accept", "text/event-stream");
   const send = (requestBody: Record<string, unknown>) => fetch(endpoint, {
     method: "POST",
     signal: requestController.signal,
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...credentialHeaders,
-      ...Object.fromEntries((provider.kind === "local-openai-compatible" ? browserLocalHeaders : [])
-        .map((header) => [header.name, header.value])),
-    },
+    headers,
     body: JSON.stringify(requestBody),
   });
   try {
@@ -326,7 +282,9 @@ async function browserCompletion(
       delete fallback.response_format;
       response = await send(fallback);
     }
-    const payload = await response.json().catch((error: unknown) => {
+    const payload = response.ok && response.headers?.get("Content-Type")?.includes("text/event-stream")
+      ? await readAIStream(response, progress)
+      : await response.json().catch((error: unknown) => {
       // A timeout/network failure can arrive after headers while reading JSON.
       // Preserve it for the bounded retry instead of reporting an empty answer.
       if (requestController.signal.aborted || error instanceof TypeError) throw error;
@@ -335,10 +293,10 @@ async function browserCompletion(
     if (!response.ok) throw new Error(`AI endpoint returned ${response.status}: ${String(payload?.error?.message ?? response.statusText).slice(0, 400)}`);
     const reasoningContent = completionReasoning(payload);
     let content = completionContent(payload);
-    if (!content && reasoningContent) content = reasoningContent;
+
     const rawToolCalls = payload.choices?.[0]?.message?.tool_calls;
     const toolCalls = Array.isArray(rawToolCalls) ? rawToolCalls as AIToolCall[] : undefined;
-    if (!content && !toolCalls?.length) throw new Error("AI endpoint returned an empty message");
+    if (!content && !toolCalls?.length) throw new Error(reasoningContent ? "AI endpoint returned an empty message (reasoning only)" : "AI endpoint returned an empty message");
     return {
       content,
       toolCalls,
@@ -379,22 +337,30 @@ export async function requestAICompletion(
 ): Promise<AICompletionResult> {
   normalizeAIBaseUrl(provider.baseUrl);
   if (!provider.model.trim()) throw new Error("AI model is empty");
+  let completionOptions = options;
   for (let attempt = 0; ; attempt++) {
     if (signal?.aborted) throw new DOMException("Request cancelled", "AbortError");
     try {
-      if (!isTauri()) return await browserCompletion(provider, messages, responseSchema, signal, options);
+      if (!isTauri()) return await browserCompletion(provider, messages, responseSchema, signal, completionOptions);
       const { invoke } = await import("@tauri-apps/api/core");
       if (signal?.aborted) throw new DOMException("Request cancelled", "AbortError");
       return await withAbort(invoke<AICompletionResult>("ai_chat_completion", {
         request: {
           baseUrl: provider.baseUrl, model: provider.model, messages, responseSchema,
-          temperature: provider.temperature, maxTokens: options?.maxTokens ?? provider.maxTokens, timeoutMs: provider.timeoutMs,
-          providerKind: provider.kind,
-          tools: options?.tools, toolChoice: options?.toolChoice ?? "auto",
-          disableReasoning: options?.disableReasoning ?? false,
+          temperature: provider.temperature, maxTokens: completionOptions?.maxTokens ?? provider.maxTokens, timeoutMs: provider.timeoutMs,
+          providerId: provider.id,
+          credentials: completionOptions?.credentials,
+          tools: completionOptions?.tools, toolChoice: completionOptions?.toolChoice ?? "auto",
+          disableReasoning: completionOptions?.disableReasoning ?? false,
+          stream: completionOptions?.stream ?? false,
         },
       }), signal);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!signal?.aborted && attempt < 1 && /empty message.*reasoning only/.test(message) && !completionOptions?.disableReasoning) {
+        completionOptions = { ...completionOptions, disableReasoning: true };
+        continue;
+      }
       if (signal?.aborted || attempt >= 1 || !transientFailure(error)) throw error;
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
@@ -402,17 +368,12 @@ export async function requestAICompletion(
 }
 
 /** Probe the compatible endpoint's model catalog without a completion request. */
-export async function fetchAIModels(provider: AIProviderConfig, signal?: AbortSignal): Promise<AIModelInfo[]> {
+export async function fetchAIModels(provider: AIProviderConfig, signal?: AbortSignal, credentials?: AIProviderCredentials): Promise<AIModelInfo[]> {
   const endpoint = `${normalizeAIBaseUrl(provider.baseUrl)}/models`;
   if (!isTauri()) {
-    const headers: Record<string, string> = {};
-    if (provider.kind === "local-openai-compatible" && browserLocalApiKey) headers.Authorization = `Bearer ${browserLocalApiKey}`;
-    else if (provider.kind === "openai-compatible" && browserRemoteApiKey) headers["X-Api-Key"] = browserRemoteApiKey;
-    if (provider.kind === "local-openai-compatible") {
-      for (const header of browserLocalHeaders) headers[header.name] = header.value;
-    }
+    const headers = browserHeaders(provider, credentials);
     const response = await fetch(endpoint, {
-      signal,
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(provider.timeoutMs ?? 15_000)]) : AbortSignal.timeout(provider.timeoutMs ?? 15_000),
       headers,
     });
     const payload = await response.json().catch(() => ({})) as any;
@@ -423,7 +384,8 @@ export async function fetchAIModels(provider: AIProviderConfig, signal?: AbortSi
   return withAbort(invoke<AIModelInfo[]>("ai_list_models", {
     request: {
       baseUrl: provider.baseUrl,
-      providerKind: provider.kind,
+      providerId: provider.id,
+      credentials,
       timeoutMs: provider.timeoutMs,
     },
   }), signal);
@@ -440,7 +402,7 @@ function parseAIModels(payload: unknown): AIModelInfo[] {
 /** Wake sleeping endpoints without sending any capture/history content. */
 const warmups = new Map<string, Promise<void>>();
 export function warmUpAIProvider(provider: AIProviderConfig): Promise<void> {
-  const key = provider.kind + ":" + provider.baseUrl;
+  const key = `${provider.id ?? ""}:${provider.baseUrl}`;
   const pending = warmups.get(key);
   if (pending) return pending;
   const request = (async () => {

@@ -32,6 +32,11 @@ async fn call(app: AppHandle, command: &'static str, payload: Value) -> Result<V
     }
 }
 
+#[cfg(target_os = "android")]
+pub async fn credentials(app: AppHandle, action: &str, id: &str, value: Option<String>) -> Result<Value, String> {
+    call(app, "credentials", serde_json::json!({ "action": action, "id": id, "value": value })).await
+}
+
 #[tauri::command]
 pub async fn device_location(app: AppHandle, timeout_ms: u64) -> Result<Value, String> {
     call(app, "locate", serde_json::json!({ "timeoutMs": timeout_ms.clamp(1000, 30000) })).await

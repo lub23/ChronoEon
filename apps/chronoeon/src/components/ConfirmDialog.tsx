@@ -3,6 +3,7 @@ import type { Locale } from "../domain/entry";
 import { t, type MessageKey } from "../i18n";
 import { Icon } from "./Icon";
 import { registerModalDismiss } from "./modalLayer";
+import { createPortal } from "react-dom";
 
 export interface ConfirmRequest {
   title: string;
@@ -55,7 +56,7 @@ export function useConfirmDialog(locale: Locale): {
     });
   }, [request, settle]);
 
-  const dialog = request ? (
+  const dialog = request ? createPortal(
     <div
       className="confirm-backdrop"
       role="presentation"
@@ -78,7 +79,7 @@ export function useConfirmDialog(locale: Locale): {
           </button>
         </div>
       </section>
-    </div>
+    </div>, document.body
   ) : null;
 
   return { confirm, dialog };

@@ -30,6 +30,7 @@ const MAX_LINE_BYTES = 8 * 1024 * 1024;
  * Triggers capture *every* business write atomically, including chat and deletes. */
 export class SyncStore {
   constructor(private readonly db: PersistencePort) {}
+  recordLanguageChange(before: string, after: string) { return new OperationHistoryStore(this.db).recordLanguage(before, after); }
   history(limit = 100, offset = 0) { return new OperationHistoryStore(this.db).list(limit, offset); }
   restoreHistory(id: string): Promise<void> { return new OperationHistoryStore(this.db).restore(id); }
   clearHistory(): Promise<void> { return new OperationHistoryStore(this.db).clear(); }

@@ -21,7 +21,7 @@ const dialogExtras = {
 };
 
 vi.mock("../ai/provider", () => ({
-  activeAIProvider: (choice: { remote: AIProviderConfig }) => choice.remote,
+  activeAIProvider: (preferences: { providers: AIProviderConfig[] }) => preferences.providers[0],
   askIsReady: () => true,
   requestAICompletion: vi.fn(async (_provider: AIProviderConfig, messages: AIChatMessage[]) => {
     capturedSystem = String(messages[0]?.content ?? "");
@@ -59,7 +59,7 @@ function ContextHost({ initialEntries, removeId }: { initialEntries: Entry[]; re
         entries={entries}
         aiPreferences={{
           enabled: true,
-          ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+          ask: { thinking: false, mode: "ai" }, providers: [{ id: "test", name: "Test", preset: "compatible", kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }], activeProviderId: "test",
           capture: { mode: "offline" },
         }}
         conversations={createMemoryConversationStore()}
@@ -99,7 +99,7 @@ describe("AI chat context selection", () => {
           ]}
           aiPreferences={{
             enabled: true,
-            ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+            ask: { thinking: false, mode: "ai" }, providers: [{ id: "test", name: "Test", preset: "compatible", kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }], activeProviderId: "test",
             capture: { mode: "offline" },
           }}
           conversations={conversations}
@@ -143,7 +143,7 @@ describe("AI chat context selection", () => {
           ]}
           aiPreferences={{
             enabled: true,
-            ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+            ask: { thinking: false, mode: "ai" }, providers: [{ id: "test", name: "Test", preset: "compatible", kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }], activeProviderId: "test",
             capture: { mode: "offline" },
           }}
           conversations={conversations}
@@ -179,7 +179,7 @@ describe("AI chat context selection", () => {
     expect(capturedSystem).not.toContain("Older idea");
   });
 
-  it("supports a custom date range in the context picker", async () => {
+  it.each(["mouse", "touch"])("supports custom context dates with %s pointer events and nested dismissal", async (pointerType) => {
     vi.useFakeTimers({ now: new Date("2026-08-31T12:00:00"), shouldAdvanceTime: true });
     const conversations = createMemoryConversationStore();
     try {
@@ -193,7 +193,7 @@ describe("AI chat context selection", () => {
             ]}
             aiPreferences={{
               enabled: true,
-              ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+              ask: { thinking: false, mode: "ai" }, providers: [{ id: "test", name: "Test", preset: "compatible", kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }], activeProviderId: "test",
               capture: { mode: "offline" },
             }}
             conversations={conversations}
@@ -212,12 +212,47 @@ describe("AI chat context selection", () => {
       act(() => { custom.click(); });
       expect(host.textContent).toContain("Early August idea");
 
-      act(() => { host.querySelector<HTMLButtonElement>(".chat-context-dates .glass-picker-trigger")!.click(); });
+      // HTMLElement.click() skips pointerdown and cannot catch portal dismissal bugs.
+      const click = (element: HTMLElement) => {
+        act(() => { element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType })); });
+        expect(element.isConnected).toBe(true);
+        act(() => { element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType })); element.click(); });
+      };
+      click(host.querySelector<HTMLButtonElement>(".chat-context-dates .glass-picker-trigger")!);
+      click(document.querySelector<HTMLButtonElement>('.glass-picker-popup button[aria-label="Previous month"]')!);
+      expect(document.querySelector(".glass-picker-month strong")?.textContent).toBe("July 2026");
+      click(document.querySelector<HTMLButtonElement>('.glass-picker-popup button[aria-label="Next month"]')!);
+      expect(host.querySelector(".chat-context-panel")).not.toBeNull();
       const startCell = [...document.querySelectorAll<HTMLButtonElement>(".glass-date-cell")]
         .find((cell) => cell.textContent === "25" && !cell.disabled)!;
-      act(() => { startCell.click(); });
+      click(startCell);
       expect(host.textContent).not.toContain("Early August idea");
       expect(host.textContent).toContain("Late August idea");
+      const rangeSelectAll = [...host.querySelectorAll<HTMLButtonElement>(".chat-context-panel button")]
+        .find(button => button.textContent === "Select all matches")!;
+      click(rangeSelectAll);
+      expect(host.querySelector(".chat-tool b")?.textContent).toBe("1");
+      expect(rangeSelectAll.disabled).toBe(true);
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(document.querySelector(".glass-picker-popup")).toBeNull();
+      const endTrigger = host.querySelectorAll<HTMLButtonElement>(".chat-context-dates .glass-picker-trigger")[1];
+      click(endTrigger);
+      const endCell = [...document.querySelectorAll<HTMLButtonElement>(".glass-date-cell:not(.is-outside)")].find(cell => cell.textContent === "29")!;
+      click(endCell);
+      expect(host.querySelector(".chat-context-panel")).not.toBeNull();
+      expect(host.textContent).not.toContain("Late August idea");
+      expect(endTrigger.textContent).toContain("2026-08-29");
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      click(endTrigger);
+      act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(document.querySelector(".glass-picker-popup")).toBeNull();
+      expect(host.querySelector(".chat-context-panel")).not.toBeNull();
+      click(endTrigger);
+      click(host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!);
+      expect(host.querySelector(".chat-context-panel")).toBeNull();
+      expect(document.querySelector(".glass-picker-popup")).toBeNull();
+      expect(host.querySelector(".chat-dialog")).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -237,7 +272,7 @@ describe("AI chat context selection", () => {
           entries={[entry("sel", "Carried idea", "2026-08-10"), entry("other", "Other idea", "2026-08-11")]}
           aiPreferences={{
             enabled: true,
-            ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+            ask: { thinking: false, mode: "ai" }, providers: [{ id: "test", name: "Test", preset: "compatible", kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }], activeProviderId: "test",
             capture: { mode: "offline" },
           }}
           conversations={conversations}
@@ -305,3 +340,56 @@ describe("AI chat context selection", () => {
     localHost.remove();
   });
 });
+
+ it.each(["en", "zh"] as const)("selects all filtered matches beyond the visible list and preserves prior context (%s)", async (locale) => {
+  const matches = Array.from({ length: 123 }, (_, i) => entry(
+    "match-" + i, "Match idea " + i, isoDaysFromToday(-1),
+  ));
+  const excluded = [
+    entry("old", "Match old idea", isoDaysFromToday(-40)),
+    { ...entry("task", "Match task", isoDaysFromToday(-1)), kind: "task" as const },
+    entry("query", "Unrelated idea", isoDaysFromToday(-1)),
+  ];
+  await act(async () => root.render(<ChatDialog
+    locale={locale} entries={[entry("pinned", "Pinned record", isoDaysFromToday(1)), ...matches, ...excluded]}
+    aiPreferences={{ enabled: true, ask: { thinking: false, mode: "ai" }, providers: [{ id: "test", name: "Test", preset: "compatible", kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }], activeProviderId: "test", capture: { mode: "offline" } }}
+    conversations={createMemoryConversationStore()} {...dialogExtras}
+    onOpenEntry={() => {}} onOpenSettings={() => {}} onClose={() => {}} />));
+  act(() => host.querySelector<HTMLButtonElement>(".chat-tool")!.click());
+  act(() => host.querySelector<HTMLInputElement>('.chat-context-item input[aria-label="Pinned record"]')!.click());
+  act(() => host.querySelectorAll<HTMLButtonElement>(".chat-context-range-options button")[1].click());
+  for (const checkbox of [...host.querySelectorAll<HTMLButtonElement>('.chat-context-kinds [role="checkbox"]')].slice(0, 3)) {
+    act(() => checkbox.click());
+  }
+  const search = host.querySelector<HTMLInputElement>(".chat-context-panel input:not([type=checkbox])")!;
+  const query = (text: string) => act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, text);
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  query("Match");
+  const selectAll = [...host.querySelectorAll<HTMLButtonElement>(".chat-context-panel button")].find(button => button.textContent === (locale === "zh" ? "全选当前范围" : "Select all matches"))!;
+  expect(selectAll).toBeDefined();
+  expect(selectAll.disabled).toBe(false);
+  act(() => host.querySelector<HTMLInputElement>(".chat-context-item input")!.click());
+  expect(selectAll.disabled).toBe(false);
+  act(() => selectAll.click());
+  expect(selectAll.disabled).toBe(true);
+  expect(host.querySelector(".chat-tool b")?.textContent).toBe("124");
+  expect(host.querySelectorAll(".chat-context-item input:checked")).toHaveLength(120);
+  expect(host.querySelector(".chat-context-selection")?.textContent).toContain("123");
+  query("no matching records");
+  expect(selectAll.disabled).toBe(true);
+  expect(host.querySelectorAll(".chat-context-item")).toHaveLength(0);
+  expect(host.querySelector(".chat-tool b")?.textContent).toBe("124");
+  act(() => host.querySelector<HTMLButtonElement>(".chat-tool")!.click());
+  const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "Summarize these records");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => host.querySelector<HTMLButtonElement>(".chat-send")!.click());
+  expect(capturedSystem).toContain("Answer in English");
+  expect(capturedSystem).toContain("Pinned record");
+  for (const item of matches) expect(capturedSystem).toContain(item.title);
+  for (const item of excluded) expect(capturedSystem).not.toContain(item.title);
+ });

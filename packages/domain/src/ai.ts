@@ -24,6 +24,8 @@ export type AIProviderKind = "openai-compatible" | "local-openai-compatible";
 
 /** Non-secret provider settings. API keys deliberately do not belong here. */
 export interface AIProviderConfig {
+  /** Saved profile identity; absent for an anonymous, keyless request. */
+  id?: string;
   kind: AIProviderKind;
   baseUrl: string;
   model: string;

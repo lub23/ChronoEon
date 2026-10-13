@@ -42,7 +42,7 @@ function render(store: AiConversationStore, onClose = vi.fn()) {
         entries={[]}
         aiPreferences={{
           enabled: true,
-          ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+          ask: { thinking: false, mode: "ai" }, providers: [{ id: "test", name: "Test", preset: "compatible", kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }], activeProviderId: "test",
           capture: { mode: "offline" },
         }}
         conversations={store}

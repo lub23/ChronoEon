@@ -227,7 +227,7 @@ describe("app: create flow (browser demo)", () => {
     });
     await flush();
 
-    const sheet = host.querySelector(".composer-sheet");
+    const sheet = document.querySelector(".composer-sheet");
     expect(sheet, "composer should open").toBeTruthy();
 
     const titleInput = sheet!.querySelector<HTMLInputElement>("input[placeholder]")!;
@@ -240,7 +240,7 @@ describe("app: create flow (browser demo)", () => {
     await flush(150);
 
     // The composer closes and the entry is persisted to the demo store.
-    expect(host.querySelector(".composer-sheet")).toBeNull();
+    expect(document.querySelector(".composer-sheet")).toBeNull();
     const stored = JSON.parse(window.localStorage.getItem("chronoeon.entries.v1") ?? "[]") as Array<{ id: string; title: string }>;
     expect(stored.some((entry) => entry.title === "Smoke test entry")).toBe(true);
     // And it is visible in the agenda list.
@@ -259,7 +259,7 @@ describe("app: create flow (browser demo)", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }));
     });
     await flush();
-    const sheet = host.querySelector(".composer-sheet")!;
+    const sheet = document.querySelector(".composer-sheet")!;
     const titleInput = sheet.querySelector<HTMLInputElement>("input[placeholder='想记下什么？']")!;
     await act(async () => { setInputValue(titleInput, "Draft that must survive"); });
 
@@ -268,7 +268,7 @@ describe("app: create flow (browser demo)", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
     await flush();
-    expect(host.querySelector(".confirm-backdrop"), "discard confirm must open").toBeTruthy();
+    expect(document.querySelector(".confirm-backdrop"), "discard confirm must open").toBeTruthy();
     expect(sheet.querySelector<HTMLInputElement>("input[placeholder='想记下什么？']")?.value).toBe("Draft that must survive");
 
     // Second Escape closes ONLY the confirm; the dirty composer must survive.
@@ -276,21 +276,21 @@ describe("app: create flow (browser demo)", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
     await flush();
-    expect(host.querySelector(".confirm-backdrop"), "confirm must close first").toBeNull();
-    expect(host.querySelector(".composer-sheet"), "dirty composer must survive").toBeTruthy();
-    expect(host.querySelector(".composer-sheet")?.querySelector<HTMLInputElement>("input[placeholder='想记下什么？']")?.value).toBe("Draft that must survive");
+    expect(document.querySelector(".confirm-backdrop"), "confirm must close first").toBeNull();
+    expect(document.querySelector(".composer-sheet"), "dirty composer must survive").toBeTruthy();
+    expect(document.querySelector(".composer-sheet")?.querySelector<HTMLInputElement>("input[placeholder='想记下什么？']")?.value).toBe("Draft that must survive");
 
     // Asking again and choosing Discard closes the composer without saving.
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
     await flush();
-    const discardButton = [...host.querySelectorAll<HTMLButtonElement>(".confirm-actions button")]
+    const discardButton = [...document.querySelectorAll<HTMLButtonElement>(".confirm-actions button")]
       .find((button) => button.textContent === "放弃")!;
     await act(async () => { discardButton.click(); });
     await flush(200); // the exit surface is retained for 160ms
-    expect(host.querySelector(".composer-sheet")).toBeNull();
-    expect(host.querySelector(".confirm-backdrop")).toBeNull();
+    expect(document.querySelector(".composer-sheet")).toBeNull();
+    expect(document.querySelector(".confirm-backdrop")).toBeNull();
     const stored = JSON.parse(window.localStorage.getItem("chronoeon.entries.v1") ?? "[]") as Array<{ title: string }>;
     expect(stored.some((entry) => entry.title === "Draft that must survive")).toBe(false);
   });
@@ -303,7 +303,7 @@ describe("app: create flow (browser demo)", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }));
     });
     await flush();
-    const sheet = host.querySelector(".composer-sheet")!;
+    const sheet = document.querySelector(".composer-sheet")!;
 
     // The all-day switch and category share the top line; the title and
     // location share the next row so long labels stop consuming vertical space.
@@ -380,7 +380,7 @@ describe("app: create flow (browser demo)", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }));
     });
     await flush();
-    const sheet = host.querySelector(".composer-sheet")!;
+    const sheet = document.querySelector(".composer-sheet")!;
 
     // Repeat and reminder are plain fields on the sheet, always visible.
     const reminderTrigger = [...sheet.querySelectorAll<HTMLButtonElement>("button.glass-select-trigger")]
@@ -433,7 +433,7 @@ describe("app: create flow (browser demo)", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }));
     });
     await flush();
-    const sheet = host.querySelector(".composer-sheet")!;
+    const sheet = document.querySelector(".composer-sheet")!;
     const titleInput = sheet.querySelector<HTMLInputElement>("input[placeholder='想记下什么？']")!;
     await act(async () => { setInputValue(titleInput, "No duplicates"); });
 
@@ -444,7 +444,7 @@ describe("app: create flow (browser demo)", () => {
     });
     await flush(150);
 
-    expect(host.querySelector(".composer-sheet")).toBeNull();
+    expect(document.querySelector(".composer-sheet")).toBeNull();
     const stored = JSON.parse(window.localStorage.getItem("chronoeon.entries.v1") ?? "[]") as Array<{ title: string }>;
     const matches = stored.filter((entry) => entry.title === "No duplicates");
     expect(matches.length, "exactly one row for one entry").toBe(1);
@@ -467,14 +467,14 @@ describe("app: create flow (browser demo)", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }));
     });
     await flush();
-    expect(host.querySelector(".composer-sheet"), "n must be ignored while settings is open").toBeNull();
+    expect(document.querySelector(".composer-sheet"), "n must be ignored while settings is open").toBeNull();
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
     await flush();
     expect(host.querySelector(".settings-backdrop"), "Escape must close settings").toBeNull();
-    expect(host.querySelector(".composer-sheet")).toBeNull();
+    expect(document.querySelector(".composer-sheet")).toBeNull();
   });
 
   it("swipes mobile views through the shared calendar-to-insights order", async () => {
@@ -555,14 +555,14 @@ describe("app: create flow (browser demo)", () => {
     });
     await flush();
 
-    const sheet = host.querySelector(".composer-sheet")!;
+    const sheet = document.querySelector(".composer-sheet")!;
     const form = sheet.querySelector("form")!;
     await act(async () => {
       form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });
     await flush();
 
-    expect(host.querySelector(".composer-sheet"), "composer must stay open").toBeTruthy();
+    expect(document.querySelector(".composer-sheet"), "composer must stay open").toBeTruthy();
     expect(JSON.parse(window.localStorage.getItem("chronoeon.entries.v1") ?? "[]").length).toBeLessThanOrEqual(
       (JSON.parse(window.localStorage.getItem("chronoeon.entries.v1") ?? "[]") as unknown[]).length,
     );

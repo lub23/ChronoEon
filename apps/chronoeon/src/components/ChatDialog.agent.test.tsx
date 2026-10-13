@@ -15,7 +15,7 @@ let root: Root;
 let requests: AIChatMessage[][] = [];
 
 vi.mock("../ai/provider", () => ({
-  activeAIProvider: (choice: { remote: AIProviderConfig }) => choice.remote,
+  activeAIProvider: (preferences: { providers: AIProviderConfig[] }) => preferences.providers[0],
   askIsReady: () => true,
   requestAICompletion: vi.fn(async (
     _provider: AIProviderConfig,
@@ -38,7 +38,7 @@ vi.mock("../ai/provider", () => ({
         }],
       };
     }
-    return { content: options?.tools?.length ? "Tool answer." : "Planned answer." };
+    return { content: requests.length > 1 ? "Tool answer." : "Planned answer." };
   }),
 }));
 
@@ -59,7 +59,7 @@ afterEach(() => {
   requests = [];
 });
 
-function render(entries: Entry[]) {
+function render(entries: Entry[], conversations = createMemoryConversationStore()) {
   act(() => {
     root.render(
       <ChatDialog
@@ -67,10 +67,10 @@ function render(entries: Entry[]) {
         entries={entries}
         aiPreferences={{
           enabled: true,
-          ask: { backend: "remote", thinking: false, remote: { kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }, local: { kind: "local-openai-compatible", baseUrl: "http://127.0.0.1:8080/v1", model: "local" } },
+          ask: { thinking: false, mode: "ai" }, providers: [{ id: "test", name: "Test", preset: "compatible", kind: "openai-compatible", baseUrl: "https://example.test/v1", model: "remote" }], activeProviderId: "test",
           capture: { mode: "offline" },
         }}
-        conversations={createMemoryConversationStore()}
+        conversations={conversations}
         settings={createDefaultSettings()}
         initialMode="ask"
         onOpenEntry={() => undefined}
@@ -84,7 +84,7 @@ function render(entries: Entry[]) {
 }
 
 describe("AI advisor model tool workflow", () => {
-  it("returns model tool_calls to the model and shows the local retrieval trace", async () => {
+  it("synthesizes a final answer from tool data without replaying tool protocol", async () => {
     render([
       { id: "food", kind: "event", title: "饮食记录", date: "2026-09-18", allDay: true, category: "personal", color: "#77787b", createdAt: "2026-09-18T12:00:00.000Z" },
       { id: "old", kind: "idea", title: "旧记录", date: "2026-08-01", allDay: true, category: "personal", color: "#77787b", createdAt: "2026-08-01T12:00:00.000Z" },
@@ -100,14 +100,14 @@ describe("AI advisor model tool workflow", () => {
     expect(requests).toHaveLength(2);
     const first = vi.mocked(requestAICompletion).mock.calls[0];
     expect(first[4]?.tools?.map((tool) => tool.function.name)).toContain("search_entries");
+    expect(first[4]).toMatchObject({ maxTokens: 1024, disableReasoning: true });
     expect(first[1].at(-1)?.content).toContain("饮食");
 
     const second = requests[1];
-    expect(second.at(-2)).toMatchObject({ role: "assistant", tool_calls: [expect.objectContaining({ id: "call-diet-sleep" })] });
-    const toolMessage = second.at(-1)!;
-    expect(toolMessage).toMatchObject({ role: "tool", tool_call_id: "call-diet-sleep", name: "search_entries" });
-    expect(toolMessage.content).toContain("饮食记录");
-    expect(toolMessage.content).not.toContain("旧记录");
+    expect(second.some(message => message.role === "tool" || message.tool_calls)).toBe(false);
+    expect(second[0].content).toContain("饮食记录");
+    expect(second[0].content).not.toContain("旧记录");
+    expect(second[0].content).toContain("Retrieval is complete");
 
     const trace = host.querySelector(".chat-tool-trace")!;
     expect(trace.textContent).toContain("检索条目");
@@ -135,17 +135,33 @@ describe("AI advisor model tool workflow", () => {
     expect(call[4]?.tools).toBeUndefined();
     expect(call[4]?.disableReasoning).toBe(true);
     const messages = call[1];
-    expect(messages.at(-2)).toMatchObject({
-      role: "assistant",
-      tool_calls: [expect.objectContaining({ id: "dietPattern-0", function: expect.objectContaining({ name: "search_entries" }) })],
-    });
-    const toolMessage = messages.at(-1)!;
-    expect(toolMessage.role).toBe("tool");
-    expect(toolMessage.content).toContain("早餐");
-    expect(toolMessage.content).not.toContain("旧早餐");
-    expect(toolMessage.content).toContain("\"duration_minutes\":20");
-    expect(toolMessage.content).toContain("kinds=event=1");
+    expect(messages.some(message => message.role === "tool" || message.tool_calls)).toBe(false);
+    expect(messages[0].content).toContain("早餐");
+    expect(messages[0].content).not.toContain("旧早餐");
+    expect(messages[0].content).toContain("\"duration_minutes\":20");
+    expect(messages[0].content).toContain("kinds=event=1");
     expect(host.querySelector(".chat-tool-trace")?.textContent).toContain("检索条目");
     expect(host.textContent).toContain("Planned answer.");
   });
+});
+
+it("keeps complete stored history while bounding native model requests", async () => {
+  const store = createMemoryConversationStore();
+  render([], store);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+  for (let i = 0; i < 18; i++) {
+    const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, `Diet analysis ${i}`);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>(".chat-send")!.click();
+      await new Promise(resolve => setTimeout(resolve, 30));
+    });
+  }
+  expect(requests.at(-1)!.length).toBeLessThanOrEqual(25);
+  expect(requests.at(-1)!.at(-1)!.content).toBe("Diet analysis 17");
+  const conversation = (await store.listConversations())[0];
+  expect(await store.listMessages(conversation.id)).toHaveLength(36);
 });

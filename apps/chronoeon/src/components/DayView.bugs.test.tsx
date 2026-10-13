@@ -257,6 +257,7 @@ describe("day view: drag to reschedule", () => {
     });
     const { canvasTop } = mockGeometry();
     const handle = host.querySelector(".calendar-resize-handle--end")!;
+    act(() => handle.closest(".item-chip")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 
     await act(async () => {
       firePointer("pointerdown", handle, 96, canvasTop + 10 * 64);
@@ -301,6 +302,7 @@ describe("day view: drag to reschedule", () => {
 
     const { canvasTop } = mockGeometry();
     const handle = [...host.querySelectorAll<HTMLElement>(".calendar-resize-handle--end")][0]!;
+    act(() => handle.closest(".item-chip")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(handle).toBeTruthy();
 
     await act(async () => {
@@ -341,6 +343,7 @@ describe("day view: drag to reschedule", () => {
     });
     const { canvasTop, hourHeight } = mockGeometry();
     const handle = host.querySelector<HTMLElement>(".calendar-resize-handle--end")!;
+    act(() => handle.closest(".item-chip")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 
     await act(async () => {
       firePointer("pointerdown", handle, 96, canvasTop + 10 * hourHeight);
@@ -393,6 +396,7 @@ describe("day view: drag to reschedule", () => {
     });
     const { canvasTop, hourHeight } = mockGeometry();
     const handle = host.querySelector<HTMLElement>(".calendar-resize-handle--start")!;
+    act(() => handle.closest(".item-chip")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 
     await act(async () => {
       firePointer("pointerdown", handle, 182, canvasTop + 10 * hourHeight);
@@ -447,6 +451,7 @@ describe("day view: drag to reschedule", () => {
     });
     const { canvasTop, hourHeight } = mockGeometry();
     const handle = [...host.querySelectorAll<HTMLElement>(".calendar-resize-handle--end")][0]!;
+    act(() => handle.closest(".item-chip")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 
     await act(async () => {
       firePointer("pointerdown", handle, 182, canvasTop + 8 * hourHeight);
@@ -499,6 +504,7 @@ describe("day view: drag to reschedule", () => {
     });
     const { canvasTop, hourHeight } = mockGeometry();
     const handle = [...host.querySelectorAll<HTMLElement>(".calendar-resize-handle--end")][0]!;
+    act(() => handle.closest(".item-chip")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 
     await act(async () => {
       firePointer("pointerdown", handle, 182, canvasTop + 2 * hourHeight);
@@ -636,23 +642,76 @@ describe("day view: touch gesture ownership", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  function renderTouch(item = entry({}), resizeStep: 5 | 10 = 5) {
-    const onReschedule = vi.fn(), onViewChange = vi.fn(), onNewAt = vi.fn();
+  function renderTouch(item = entry({}), resizeStep: 5 | 10 = 5, select = true) {
+    const onReschedule = vi.fn(), onViewChange = vi.fn(), onNewAt = vi.fn(), onEdit = vi.fn();
     function Harness() {
       const nav = useSwipeNavigation({ enabled: true, activeView: "day", selectedDate: new Date(2026, 7, 10),
         onDateChange: () => {}, menuOpen: false, onViewChange, onMenuChange: () => {} });
       return <div ref={nav.pagerRef} className="test-pager">
         <DayView entries={[item]} selectedDate={new Date(2026, 7, 10)} locale="en"
           settings={DEFAULT_CHRONOEON_SETTINGS} days={2} anchor="selection" filter={[]} search=""
-          onSelectDate={() => {}} onToggle={() => {}} onEdit={() => {}} onNew={() => {}}
+          onSelectDate={() => {}} onToggle={() => {}} onEdit={onEdit} onNew={() => {}}
           onNewAt={onNewAt} onReschedule={onReschedule} resizeStep={resizeStep} />
       </div>;
     }
     act(() => root.render(<Harness />));
     mockGeometry();
     Object.defineProperty(host.querySelector(".test-pager"), "clientWidth", { value: 360 });
-    return { onReschedule, onViewChange, onNewAt };
+    if (select) {
+      const chip = host.querySelector(".item-chip")!;
+      act(() => {
+        firePointer("pointerdown", chip, 96, 700, "touch");
+        firePointer("pointerup", chip, 96, 700, "touch");
+        chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    }
+    return { onReschedule, onViewChange, onNewAt, onEdit };
   }
+
+  it("selects desktop items before resizing and edits only on double-click", () => {
+    const { onEdit, onReschedule, onNewAt } = renderTouch(entry({}), 5, false);
+    const chip = host.querySelector(".item-chip--timed")!;
+    const handle = chip.querySelector(".calendar-resize-handle--end")!;
+    act(() => {
+      firePointer("pointerdown", handle, 96, 740);
+      firePointer("pointermove", window, 96, 804);
+      firePointer("pointerup", window, 96, 804);
+    });
+    expect(onReschedule).not.toHaveBeenCalled();
+    act(() => chip.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(chip.classList.contains("is-touch-selected")).toBe(true);
+    expect(onEdit).not.toHaveBeenCalled();
+    act(() => chip.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onNewAt).not.toHaveBeenCalled();
+  });
+
+  it("selects on first touch tap, opens on second, and ignores unselected resize holds", () => {
+    const { onEdit, onReschedule, onNewAt } = renderTouch(entry({}), 5, false);
+    const handle = host.querySelector(".calendar-resize-handle--end")!;
+    act(() => {
+      firePointer("pointerdown", handle, 96, 740, "touch");
+      vi.advanceTimersByTime(300);
+      firePointer("pointerup", handle, 96, 740, "touch");
+    });
+    expect(isChipDragActive()).toBe(false);
+    expect(onReschedule).not.toHaveBeenCalled();
+    const chip = host.querySelector(".item-chip--timed")!;
+    const tap = () => act(() => {
+      firePointer("pointerdown", chip, 96, 700, "touch");
+      firePointer("pointerup", chip, 96, 700, "touch");
+      chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    tap();
+    expect(chip.classList.contains("is-touch-selected")).toBe(true);
+    expect(onEdit).not.toHaveBeenCalled();
+    tap();
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    act(() => chip.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+    expect(onNewAt).not.toHaveBeenCalled();
+    act(() => chip.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(onEdit).toHaveBeenCalledTimes(2);
+  });
 
   it.each(["start", "end"] as const)("starts a timed %s resize after a hold and blocks scroll/navigation", (edge) => {
     const { onReschedule, onViewChange, onNewAt } = renderTouch();

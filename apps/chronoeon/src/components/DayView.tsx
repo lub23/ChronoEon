@@ -251,6 +251,9 @@ export function DayView({
   // page scroll on touchpads / mobile.
   const pendingTouchRef = useRef<{ startX: number; startY: number; timer: number; cancel: () => void } | null>(null);
   const selectionCleanupRef = useRef<(() => void) | null>(null);
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const lastTouchTap = useRef<{ id: string; at: number } | null>(null);
+  const touchInput = useRef(false);
   const [viewport, setViewport] = useState({ width: 900, height: 650 });
   const [dragVisual, setDragVisual] = useState<DragVisual | null>(null);
   const [timeSelection, setTimeSelection] = useState<TimeSelectionVisual | null>(null);
@@ -448,6 +451,11 @@ export function DayView({
     sourceSegmentDate?: string,
   ) {
     if ((event.button !== 0 && event.pointerType !== "touch") || event.isPrimary === false || gestureCleanupRef.current) return;
+    touchInput.current = event.pointerType === "touch";
+    if (edgeIsResize(edge) && selectedEntryId !== entry.id) {
+      event.stopPropagation();
+      return;
+    }
     if (event.pointerType !== "touch") event.preventDefault();
     event.stopPropagation();
     const originX = event.clientX;
@@ -490,6 +498,7 @@ export function DayView({
     enterGesture();
 
     function enterGesture() {
+      lastTouchTap.current = null;
       selectionCleanupRef.current?.();
       setTimeSelection(null);
       try { target.setPointerCapture?.(pointerId); } catch {
@@ -674,6 +683,8 @@ export function DayView({
   function beginTimeSelection(event: React.PointerEvent<HTMLDivElement>, key: string) {
     if (event.button !== 0 && event.pointerType !== "touch") return;
     if ((event.target as HTMLElement).closest(".item-chip, button")) return;
+    setSelectedEntryId(null);
+    lastTouchTap.current = null;
     const isTouch = event.pointerType === "touch";
     if (!isTouch) event.preventDefault();
     selectionCleanupRef.current?.();
@@ -827,8 +838,17 @@ export function DayView({
   // instead of letting the timed grid silently absorb the reclaimed height.
   const laneHeight = Math.max(94, lane.rowCount * LANE_PITCH + 34);
   const boardMinWidth = TIME_GUTTER + visibleDays * 86;
-  const openEntry = (entry: Entry) => {
+  const openEntry = (entry: Entry, event?: React.SyntheticEvent) => {
     if (Date.now() < suppressOpenUntilRef.current) return;
+    if (event?.type !== "keydown") {
+      if (!touchInput.current) { setSelectedEntryId(entry.id); return; }
+      setSelectedEntryId(entry.id);
+      const previous = lastTouchTap.current;
+      const at = Date.now();
+      lastTouchTap.current = { id: entry.id, at };
+      if (!previous || previous.id !== entry.id || at - previous.at > 350) return;
+      lastTouchTap.current = null;
+    }
     onEdit(entry);
   };
 
@@ -955,6 +975,7 @@ export function DayView({
                   settings={settings}
                   locale={locale}
                   variant="all-day"
+                  className={selectedEntryId === item.entry.id ? "is-touch-selected" : undefined}
                   past={past}
                   dragging={visual != null && visual.moved && visual.edge !== "move"}
                   dragSource={visual != null && visual.moved && visual.edge === "move"}
@@ -965,6 +986,7 @@ export function DayView({
                     gridRow: item.row + 1,
                   }}
                   onPointerDown={(event) => beginGesture(event, item.entry, "move", itemKey, true)}
+                  onDoubleOpen={entry => { if (!touchInput.current && Date.now() >= suppressOpenUntilRef.current) onEdit(entry); }}
                   onOpen={openEntry}
                   onStatusToggle={(entry) => onToggle(entry.id, entry)}
                   onMenu={onEntryMenu}
@@ -1100,6 +1122,7 @@ export function DayView({
                       settings={settings}
                       locale={locale}
                       variant="timed"
+                      className={selectedEntryId === placement.entry.id ? "is-touch-selected" : undefined}
                       past={past}
                       dragging={false}
                       dragSource={isMove}
@@ -1113,7 +1136,8 @@ export function DayView({
                         width: `calc(${100 / effectiveColumnCount}% - 4px)`,
                       }}
                       onPointerDown={(event) => beginGesture(event, placement.entry, "move", itemKey, false, placement.date)}
-                      onOpen={openEntry}
+                      onDoubleOpen={entry => { if (!touchInput.current && Date.now() >= suppressOpenUntilRef.current) onEdit(entry); }}
+                  onOpen={openEntry}
                       onStatusToggle={(entry) => onToggle(entry.id, entry)}
                       onMenu={onEntryMenu}
                     >

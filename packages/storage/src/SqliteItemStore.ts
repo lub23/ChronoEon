@@ -32,7 +32,7 @@ interface ItemRow {
 
 const COLUMNS = ["id", "name", "calendar", "category", "acquisition", "acquired_on", "acquired_at", "cost", "currency", "location", "payment", "purchase_entry_id", "disposal", "disposed_on", "sale_amount", "sale_entry_id", "images_json", "notes", "created_at", "updated_at"] as const;
 
-function toItem(row: ItemRow): Item {
+export function toItem(row: ItemRow): Item {
   let images: unknown = [];
   try { images = JSON.parse(row.images_json); } catch { images = []; }
   return { id: row.id, name: row.name, calendarId: row.calendar, category: row.category, acquisition: row.acquisition,

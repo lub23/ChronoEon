@@ -36,7 +36,7 @@ import {
 } from "./platform/globalShortcut";
 import { focusAppWindow, showSystemNotification } from "./platform/notifications";
 import { createSqliteStoreSession, storageBootErrorMessage } from "./platform/sqliteSession";
-import { isStorageError, type DeletedEntrySummary, type SqliteEntryStore, type SyncStore, type TimerStore } from "@chronoeon/storage";
+import { isStorageError, type OperationHistoryRecord, type SqliteEntryStore, type SyncStore, type TimerStore } from "@chronoeon/storage";
 import { useSyncService } from "./sync/useSyncService";
 import { DEFAULT_SYNC_CONFIG, type SyncConfig } from "./sync/types";
 import { calendarDisplayName, categoryLabel, t } from "./i18n";
@@ -79,20 +79,10 @@ import {
   activeAIProvider,
   askIsReady,
   warmUpAIProvider,
-  fetchAIModels,
-  hasLocalAIKey as hasStoredLocalAIKey,
-  hasRemoteAIKey as hasStoredRemoteAIKey,
   normalizeAIProviderPreferences,
   readAIProviderPreferences,
   requestAICompletion,
-  saveLocalAIKey as storeLocalAIKey,
-  clearLocalAIKey as clearStoredLocalAIKey,
-  saveRemoteAIKey as storeRemoteAIKey,
-  clearRemoteAIKey as clearStoredRemoteAIKey,
-  readLocalAIHeaders,
-  saveLocalAIHeaders as storeLocalAIHeaders,
   writeAIProviderPreferences,
-  type AICustomHeader,
   type AIProviderPreferences,
 } from "./ai/provider";
 
@@ -120,7 +110,7 @@ function App() {
   const [locale, setLocale] = usePersistentPreference<Locale>("locale", "zh");
   const [theme, setTheme] = usePersistentPreference<ThemeMode>("theme", "light");
   const [settingsPreference, setSettingsPreference] = usePersistentPreference<ChronoEonSettings>("settings", createDefaultSettings(locale));
-  const settings = useMemo(() => normalizeChronoEonSettings(settingsPreference), [settingsPreference]);
+  const settings = useMemo(() => localizeBuiltinSettings(normalizeChronoEonSettings(settingsPreference), locale), [settingsPreference, locale]);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const demoStore = useChronoEonStore(settings, !isTauri());
@@ -218,15 +208,11 @@ function App() {
   const [reminderNotice, setReminderNotice] = useState<DueReminder[] | null>(null);
   const [imagePreview, setImagePreview] = useState<{ items: string[]; index: number } | null>(null);
   const [aiPreferences, setAIPreferencesState] = useState<AIProviderPreferences>(readAIProviderPreferences);
-  const [localKeyStored, setLocalKeyStored] = useState(false);
-  const [remoteKeyStored, setRemoteKeyStored] = useState(false);
-  const [localAIHeaders, setLocalAIHeaders] = useState<AICustomHeader[]>([]);
   const [transferBusy, setTransferBusy] = useState(false);
   const ledgerBusyRef = useRef(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [deletedEntries, setDeletedEntries] = useState<DeletedEntrySummary[]>([]);
-  const [recycleBusy, setRecycleBusy] = useState("");
+  const [historyPreview, setHistoryPreview] = useState<OperationHistoryRecord | null>(null);
   const [lunar, setLunar] = usePersistentPreference<LunarPreference>("lunar", "auto");
   const [dayPhotos, setDayPhotos] = usePersistentPreference<boolean>("dayPhotos", true);
   const [accentTheme, setAccentTheme] = usePersistentPreference<AccentTheme>("accentTheme", "terracotta");
@@ -331,8 +317,8 @@ function App() {
 
   const changeLocale = useCallback((next: Locale) => {
     setLocale(next);
-    updateSettings(localizeBuiltinSettings(settings, next));
-  }, [setLocale, settings, updateSettings]);
+    if (syncJournal && next !== locale) void syncJournal.recordLanguageChange(locale, next).catch(error => console.warn("Could not record language change", error));
+  }, [setLocale, syncJournal, locale]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -345,23 +331,10 @@ function App() {
   }, [aiPreferences]);
 
   const warmCaptureProvider = useCallback(() => {
-    if (askIsReady(aiPreferences)) void warmUpAIProvider(activeAIProvider(aiPreferences.ask));
+    const provider = activeAIProvider(aiPreferences);
+    if (provider && askIsReady(aiPreferences)) void warmUpAIProvider(provider);
   }, [aiPreferences]);
   useEffect(() => { warmCaptureProvider(); }, [warmCaptureProvider]);
-
-  useEffect(() => {
-    let disposed = false;
-    void hasStoredLocalAIKey().then((stored) => { if (!disposed) setLocalKeyStored(stored); }).catch(() => { if (!disposed) setLocalKeyStored(false); });
-    void hasStoredRemoteAIKey().then((stored) => { if (!disposed) setRemoteKeyStored(stored); }).catch(() => { if (!disposed) setRemoteKeyStored(false); });
-    void readLocalAIHeaders().then((headers) => { if (!disposed) setLocalAIHeaders(headers); }).catch(() => { if (!disposed) setLocalAIHeaders([]); });
-    return () => { disposed = true; };
-  }, []);
-
-  const saveLocalHeaders = useCallback(async (headers: AICustomHeader[]) => {
-    const saved = await storeLocalAIHeaders(headers);
-    setLocalAIHeaders(saved);
-    return saved;
-  }, []);
 
   useEffect(() => {
     // Snap to today when entering the mini window, then leave navigation alone
@@ -429,23 +402,6 @@ function App() {
     return session.store;
   }, []);
 
-  const refreshDeletedEntries = useCallback(async () => {
-    const store = sqliteStoreRef.current;
-    if (!store) {
-      setDeletedEntries([]);
-      return;
-    }
-    try {
-      setDeletedEntries(await store.deletedEntries());
-    } catch (error) {
-      console.warn("Could not read the recycle bin", error);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshDeletedEntries();
-  }, [refreshDeletedEntries, sqliteStore]);
-
   // Boot the SQLite store — the app's only data path on Tauri. The browser demo
   // has no store; a failed Tauri boot blocks writes and shows the bilingual
   // storage error rather than silently falling back to demo data.
@@ -479,7 +435,7 @@ function App() {
         updateSettings(mergeSharedSettings(settings, payload.settings as Partial<ChronoEonSettings>));
       }
     },
-    onApplied: async () => { await sqliteEntries.reload(); await sqliteItems.reload(); await refreshDeletedEntries(); setChatSyncVersion((value) => value + 1); },
+    onApplied: async () => { await sqliteEntries.reload(); await sqliteItems.reload(); setChatSyncVersion((value) => value + 1); },
     onMaintenance: async active => { ledgerBusyRef.current = active; if (active) await writeQueue.current; },
     onConflicts: (count) => notify(`${t("syncConflictNotice", locale)} (${count})`, "warning"),
   });
@@ -567,35 +523,16 @@ function App() {
   }, [demoStore, ensureSqliteStore]);
 
   const restoreDeletedEntry = useCallback(async (id: string, fallback?: Entry): Promise<void> => {
-    setRecycleBusy(id);
     try {
       const store = sqliteStoreRef.current ?? (isTauri() ? await ensureSqliteStore() : null);
       if (store) await store.restoreDeleted(id);
       else if (fallback) await persistCreated(fallback);
       else throw new Error("Entry is no longer recoverable");
-      await refreshDeletedEntries();
       notify(t("restored", locale));
     } catch (error) {
       reportWriteFailure(error);
-    } finally {
-      setRecycleBusy("");
     }
-  }, [ensureSqliteStore, locale, notify, persistCreated, refreshDeletedEntries, reportWriteFailure]);
-
-  const clearRecycleBin = useCallback(async () => {
-    const store = sqliteStoreRef.current;
-    if (!store) return;
-    setRecycleBusy("all");
-    try {
-      await store.clearDeletedEntries();
-      await refreshDeletedEntries();
-      notify(t("recycleBinCleared", locale));
-    } catch (error) {
-      reportWriteFailure(error);
-    } finally {
-      setRecycleBusy("");
-    }
-  }, [locale, notify, refreshDeletedEntries, reportWriteFailure]);
+  }, [ensureSqliteStore, locale, notify, persistCreated, reportWriteFailure]);
 
   const closeComposer = useCallback(() => {
     setComposerOpen(false);
@@ -605,17 +542,13 @@ function App() {
     setEditingItem(null);
     setItemDraftSeed(null);
     setCaptureLinkedItem(null);
+    setHistoryPreview(null);
   }, []);
 
   const openSettings = useCallback((section: SettingsSection = "general") => {
-    void refreshDeletedEntries();
     setSettingsInitialSection(section);
     setSettingsOpen(true);
-  }, [refreshDeletedEntries]);
-
-  useEffect(() => {
-    if (settingsOpen) void refreshDeletedEntries();
-  }, [refreshDeletedEntries, settingsOpen, syncService.status?.lastSuccess]);
+  }, []);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -803,13 +736,12 @@ function App() {
       return;
     }
     const sourceId = sourceEntryId({ id });
-    const entry = entries.find((candidate) => candidate.id === sourceId);
+    const entry = entriesRef.current.find((candidate) => candidate.id === sourceId);
     if (!entry) return;
     // Keep the whole record so an accidental delete is one click from undone.
     const removed: Entry = { ...entry };
     try {
       await persistDeleted(entry.id);
-      await refreshDeletedEntries();
     } catch (error) {
       reportWriteFailure(error);
       return;
@@ -819,7 +751,7 @@ function App() {
       label: t("undo", locale),
       run: () => { void restoreDeletedEntry(entry.id, removed); },
     });
-  }, [closeComposer, entries, locale, notify, persistDeleted, refreshDeletedEntries, restoreDeletedEntry, writable]);
+  }, [closeComposer, locale, notify, persistDeleted, restoreDeletedEntry, writable, reportWriteFailure]);
 
   /** Persist a finished recording as a normal calendar entry. */
   const finishTimer = useCallback(async (segments: TimerSegment[], session: TimerSession) => {
@@ -1279,29 +1211,13 @@ function App() {
     setAIPreferencesState(normalizeAIProviderPreferences(next));
   }, []);
 
-  const saveLocalAIKey = useCallback(async (value: string) => {
-    await storeLocalAIKey(value);
-    setLocalKeyStored(Boolean(value.trim()));
-  }, []);
-
-  const clearLocalAIKey = useCallback(async () => {
-    await clearStoredLocalAIKey();
-    setLocalKeyStored(false);
-  }, []);
-
-  const saveRemoteAIKey = useCallback(async (value: string) => {
-    await storeRemoteAIKey(value);
-    setRemoteKeyStored(Boolean(value.trim()));
-  }, []);
-
-  const clearRemoteAIKey = useCallback(async () => {
-    await clearStoredRemoteAIKey();
-    setRemoteKeyStored(false);
-  }, []);
-
   const testAI = useCallback(async (provider: AIProviderConfig) => {
-    await fetchAIModels(provider);
-  }, []);
+    const result = await requestAICompletion(provider, [{ role: "user", content: "Call chronoeon_connection_check with no arguments." }], undefined, undefined, {
+      disableReasoning: true, maxTokens: 128,
+      tools: [{ type: "function", function: { name: "chronoeon_connection_check", description: "Verify tool support.", parameters: { type: "object", properties: {}, additionalProperties: false } } }],
+    });
+    if (!result.toolCalls?.some(call => call.function.name === "chronoeon_connection_check")) throw new Error(locale === "zh" ? "模型未通过工具调用测试，请选择支持工具的模型。" : "Tool test failed. Choose a model with tool support.");
+  }, [locale]);
 
   const sendTestNotification = useCallback(async () => {
     const delivered = await showSystemNotification({
@@ -1324,23 +1240,9 @@ function App() {
     miniShortcutStatus={miniShortcutStatus}
     initialSection={settingsInitialSection}
     aiPreferences={aiPreferences}
-    localKeyStored={localKeyStored}
-    remoteKeyStored={remoteKeyStored}
-    localAIHeaders={localAIHeaders}
     onAIPreferencesChange={changeAIPreferences}
-    onSaveLocalKey={saveLocalAIKey}
-    onClearLocalKey={clearLocalAIKey}
-    onSaveRemoteKey={saveRemoteAIKey}
-    onClearRemoteKey={clearRemoteAIKey}
-    onSaveLocalHeaders={saveLocalHeaders}
     onTestAI={testAI}
     onTestNotification={() => { void sendTestNotification(); }}
-    onOpenArchivedConversations={() => {
-      setSettingsOpen(false);
-      setChatInitialMode("capture");
-      setChatArchivedOnly(true);
-      setChatOpen(true);
-    }}
     onClose={() => setSettingsOpen(false)}
     onLocaleChange={changeLocale}
     onThemeChange={setTheme}
@@ -1353,16 +1255,19 @@ function App() {
     syncConfig={syncConfig}
     onSyncConfigChange={setSyncConfig}
     syncService={syncService}
-    deletedEntries={deletedEntries}
     historyJournal={syncJournal}
     onHistoryRestored={async () => {
-      await sqliteEntries.reload(); await sqliteItems.reload(); await refreshDeletedEntries();
+      await sqliteEntries.reload(); await sqliteItems.reload();
       const payload = await syncJournal?.getSettings();
       if (payload?.settings && typeof payload.settings === "object") updateSettings(mergeSharedSettings(settingsRef.current, payload.settings as Partial<ChronoEonSettings>));
     }}
-    recycleBusy={recycleBusy}
-    onRestoreDeleted={(id) => restoreDeletedEntry(id)}
-    onClearDeleted={clearRecycleBin}
+    onHistoryPreview={record => {
+      const subject = record.subject;
+      if (!subject) return;
+      if (subject.type === "entry") openComposer(entries.find(entry => entry.id === subject.value.id) ?? subject.value);
+      else openItemComposer(items.find(item => item.id === subject.value.id) ?? subject.value);
+      setHistoryPreview(record);
+    }}
     isTauri={isTauri()}
   /> : null;
 
@@ -1441,6 +1346,7 @@ function App() {
   const filterPanel = filterOpen ? <FilterPanel locale={locale} settings={settings}
     kind={filter} filter={entryFilter} scheduleCategories={scheduleCategories} billCategories={billCategories}
     calendars={calendars} anchor={filterAnchor} focusSearch={focusFilterSearch}
+    items={entryFilter.photosOnly ? searchedItems.filter(item => item.images?.length) : searchedItems} onOpenItem={item => openItemComposer(item)}
     entries={entryFilter.photosOnly ? filteredEntries.filter(entry => entry.images?.length) : filteredEntries}
     search={search} onSearch={setSearch} onKindChange={setFilter} onChange={setEntryFilter} onClose={closeFilter}
     onOpenEntry={entry => { setSelectedDate(parseISO(entry.date)); openComposer(entry); }} /> : null;
@@ -1485,6 +1391,9 @@ function App() {
 
   const captureDialog = composerOpen ? <EntryComposer onOpenBill={entry => viewActions.current.openComposer(entry)} entries={entries} items={items} pendingItemLink={captureLinkedItem} editingItem={editingItem} initialItemDraft={itemDraftSeed} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onEditItem={item => openItemComposer(item)} onCreateItemFromBill={createItemFromBill} availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
     locale={locale} settings={settings} selectedDate={selectedKey} editing={editingEntry} sourceEntry={editingSourceEntry}
+    readOnly={Boolean(historyPreview?.subject && (historyPreview.subject.type === "entry"
+      ? !entries.some(entry => entry.id === historyPreview.subject!.value.id)
+      : !items.some(item => item.id === historyPreview.subject!.value.id)))}
     history={entries} onClose={closeComposer} onSave={handleSave} onDelete={handleDelete} onNotice={notify} onConfirm={confirm}
     initialDraft={composerSeed} /> : null;
 
@@ -1557,7 +1466,7 @@ function App() {
             <TimerPill locale={locale} timer={timer} onOpen={() => setTimerOpen(true)} />
           </ViewDock>
         </main>
-        <MotionPresence>{captureDialog}</MotionPresence>
+        {createPortal(<MotionPresence>{captureDialog}</MotionPresence>, document.body)}
         <MotionPresence>{chatDialog}</MotionPresence>
         <MotionPresence>{filterPanel}</MotionPresence>
         <MotionPresence>{settingsDialog}</MotionPresence>
@@ -1679,7 +1588,7 @@ function App() {
           <TimerPill locale={locale} timer={timer} onOpen={() => setTimerOpen(true)} />
         </ViewDock>
       </main>
-      <MotionPresence>{captureDialog}</MotionPresence>
+      {createPortal(<MotionPresence>{captureDialog}</MotionPresence>, document.body)}
       <MotionPresence>{chatDialog}</MotionPresence>
       <MotionPresence>{filterPanel}</MotionPresence>
       <MotionPresence>{settingsDialog}</MotionPresence>

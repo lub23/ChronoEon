@@ -86,7 +86,7 @@ export function askPresetToolPlan(text: string, locale: Locale, today: string): 
       spending({ start: addIsoDays(today, -59), end: addIsoDays(today, -30) }),
     ],
     sleepRhythm: [search(lastDays(today, 14), ["event"], "sleep bedtime wake 睡觉 入睡 起床 睡眠 熬夜")],
-    dietPattern: [search(lastDays(today, 14), ["event"], "breakfast lunch dinner snack supper 早餐 午餐 晚餐 下午茶 夜宵")],
+    dietPattern: [search(lastDays(today, 14), undefined, "breakfast lunch dinner snack supper food 饮食 吃饭 早餐 午餐 晚餐 下午茶 夜宵 零食 饮料")],
     thoughtRecord: [search(lastDays(today, 30), ["idea"])],
     permaReview: [search(lastDays(today, 14))],
   };

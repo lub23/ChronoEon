@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createEntryId, DEFAULT_CHRONOEON_SETTINGS, draftToItem, type Entry } from "@chronoeon/domain";
+import { createEntryId, createDefaultSettings, DEFAULT_CHRONOEON_SETTINGS, draftToItem, type Entry } from "@chronoeon/domain";
 import { SqliteItemStore } from "../SqliteItemStore";
 import { SyncStore } from "../sync/SyncStore";
 import { OperationHistoryStore } from "../history/OperationHistoryStore";
@@ -67,6 +67,15 @@ describe("independent operation recovery", () => {
     await d.sync.clearHistory();
     expect(await d.sync.history()).toEqual([]);
     expect(await d.store.deletedEntries()).toHaveLength(1);
+  });
+  it("builds a complete deleted-entry preview without syncing history", async () => {
+    const d = await device();
+    const original = await d.store.create(entry({ start: "09:30", note: "Read only", tags: ["trip"], images: [`attachments/${"d".repeat(64)}.webp`] }));
+    await d.store.delete(original.id);
+    const deleted = (await d.sync.history())[0];
+    expect(deleted.subject).toEqual({ type: "entry", value: original });
+    const dataset = await d.sync.bindDataset();
+    expect(await d.sync.snapshot(dataset)).not.toContain("operation_history");
   });
 
   it("expires each store at seven days even when sync never runs", async () => {
@@ -186,3 +195,19 @@ describe("independent operation recovery", () => {
     expect(await d.sync.history()).toHaveLength(count);
   });
 });
+
+ it("records only language locally and does not sync translated catalog names", async () => {
+  const d = await device();
+  await d.sync.setSettings({ settings: createDefaultSettings("zh") });
+  const baseline = await d.sync.getSettings();
+  await d.sync.setSettings({ settings: createDefaultSettings("en") });
+  expect(await d.sync.getSettings()).toEqual(baseline);
+  expect(await d.sync.history()).toHaveLength(0);
+  await d.sync.recordLanguageChange("zh", "en");
+  const rows = await d.sync.history();
+  expect(rows).toHaveLength(1);
+  expect(rows[0].changes).toEqual([{ table: "device_preferences", key: ["language"], before: { language: "zh" }, after: { language: "en" } }]);
+  expect(await d.sync.getSettings()).toEqual(baseline);
+  await d.sync.recordLanguageChange("en", "en");
+  expect(await d.sync.history()).toHaveLength(1);
+ });
