@@ -119,3 +119,8 @@ it("shares records across overlapping tool results without losing per-tool scope
   expect(data.results.map((result: any) => result.entry_ids)).toEqual([["one"], ["one"]]);
   expect(data.results[1].notes).toContain("expense=20.00");
 });
+
+it("bounds search-query expansion in the model schema", () => {
+  const schema = advisorTools.find(tool => tool.function.name === "search_entries")!.function.parameters as any;
+  expect(schema.properties.query.maxLength).toBe(160);
+});

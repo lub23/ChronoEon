@@ -48,7 +48,7 @@ const searchParameters = {
   type: "object",
   additionalProperties: false,
   properties: {
-    query: { type: "string", description: "Optional text to find in titles, notes, locations, categories, tags or payment methods." },
+    query: { type: "string", maxLength: 160, description: "Up to 8 short terms directly relevant to the question. Search titles, notes, locations, categories, tags or payment methods. Do not enumerate synonyms or related topics." },
     ...DATE_PROPERTIES,
     days: { type: "integer", minimum: 1, maximum: 365 },
     kinds: KINDS_SCHEMA,

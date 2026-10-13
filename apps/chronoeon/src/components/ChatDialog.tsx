@@ -174,7 +174,7 @@ const ANALYSIS_CONTRACT = " When the question asks for an analysis, name the met
 // than advice that costs a few more tokens, so every answer keeps a generous
 // ceiling regardless of what the endpoint's own default is set to.
 const ADVISOR_MIN_MAX_TOKENS = 8192;
-const TOOL_GUIDANCE = " search_entries matches several space-separated terms at once (logical OR), so combine every keyword for one topic into a single call instead of issuing one call per term; the records stay in the user's language, so never retry a search with translated terms; once a tool has returned enough data, stop calling tools and answer from what you have.";
+const TOOL_GUIDANCE = " search_entries matches several space-separated terms at once (logical OR), so use at most 8 short directly relevant terms in one call; never enumerate ingredients, synonyms or related health topics; the records stay in the user's language, so never retry a search with translated terms; once a tool has returned enough data, stop calling tools and answer from what you have.";
 const PLANNED_TOOL_GUIDANCE = " The fixed method's local tool plan has already run; use only its tool results and the user's message, and do not request more tools.";
 
 function plannedToolCalls(plan: AskPresetToolPlan): AIToolCall[] {
