@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { refineCapture, type EditableCapture } from "../domain/captureRefinement";
 import { format, parseISO } from "date-fns";
 import {
@@ -28,7 +28,6 @@ import {
   type EntryDraft,
   type EntryKind,
   type EntryStatus,
-  type CaptureHistoryItem,
   type CaptureFieldDecisions,
   type Recurrence,
   type Reminder,
@@ -40,9 +39,8 @@ import type { AiConversationApi } from "../ai/memoryConversationStore";
 import type { AIChatContentPart, AIChatMessage, AIToolCall, EntryPriority } from "@chronoeon/domain";
 import { activeAIProvider, askIsReady, requestAICompletion, type AICompletionResult, type AIProviderPreferences } from "../ai/provider";
 import { advisorContextForModel, advisorResultsForModel, advisorTools, executeAdvisorToolCall, type AdvisorTool, type AdvisorToolResult } from "../ai/advisorAgent";
-import { categoryLabel, localeTag, paymentMethodLabel, t, type MessageKey } from "../i18n";
+import { categoryLabel, paymentMethodLabel, t, type MessageKey } from "../i18n";
 import { Icon } from "./Icon";
-import { renderChatMarkdown } from "./ChatMarkdown";
 import { registerModalDismiss, useModalDismiss } from "./modalLayer";
 import { ChatContextPicker, type ChatContextRange } from "./ChatContextPicker";
 import { GlassDatePicker, GlassTimePicker } from "./GlassDateTimePicker";
@@ -57,6 +55,10 @@ import { askPresets, askPresetToolPlan, type AskPreset, type AskPresetToolPlan }
 import { TaskStatusGlyph } from "./ItemGlyph";
 import { openImagePreview } from "./photoPreviewBus";
 import { FieldSuggestions, locationFieldCandidates } from "./FieldSuggestions";
+import { CaptureLocationInput } from "./CaptureLocationInput";
+import { ChatMessageRow } from "./ChatMessageRow";
+import { MODE_ICONS, type ChatMode } from "./chat/mode";
+import { formatMessageTime } from "./chat/format";
 
 interface ChatDialogProps {
   locale: Locale;
@@ -86,9 +88,6 @@ function mediaMatches(query: string): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia(query).matches;
 }
 
-/** Each composer keeps its own symbol, so a reply or a rail entry is readable
- *  without relying on the accent colour alone. */
-const MODE_ICONS = { capture: "edit", ask: "sparkle" } as const;
 const MODE_TITLE_PREFIX = /^(?:随心记|随心问|Capture|Ask)\s+/;
 
 const toolMessages: Record<AdvisorTool, MessageKey> = {
@@ -110,8 +109,6 @@ const captureIssueMessages: Record<AIValidationIssue["code"], MessageKey> = {
   "empty-response": "aiIssueEmptyResponse",
 };
 
-type ChatMode = "capture" | "ask";
-
 interface CaptureDraftItem extends EditableCapture {
   key: string;
   draft: EntryDraft;
@@ -119,25 +116,6 @@ interface CaptureDraftItem extends EditableCapture {
   parseIssues?: CaptureIssue[];
   link?: string;
   decisions?: CaptureFieldDecisions;
-}
-
-function CaptureLocationInput({ value, history, date, locale, locating, onChange, onLocate }: {
-  value?: string; history: CaptureHistoryItem[]; date: string; locale: Locale; locating: boolean;
-  onChange: (value: string | undefined) => void; onLocate: () => void;
-}) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const suggestions = useMemo(() => locationFieldCandidates("", value, history, date), [history, value, date]);
-  return (
-    <span className="capture-review-location-wrap">
-      <input className="capture-review-location" ref={inputRef} value={value ?? ""} placeholder={t("locationPlaceholder", locale)}
-        aria-label={t("location", locale)} onChange={event => onChange(event.target.value || undefined)} />
-      {Boolean(value) && <button type="button" className="capture-review-location-clear" onClick={() => onChange(undefined)}
-        aria-label={t("clearLocation", locale)} title={t("clearLocation", locale)}><Icon name="close" size={11} /></button>}
-      <button type="button" className="capture-review-location-pin" onClick={onLocate} disabled={locating}
-        aria-label={t("useDeviceLocation", locale)} title={t("useDeviceLocation", locale)}><Icon name="map-pin" size={12} /></button>
-      <FieldSuggestions inputRef={inputRef} locale={locale} suggestions={suggestions} onSelect={onChange} />
-    </span>
-  );
 }
 
 interface CaptureReview {
@@ -285,62 +263,6 @@ function normalizeCapturedDraft(draft: EntryDraft, timeScale: number): EntryDraf
   const end = endClockAfter(draft.start, timeScale);
   return end ? { ...draft, end } : draft;
 }
-
-function formatMessageTime(value: string, locale: Locale): string {
-  const date = new Date(value);
-  return date.toDateString() === new Date().toDateString()
-    ? date.toLocaleTimeString(localeTag[locale], { hour: "2-digit", minute: "2-digit" })
-    : date.toLocaleString(localeTag[locale], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-interface ChatMessageRowProps {
-  message: AiMessageRecord;
-  mode: ChatMode;
-  locale: Locale;
-  copied: boolean;
-  copyFailed: boolean;
-  onCopy: (message: AiMessageRecord) => void;
-  onOpenEntry: (entryId: string) => void;
-}
-
-/** A finished message never changes while the user types the next one. Keep the
- *  markdown parse and the whole bubble behind an identity check; the composer's
- *  draft state must not re-render every previous turn. */
-const ChatMessageRow = memo(function ChatMessageRow({ message, mode, locale, copied, copyFailed, onCopy, onOpenEntry }: ChatMessageRowProps) {
-  return (
-    <div className={`chat-message chat-message--${message.role}`}>
-      <span className={message.role === "user" ? "chat-avatar is-user" : "chat-avatar is-assistant"} aria-hidden="true">
-        <Icon name={message.role === "user" ? "day" : MODE_ICONS[mode]} size={13} />
-      </span>
-      <div className="chat-bubble">
-        {message.reasoningContent && (
-          <details className="chat-reasoning">
-            <summary>{t("aiChatShowThinking", locale)}</summary>
-            <div>{renderChatMarkdown(message.reasoningContent)}</div>
-          </details>
-        )}
-        <div className="chat-rich">{renderChatMarkdown(message.content)}</div>
-        <footer className="chat-meta">
-          <time>{formatMessageTime(message.createdAt, locale)}</time>
-          {message.role === "assistant" && (
-            <>
-              <button type="button" className="chat-meta-action" onClick={() => onCopy(message)}>
-                <Icon name={copied ? "check" : "copy"} size={12} />
-                {copied ? t("copied", locale) : t("copy", locale)}
-              </button>
-              {copyFailed && <span className="chat-copy-error">{t("aiCopyFailed", locale)}</span>}
-              {message.proposedEntryId && (
-                <button type="button" className="chat-meta-action is-accent" onClick={() => onOpenEntry(message.proposedEntryId!)}>
-                  <Icon name="arrow-right" size={12} />{t("aiChatOpenEntry", locale)}
-                </button>
-              )}
-            </>
-          )}
-        </footer>
-      </div>
-    </div>
-  );
-});
 
 export function ChatDialog({
   locale, entries, aiPreferences, conversations, settings, availableTags = [], availableAssets = [], initialMode = "capture", showArchivedOnly = false,

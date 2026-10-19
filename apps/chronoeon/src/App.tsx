@@ -86,12 +86,7 @@ import {
   type AIProviderPreferences,
 } from "./ai/provider";
 
-interface ToastState {
-  message: string;
-  tone?: "normal" | "warning";
-  /** Optional follow-up, e.g. undoing a delete. */
-  action?: { label: string; run: () => void };
-}
+import { Toast, type ToastState } from "./components/Toast";
 
 const CSV_FILE_FILTERS = [{ name: "CSV", extensions: ["csv", "txt"] }];
 type CalendarView = Extract<AppView, "day" | "week" | "month">;
@@ -1599,21 +1594,6 @@ function App() {
       <MotionPresence>{entryMenuNode}</MotionPresence>
       <MotionPresence>{confirmDialog}</MotionPresence>
       {toast && <Toast toast={toast} locale={locale} onDismiss={dismissToast} />}
-    </div>
-  );
-}
-
-function Toast({ toast, locale, onDismiss }: { toast: ToastState; locale: Locale; onDismiss: () => void }) {
-  return (
-    <div className={`toast toast--${toast.tone ?? "normal"}`} role="status" aria-live={toast.tone === "warning" ? "assertive" : "polite"}>
-      <span className="toast-mark"><Icon name={toast.tone === "warning" ? "close" : "check"} size={15} /></span>
-      <span className="toast-message">{toast.message}</span>
-      {toast.action && (
-        <button type="button" className="toast-action" onClick={() => { toast.action?.run(); onDismiss(); }}>{toast.action.label}</button>
-      )}
-      <button type="button" className="toast-close" onClick={onDismiss} aria-label={t("close", locale)} title={t("close", locale)}>
-        <Icon name="close" size={13} />
-      </button>
     </div>
   );
 }

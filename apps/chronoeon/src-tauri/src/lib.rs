@@ -6,6 +6,7 @@ mod network;
 use serde::{Deserialize, Serialize};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use std::{
+    collections::HashSet,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -517,6 +518,77 @@ fn read_attachment_local(app: tauri::AppHandle, sha256: String) -> Result<String
     Ok(format!("data:image/webp;base64,{}", BASE64.encode(bytes)))
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentPrune {
+    files: usize,
+    bytes: u64,
+}
+
+/// Delete content-addressed photos that no live or seven-day-history state
+/// references. Only canonical 64-hex `.webp` names are considered, symlinks and
+/// young files are skipped, and the caller can first run with `delete = false`
+/// to get a count for confirmation.
+fn prune_unreferenced_attachments_at(
+    root: &Path,
+    referenced: &HashSet<String>,
+    minimum_age_ms: u64,
+    delete: bool,
+) -> Result<AttachmentPrune, String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("System clock is before the Unix epoch: {error}"))?
+        .as_millis() as u64;
+    let mut result = AttachmentPrune { files: 0, bytes: 0 };
+    let entries = fs::read_dir(root)
+        .map_err(|error| format!("Could not read the attachments folder: {error}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("Could not read an attachment: {error}"))?;
+        if !entry.file_type().map_err(|error| error.to_string())?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(hash) = name.strip_suffix(".webp") else { continue };
+        if !attachments::valid_hash(hash) || referenced.contains(hash) {
+            continue;
+        }
+        let metadata = entry.metadata().map_err(|error| error.to_string())?;
+        let modified = metadata
+            .modified()
+            .map_err(|error| error.to_string())?
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| format!("Attachment timestamp is before the Unix epoch: {error}"))?
+            .as_millis() as u64;
+        if now.saturating_sub(modified) < minimum_age_ms {
+            continue;
+        }
+        result.files += 1;
+        result.bytes += metadata.len();
+        if delete {
+            fs::remove_file(entry.path())
+                .map_err(|error| format!("Could not delete an unused photo: {error}"))?;
+        }
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+fn prune_unreferenced_attachments(
+    app: tauri::AppHandle,
+    referenced: Vec<String>,
+    older_than_ms: u64,
+    delete: bool,
+) -> Result<AttachmentPrune, String> {
+    let hashes: HashSet<String> = referenced.into_iter().collect();
+    prune_unreferenced_attachments_at(
+        &local_attachments_root(&app)?,
+        &hashes,
+        older_than_ms,
+        delete,
+    )
+}
+
 /// Export one local attachment into the chosen export folder at a validated
 /// relative path. Both ends are contained: the source must stay inside the
 /// local attachments folder and the destination inside the export root.
@@ -871,6 +943,7 @@ pub fn run() {
             write_file_bytes,
             copy_attachment_source,
             read_attachment_local,
+            prune_unreferenced_attachments,
             copy_attachment_export,
             compress_photo,
             compress_photo_data,
@@ -898,7 +971,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{ai_content_is_valid, decode_photo_data, normalize_ai_base_url, normalize_ai_custom_headers, safe_relative_path, sha256_revision, AiCustomHeader};
+    use super::*;
 
     #[test]
     fn decode_photo_data_accepts_base64_and_rejects_invalid_or_oversized_input() {
@@ -969,6 +1042,49 @@ mod tests {
         ]).is_err());
         assert!(normalize_ai_custom_headers(vec![AiCustomHeader { name: "Host".into(), value: "example.test".into() }]).is_err());
         assert!(normalize_ai_custom_headers(vec![AiCustomHeader { name: "X-Bad".into(), value: "line\nbreak".into() }]).is_err());
+    }
+
+    #[test]
+    fn prunes_only_old_unreferenced_canonical_photos() {
+        let root = std::env::temp_dir().join(format!(
+            "chronoeon-prune-{}",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let referenced = "a".repeat(64);
+        let orphan_old = "b".repeat(64);
+        let orphan_new = "c".repeat(64);
+        for hash in [&referenced, &orphan_old] {
+            fs::write(root.join(format!("{hash}.webp")), b"old").unwrap();
+        }
+        fs::write(root.join(format!("{orphan_new}.webp")), b"new").unwrap();
+        fs::write(root.join("not-a-hash.webp"), b"skip").unwrap();
+        fs::write(root.join("notes.txt"), b"skip").unwrap();
+        let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+        for hash in [&referenced, &orphan_old] {
+            fs::File::options()
+                .write(true)
+                .open(root.join(format!("{hash}.webp")))
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+        let hashes = HashSet::from([referenced.clone()]);
+        let day = 24 * 60 * 60 * 1000;
+
+        let preview = prune_unreferenced_attachments_at(&root, &hashes, day, false).unwrap();
+        assert_eq!(preview.files, 1);
+        assert_eq!(preview.bytes, 3);
+        assert!(root.join(format!("{orphan_old}.webp")).exists());
+
+        let removed = prune_unreferenced_attachments_at(&root, &hashes, day, true).unwrap();
+        assert_eq!(removed.files, 1);
+        assert!(!root.join(format!("{orphan_old}.webp")).exists());
+        assert!(root.join(format!("{referenced}.webp")).exists());
+        assert!(root.join(format!("{orphan_new}.webp")).exists());
+        assert!(root.join("not-a-hash.webp").exists());
+        assert!(root.join("notes.txt").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
 }

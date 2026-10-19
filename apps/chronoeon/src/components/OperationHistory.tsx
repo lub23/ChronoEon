@@ -2,6 +2,7 @@ import { useRef, useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { OperationHistoryChange, OperationHistoryRecord, SyncStore } from "@chronoeon/storage";
 import type { Locale } from "../domain/entry";
+import { t } from "../i18n";
 import { useConfirmDialog } from "./ConfirmDialog";
 import { Icon } from "./Icon";
 import { useFocusTrap, useModalDismiss } from "./modalLayer";
@@ -183,10 +184,10 @@ function historyChanges(record: OperationHistoryRecord, zh: boolean): HistoryDet
   return details;
 }
 
-function recordTitle(record: OperationHistoryRecord, zh: boolean) {
-  if (record.changes.some(change => change.table === "device_preferences")) return zh ? "本机设置" : "Device settings";
-  if (record.changes.some(change => change.table === "sync_settings")) return zh ? "共享设置" : "Shared settings";
-  return record.title || (zh ? "用户数据" : "User data");
+function recordTitle(record: OperationHistoryRecord, locale: Locale) {
+  if (record.changes.some(change => change.table === "device_preferences")) return t("historyDeviceSettings", locale);
+  if (record.changes.some(change => change.table === "sync_settings")) return t("historySharedSettings", locale);
+  return record.title || t("historyUserData", locale);
 }
 
 function HistoryCard({ record, locale, details, busy, defaultOpen, onRestore, onPreview }: {
@@ -200,21 +201,22 @@ function HistoryCard({ record, locale, details, busy, defaultOpen, onRestore, on
 }) {
   const zh = locale === "zh";
   const [open, setOpen] = useState(Boolean(defaultOpen) || (details.length > 0 && details.length <= 2));
-  const actions = zh
-    ? { create: "新增", update: "修改", delete: "删除", restore: "恢复" }
-    : { create: "Created", update: "Changed", delete: "Deleted", restore: "Restored" };
+  const actions = {
+    create: t("historyActionCreate", locale), update: t("historyActionUpdate", locale),
+    delete: t("historyActionDelete", locale), restore: t("historyActionRestore", locale),
+  } as const;
   const multipleScopes = new Set(details.map(detail => detail.scope)).size > 1;
   const row = record.changes.find(change => change.table === "entries" || change.table === "items");
   const data = row?.after ?? row?.before;
   const date = [data?.date ?? data?.acquired_on, data?.start_time ?? data?.acquired_at].filter(Boolean).join(" ");
   const note = data?.note ?? data?.notes;
-  const toggleLabel = open ? (zh ? "收起细节" : "Hide details") : zh ? "展开细节" : "Show details";
+  const toggleLabel = open ? t("historyHideDetails", locale) : t("historyShowDetails", locale);
 
   return (
     <li className="history-card">
       <header className="history-card-head">
         <strong><i className={`history-action is-${record.action}`}>{actions[record.action]}</i>
-          {record.subject && onPreview ? <button type="button" className="history-title" onClick={() => onPreview(record)}>{recordTitle(record, zh)}</button> : recordTitle(record, zh)}
+          {record.subject && onPreview ? <button type="button" className="history-title" onClick={() => onPreview(record)}>{recordTitle(record, locale)}</button> : recordTitle(record, locale)}
         </strong>
         <small>
           <time dateTime={record.createdAt} title={new Date(record.createdAt).toLocaleString(zh ? "zh-CN" : "en-US")}>{new Date(record.createdAt).toLocaleString(zh ? "zh-CN" : "en-US", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}</time>
@@ -224,7 +226,7 @@ function HistoryCard({ record, locale, details, busy, defaultOpen, onRestore, on
         <small>{date && <span>{date}</span>}{note ? <span className="history-note" title={String(note)}>{String(note)}</span> : null}</small>
         <div className="history-card-foot">
           {details.length > 0 && <button type="button" className="icon-button history-details-toggle" title={toggleLabel} aria-label={toggleLabel} aria-expanded={open} onClick={() => setOpen(current => !current)}><Icon name={open ? "chevron-up" : "chevron-down"} size={14} /></button>}
-          {!record.changes.some(change => change.table === "device_preferences") && <button type="button" className="icon-button recovery-action" title={zh ? "撤销操作" : "Undo"} aria-label={zh ? "撤销操作" : "Undo"} disabled={busy} onClick={() => onRestore(record.id)}><Icon name="refresh" size={14} /></button>}
+          {!record.changes.some(change => change.table === "device_preferences") && <button type="button" className="icon-button recovery-action" title={t("historyUndo", locale)} aria-label={t("historyUndo", locale)} disabled={busy} onClick={() => onRestore(record.id)}><Icon name="refresh" size={14} /></button>}
         </div>
       </div>
       {open && details.length > 0 && (
@@ -239,7 +241,7 @@ function HistoryCard({ record, locale, details, busy, defaultOpen, onRestore, on
               </div>
             </div>
           ))}
-          {!details.length && <p>{zh ? "没有可显示的字段变化" : "No field changes to show"}</p>}
+          {!details.length && <p>{t("historyNoChanges", locale)}</p>}
         </div>
       )}
     </li>
@@ -247,7 +249,6 @@ function HistoryCard({ record, locale, details, busy, defaultOpen, onRestore, on
 }
 
 export function OperationHistory({ locale, journal, onRestored, onPreview }: Props) {
-  const zh = locale === "zh";
   const [records, setRecords] = useState<OperationHistoryRecord[]>([]);
   const [showAll, setShowAll] = useState(false);
   const allRef = useRef<HTMLElement>(null);
@@ -269,17 +270,17 @@ export function OperationHistory({ locale, journal, onRestored, onPreview }: Pro
 
   useEffect(() => {
     let active = true;
-    const refresh = () => { if (active) void load().catch(() => { if (active) setError(zh ? "无法读取操作历史" : "Could not load history"); }); };
+    const refresh = () => { if (active) void load().catch(() => { if (active) setError(t("historyLoadFailed", locale)); }); };
     refresh();
     const unsubscribe = journal.subscribe(refresh);
     return () => { active = false; unsubscribe(); };
-  }, [journal, zh, load]);
+  }, [journal, locale, load]);
 
   const run = async (id?: string) => {
     const approved = await confirm({
-      title: id ? (zh ? "恢复此次操作前的状态？" : "Restore the state before this change?") : (zh ? "清空操作历史？" : "Clear operation history?"),
-      detail: id ? (zh ? "后续修改冲突时不会覆盖数据。恢复也会记录为新操作。" : "Later conflicting edits will not be overwritten. Restoration creates a new history record.") : (zh ? "不影响当前数据。清空后无法再撤销历史操作。" : "Current data is unaffected. Cleared changes can no longer be undone."),
-      confirmLabel: id ? (zh ? "恢复" : "Restore") : (zh ? "清空历史" : "Clear history"),
+      title: id ? t("historyRestoreTitle", locale) : t("historyClearTitle", locale),
+      detail: id ? t("historyRestoreDetail", locale) : t("historyClearDetail", locale),
+      confirmLabel: id ? t("historyRestore", locale) : t("historyClear", locale),
       tone: id ? "normal" : "danger",
     });
     if (!approved) return;
@@ -290,30 +291,30 @@ export function OperationHistory({ locale, journal, onRestored, onPreview }: Pro
       await load();
     } catch (reason) {
       const message = String(reason);
-      setError(message.includes("HISTORY_CHANGED") ? (zh ? "数据已有后续修改，未覆盖。" : "This data changed later. Nothing was overwritten.")
-        : message.includes("HISTORY_EXPIRED") ? (zh ? "该历史已过期。" : "This history has expired.")
-        : (zh ? "操作失败，数据未恢复。" : "The operation failed. Nothing was restored."));
+      setError(message.includes("HISTORY_CHANGED") ? t("historyChanged", locale)
+        : message.includes("HISTORY_EXPIRED") ? t("historyExpired", locale)
+        : t("historyFailed", locale));
     } finally { setBusy(false); }
   };
 
   const card = (record: OperationHistoryRecord, defaultOpen = false) => (
-    <HistoryCard key={record.id} record={record} locale={locale} details={historyChanges(record, zh)}
+    <HistoryCard key={record.id} record={record} locale={locale} details={historyChanges(record, locale === "zh")}
       busy={busy} defaultOpen={defaultOpen} onRestore={id => void run(id)} onPreview={onPreview} />
   );
 
-  return <section className="settings-card recovery-card operation-history" aria-label={zh ? "操作历史" : "Operation history"}>
+  return <section className="settings-card recovery-card operation-history" aria-label={t("historyTitle", locale)}>
     <header className="recovery-heading">
-      <div><h4>{zh ? "操作历史" : "History"}</h4><p className="settings-footnote">{zh ? "仅保留在本机 7 天，不同步；与快照独立。" : "On this device for 7 days. Not synced; independent of snapshots."}</p></div>
-      {records.length > 0 && <button type="button" className="secondary-button" onClick={() => setShowAll(true)}>{zh ? "查看全部" : "View all"}</button>}
+      <div><h4>{t("historyTitle", locale)}</h4><p className="settings-footnote">{t("historyDetail", locale)}</p></div>
+      {records.length > 0 && <button type="button" className="secondary-button" onClick={() => setShowAll(true)}>{t("historyViewAll", locale)}</button>}
     </header>
     {error && <p role="alert">{error}</p>}
-    {!records.length && <p className="settings-footnote">{zh ? "暂无操作记录" : "No operation history yet"}</p>}
+    {!records.length && <p className="settings-footnote">{t("historyEmpty", locale)}</p>}
     <ol className="recovery-list">{records.slice(0, PREVIEW_COUNT).map(record => card(record))}</ol>
     {showAll && createPortal(
       <div className="settings-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setShowAll(false); }}>
-        <section ref={allRef} className="settings-modal" role="dialog" aria-modal="true" aria-label={zh ? "全部操作历史" : "All operation history"}>
-          <header><h4>{zh ? "全部操作历史" : "All operation history"}</h4><div><button type="button" className="danger-button" disabled={busy || !records.length} onClick={() => void run()}>{zh ? "清空历史" : "Clear history"}</button><button type="button" className="secondary-button" onClick={() => setShowAll(false)}>{zh ? "关闭" : "Close"}</button></div></header>
-          <ol className="recovery-list">{records.map(record => card(record))}{records.length >= limit && <li><button type="button" className="secondary-button" onClick={() => setLimit(value => value + 100)}>{zh ? "更早的操作" : "Load earlier"}</button></li>}</ol>
+        <section ref={allRef} className="settings-modal" role="dialog" aria-modal="true" aria-label={t("historyAllTitle", locale)}>
+          <header><h4>{t("historyAllTitle", locale)}</h4><div><button type="button" className="danger-button" disabled={busy || !records.length} onClick={() => void run()}>{t("historyClear", locale)}</button><button type="button" className="secondary-button" onClick={() => setShowAll(false)}>{t("historyClose", locale)}</button></div></header>
+          <ol className="recovery-list">{records.map(record => card(record))}{records.length >= limit && <li><button type="button" className="secondary-button" onClick={() => setLimit(value => value + 100)}>{t("historyEarlier", locale)}</button></li>}</ol>
         </section>
       </div>, document.body
     )}

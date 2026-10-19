@@ -3,6 +3,7 @@ import { useTouchDevice } from "../hooks/useTouchDevice";
 import { useEffect, useRef, useState } from "react";
 import { billCategoryForValue, type CalendarConfig, type ChronoEonSettings, type Item } from "@chronoeon/domain";
 import { OperationHistory } from "./OperationHistory";
+import { AttachmentMaintenance } from "./AttachmentMaintenance";
 import type { OperationHistoryRecord, SyncStore } from "@chronoeon/storage";
 import type { AIProviderConfig } from "@chronoeon/domain";
 import type { AIProviderPreferences } from "../ai/provider";
@@ -621,6 +622,7 @@ export function SettingsDialog({
               <div className="settings-card settings-data-card">
                 <div className="settings-data-block"><div className="settings-option-copy"><strong>{t("exportEntries", locale)}</strong><small>{t("entriesCsvDetail", locale)}</small></div><button type="button" className="secondary-button" disabled={transferBusy} onClick={() => void onExportEntries()}><Icon name="download" size={15} />{transferBusy ? t("importExportBusy", locale) : t("exportEntries", locale)}</button></div>
               </div>
+              {isTauri && historyJournal && <AttachmentMaintenance locale={locale} journal={historyJournal} onChanged={() => syncService.refreshUsage()} />}
               {historyJournal && onHistoryRestored && <OperationHistory locale={locale} journal={historyJournal} onRestored={onHistoryRestored} onPreview={onHistoryPreview} />}
               {isTauri
                 ? <SyncSettingsPanel entries={entries} locale={locale} config={syncConfig} onChange={onSyncConfigChange} service={syncService} />

@@ -7,12 +7,16 @@
 - Dialogs trap Tab and return focus to the control that opened them; Escape and Android back still close exactly one layer.
 - Sync reuses the attachment hash set for five minutes, skips unchanged rows when applying a snapshot, prefetches entity states during flush and writes the sequence/lamport counters once per flush.
 - Operation history loads with one grouped query; schema v16 adds ordering and calendar range indexes; startup uses `quick_check` instead of the full integrity check.
+- Add a confirmed Data → Unused photos cleanup: only canonical files older than 24 hours and unreferenced by live or seven-day-history data are removed.
+- Move the remaining AI provider and operation-history copy into the shared catalog, remove dead animation/blur CSS left behind by the motion kill switch (about 10 KB in the built stylesheet), and split chat rows, the location input and the toast into focused modules.
 
 ### 简体中文
 - 日/周视图一次投影可见日期范围，不再逐日重扫全部记录；聊天消息气泡不会因输入框每次按键而重渲染，全局搜索改为延迟过滤。
 - 弹窗限制 Tab 焦点并在关闭后还给触发控件；Escape 与 Android 返回仍只关闭一层。
 - 同步在 5 分钟内复用附件哈希集合，应用快照时跳过未变化的行，flush 时预取实体状态并将 sequence/lamport 计数改为每次 flush 写入一次。
 - 操作历史改为单次分组查询；schema v16 增加排序与日历范围索引；启动检查改用 `quick_check`，不再执行全量完整性检查。
+- 数据设置新增确认式“清理未引用图片”：仅删除超过 24 小时、且不被现存数据或 7 天历史引用的规范文件。
+- 其余 AI 服务与操作历史文案迁入共享文案表；移除动效总开关遗留的动画/模糊死代码（构建后样式约减少 10 KB），并把聊天消息行、地点输入和提示条拆成独立模块。
 
 ## 3.0.1 — 2026-10-13
 

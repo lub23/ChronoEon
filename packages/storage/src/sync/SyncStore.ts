@@ -470,6 +470,11 @@ export class SyncStore {
       }
       await pruneRecovery(this.db);
       const hashes = new Set(await new OperationHistoryStore(this.db).attachmentHashesDirect());
+      // Local-only attachments have no sync state until the first flush; once
+      // history ages out, their live rows are the only remaining reference.
+      for (const row of await this.db.select<{ sha256: string }>("SELECT DISTINCT sha256 FROM attachments WHERE sha256 IS NOT NULL")) {
+        if (/^[a-f0-9]{64}$/.test(row.sha256)) hashes.add(row.sha256);
+      }
       for await (const row of this.stateRows("WHERE entity IN ('attachment','asset')")) {
         const state = unpackState(JSON.parse(row.state_json));
         if (!(await this.reachable(state))) continue;

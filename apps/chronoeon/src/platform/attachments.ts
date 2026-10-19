@@ -20,6 +20,26 @@ export interface AttachmentPick {
 
 export type CompressedPhoto = AttachmentMetadata;
 
+export interface AttachmentPrune {
+  files: number;
+  bytes: number;
+}
+
+/** Count or remove canonical photos that no live/history state references. */
+export async function pruneUnreferencedAttachments(
+  referenced: readonly string[],
+  olderThanMs: number,
+  remove: boolean,
+): Promise<AttachmentPrune> {
+  if (!isTauri()) return { files: 0, bytes: 0 };
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<AttachmentPrune>("prune_unreferenced_attachments", {
+    referenced: [...referenced],
+    olderThanMs,
+    delete: remove,
+  });
+}
+
 const sessionUrls = new Map<string, string>();
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

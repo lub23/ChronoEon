@@ -134,6 +134,13 @@ describe("independent operation recovery", () => {
     expect(await d.sync.attachmentHashes()).not.toContain(hash);
   });
 
+  it("retains a live photo after history is cleared", async () => {
+    const d = await device(); const hash = "e".repeat(64);
+    await d.store.create(entry({ images: [`attachments/${hash}.webp`] }));
+    await d.sync.clearHistory();
+    expect(await d.sync.attachmentHashes()).toContain(hash);
+  });
+
   it("atomically creates and recovers a bill with its item binding", async () => {
     const d = await device();
     const item = await d.items.save(draftToItem({ name: "Camera", calendarId: "default", category: "electronics", acquisition: "purchase", acquiredOn: "2026-10-04", acquiredAt: "09:00", cost: 100, currency: "CNY" }), DEFAULT_CHRONOEON_SETTINGS);
