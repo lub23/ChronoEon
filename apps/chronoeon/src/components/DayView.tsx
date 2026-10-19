@@ -9,7 +9,7 @@ import {
   convertCalendarEntryToTimed,
   dayExpenseTotal,
   differenceInIsoDays,
-  entriesForDate,
+  entriesByDateRange,
   entrySegmentForDate,
   formatClockMinutes,
   layoutOverlappingEntries,
@@ -345,14 +345,20 @@ export function DayView({
     scroller.scrollTop = Math.max(0, 7 * hourHeight);
   }, [hourHeight, rangeStart.getTime()]);
 
-  const visibleFor = useMemo(() => (key: string) => entriesForDate(entries, key)
+  // Project the whole visible range once; calling entriesForDate per day walks
+  // the complete entry list and expands recurrence candidates per column.
+  const rawByDate = useMemo(
+    () => entriesByDateRange(entries, dayKeys[0] ?? "", dayKeys[dayKeys.length - 1] ?? ""),
+    [entries, dayKeys],
+  );
+  const visibleFor = useMemo(() => (key: string) => (rawByDate.get(key) ?? [])
     .filter((entry) => kindAllowed(filter, entry.kind))
-    .filter((entry) => entryMatchesSearch(entry, search, locale, settings)), [entries, filter, locale, search, settings]);
+    .filter((entry) => entryMatchesSearch(entry, search, locale, settings)), [rawByDate, filter, locale, search, settings]);
 
   const belongsInLane = (entry: Entry) => entry.allDay || !entry.start || classifyCrossDayEntry(entry) === "cross-day-long";
   const expenseByDate = useMemo(() => Object.fromEntries(
-    dayKeys.map((key) => [key, dayExpenseTotal(entriesForDate(entries, key), settings)]),
-  ), [dayKeys, entries, settings]);
+    dayKeys.map((key) => [key, dayExpenseTotal(rawByDate.get(key) ?? [], settings)]),
+  ), [dayKeys, rawByDate, settings]);
   const dayData = useMemo(() => dayKeys.map((key) => {
     const visible = visibleFor(key);
     return {
@@ -434,8 +440,8 @@ export function DayView({
   );
 
   const entriesByDate = useMemo(
-    () => Object.fromEntries(dayKeys.map((key) => [key, entriesForDate(entries, key)])),
-    [dayKeys, entries],
+    () => Object.fromEntries(dayKeys.map((key) => [key, rawByDate.get(key) ?? []])),
+    [dayKeys, rawByDate],
   );
   // The timeline layout never paints a photo backdrop; reading them would be
   // disk work per visible day for nothing. Photo appreciation reads its own,

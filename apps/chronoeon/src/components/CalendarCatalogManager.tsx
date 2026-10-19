@@ -3,7 +3,7 @@ import { MotionPresence, createMotionPortal as createPortal } from "./MotionPres
 import { PRESET_COLORS, newCalendarCatalogs, readableTextColor, type CalendarConfig } from "@chronoeon/domain";
 import type { Locale } from "../domain/entry";
 import { calendarDisplayName, t } from "../i18n";
-import { registerModalDismiss } from "./modalLayer";
+import { registerModalDismiss, useFocusTrap } from "./modalLayer";
 import { Icon } from "./Icon";
 import { ColorMenu } from "./CategoryCatalogManager";
 
@@ -38,7 +38,9 @@ export function CalendarCatalogManager({
 }: CalendarCatalogManagerProps) {
   const [draft, setDraft] = useState<CalendarConfig | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<HTMLElement>(null);
   const editing = draft;
+  useFocusTrap(editorRef, Boolean(editing));
   const isCreating = Boolean(draft && !calendars.some(calendar => calendar.id === draft.id));
 
   useEffect(() => {
@@ -129,7 +131,7 @@ export function CalendarCatalogManager({
         <div className="category-editor-backdrop" role="presentation" onMouseDown={(event) => {
           if (event.target === event.currentTarget) closeEditor();
         }}>
-          <section className="category-editor calendar-editor-dialog" role="dialog" aria-modal="true" aria-label={`${t("categoryEdit", locale)} · ${editing.name}`}>
+          <section ref={editorRef} className="category-editor calendar-editor-dialog" role="dialog" aria-modal="true" aria-label={`${t("categoryEdit", locale)} · ${editing.name}`}>
             <header>
               <ColorMenu
                 locale={locale}

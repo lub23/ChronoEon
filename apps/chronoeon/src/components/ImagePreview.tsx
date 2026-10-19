@@ -4,7 +4,7 @@ import type { Locale } from "../domain/entry";
 import { t } from "../i18n";
 import { resolveAttachmentUrl } from "../platform/attachments";
 import { Icon } from "./Icon";
-import { useModalDismiss } from "./modalLayer";
+import { useFocusTrap, useModalDismiss } from "./modalLayer";
 
 interface ImagePreviewProps {
   locale: Locale;
@@ -32,6 +32,8 @@ export function ImagePreview({ locale, items, index, onIndexChange, onClose }: I
   const gesture = useRef<{ pointerId: number; startX: number; moved: boolean } | null>(null);
   const suppressTap = useRef(false);
   const stageRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(previewRef);
   const steppable = items.length > 1;
   const active = items[index] ?? "";
   const url = urls[active];
@@ -88,6 +90,7 @@ export function ImagePreview({ locale, items, index, onIndexChange, onClose }: I
 
   return createPortal(
     <div
+      ref={previewRef}
       className="image-preview-backdrop"
       role="dialog"
       aria-modal="true"

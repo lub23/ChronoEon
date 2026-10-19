@@ -9,6 +9,13 @@ import { StorageError } from "./errors";
 import type { PersistencePort, SqlParam, SqlValue } from "./persistence/PersistencePort";
 import { ensureMigrated, RUNTIME_PRAGMAS, verifyIntegrity } from "./migrations";
 
+/** Keep every `IN (...)` below SQLite's bind-variable ceiling. */
+function chunkIds<T>(values: T[], size = 400): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
+  return result;
+}
+
 export interface EntryRow extends Record<string, SqlValue> {}
 
 export interface AttachmentRowInput {
@@ -683,12 +690,14 @@ export class SqliteEntryStore implements EntryStore {
     return this.runOp(async () => {
       const revisions = new Map<string, string>();
       if (!ids.length) return revisions;
-      const placeholders = ids.map(() => "?").join(", ");
-      const rows = await this.backend.select<{ id: string; updated_at: string | null }>(
-        `SELECT id, updated_at FROM entries WHERE id IN (${placeholders})`, ids,
-      );
-      for (const row of rows) {
-        if (row.updated_at) revisions.set(row.id, row.updated_at);
+      for (const chunk of chunkIds(ids)) {
+        const placeholders = chunk.map(() => "?").join(", ");
+        const rows = await this.backend.select<{ id: string; updated_at: string | null }>(
+          `SELECT id, updated_at FROM entries WHERE id IN (${placeholders})`, chunk,
+        );
+        for (const row of rows) {
+          if (row.updated_at) revisions.set(row.id, row.updated_at);
+        }
       }
       return revisions;
     });
@@ -697,13 +706,17 @@ export class SqliteEntryStore implements EntryStore {
   private async hydrate(rows: EntryColumns[]): Promise<Entry[]> {
     if (!rows.length) return [];
     const ids = rows.map((row) => String(row.id));
-    const idPlaceholders = ids.map(() => "?").join(", ");
-    const tagRows = await this.backend.select<{ entry_id: string; tag: string }>(
-      `SELECT entry_id, tag FROM entry_tags WHERE entry_id IN (${idPlaceholders}) ORDER BY position, tag`, ids,
-    );
-    const attachmentRows = await this.backend.select<{ entry_id: string; id: string; sha256: string | null }>(
-      `SELECT entry_id, id, sha256 FROM attachments WHERE entry_id IN (${idPlaceholders}) ORDER BY entry_id, sort, id`, ids,
-    );
+    const tagRows: Array<{ entry_id: string; tag: string }> = [];
+    const attachmentRows: Array<{ entry_id: string; id: string; sha256: string | null }> = [];
+    for (const chunk of chunkIds(ids)) {
+      const idPlaceholders = chunk.map(() => "?").join(", ");
+      tagRows.push(...await this.backend.select<{ entry_id: string; tag: string }>(
+        `SELECT entry_id, tag FROM entry_tags WHERE entry_id IN (${idPlaceholders}) ORDER BY position, tag`, chunk,
+      ));
+      attachmentRows.push(...await this.backend.select<{ entry_id: string; id: string; sha256: string | null }>(
+        `SELECT entry_id, id, sha256 FROM attachments WHERE entry_id IN (${idPlaceholders}) ORDER BY entry_id, sort, id`, chunk,
+      ));
+    }
     const tagsByEntry = new Map<string, string[]>();
     for (const row of tagRows) {
       const list = tagsByEntry.get(row.entry_id) ?? [];

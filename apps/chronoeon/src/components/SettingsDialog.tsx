@@ -20,7 +20,7 @@ import { GlassSelect } from "./GlassSelect";
 import { Icon } from "./Icon";
 import { backgroundTimingSupported } from "../platform/background";
 import { BackgroundTimingSettings } from "./BackgroundTimingSettings";
-import { registerModalDismiss } from "./modalLayer";
+import { registerModalDismiss, useFocusTrap } from "./modalLayer";
 
 export type SettingsSection = "general" | "calendar" | "catalogs" | "ai" | "data";
 
@@ -320,6 +320,8 @@ export function SettingsDialog({
   // keyboard at all, and a stray window-wide handler could race it).
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const dialogRef = useRef<HTMLElement>(null);
+  useFocusTrap(dialogRef);
   useEffect(() => registerModalDismiss((event) => {
     event.preventDefault();
     closeRef.current();
@@ -341,7 +343,7 @@ export function SettingsDialog({
   const miniShortcutValid = isValidAccelerator(miniShortcutDraft);
   return (
     <div className="settings-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <section ref={dialogRef} className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header className="settings-header">
           <div><h2 id="settings-title">{t("settingsTitle", locale)}</h2><p>{t("settingsDetail", locale)}</p></div>
           <button type="button" className="icon-button" onClick={onClose} aria-label={t("close", locale)} autoFocus><Icon name="close" /></button>

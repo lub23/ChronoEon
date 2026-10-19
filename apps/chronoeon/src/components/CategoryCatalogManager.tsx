@@ -6,7 +6,7 @@ import { t } from "../i18n";
 import { GlassSelect, type GlassSelectOption } from "./GlassSelect";
 import { itemIconChoices, resolveItemIcon } from "./ItemsView";
 import { Icon } from "./Icon";
-import { registerModalDismiss } from "./modalLayer";
+import { registerModalDismiss, useFocusTrap } from "./modalLayer";
 
 export interface EditableCategory {
   id: string;
@@ -174,7 +174,9 @@ export function CategoryCatalogManager({
   const [pendingDelete, setPendingDelete] = useState<{ id: string; target: string } | null>(null);
   const [reassignBusy, setReassignBusy] = useState(false);
   const editingRef = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<HTMLElement>(null);
   const editing = draft;
+  useFocusTrap(editorRef, Boolean(editing));
   const isCreating = Boolean(draft && !categories.some(category => category.id === draft.id));
 
   useEffect(() => {
@@ -299,7 +301,7 @@ export function CategoryCatalogManager({
       </ul>
       <MotionPresence>{editing && createPortal(
         <div className="category-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEditor(); }}>
-          <section className="category-editor" role="dialog" aria-modal="true" aria-label={`${t("categoryEdit", locale)} · ${editing.name}`}>
+          <section ref={editorRef} className="category-editor" role="dialog" aria-modal="true" aria-label={`${t("categoryEdit", locale)} · ${editing.name}`}>
             <header>
               {(mode === "calendar" || mode === "bill" || mode === "item") && <ColorMenu locale={locale} category={editing} mode={mode} onColor={(color) => patch(editing.id, (current) => ({ ...current, color }))} />}
               <strong>{editing.name}</strong>

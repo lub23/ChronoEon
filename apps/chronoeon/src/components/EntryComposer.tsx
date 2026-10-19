@@ -38,7 +38,7 @@ import { Icon } from "./Icon";
 import { TagInput } from "./TagInput";
 import { TaskStatusMenu } from "./TaskSummaryList";
 import { EntryGlyph, TaskStatusGlyph } from "./ItemGlyph";
-import { registerModalDismiss } from "./modalLayer";
+import { registerModalDismiss, useFocusTrap } from "./modalLayer";
 import { FieldSuggestions, locationFieldCandidates } from "./FieldSuggestions";
 import { readCurrentPlace } from "../platform/location";
 import { labeledOptions, priorities, recurrenceOptions, reminderLabels, reminderTriggerLabel, weekdayIndexForDate } from "./entryFieldLabels";
@@ -288,6 +288,8 @@ export function EntryComposer({
   // without re-registering on every keystroke.
   const requestCloseRef = useRef(requestClose);
   requestCloseRef.current = requestClose;
+  const sheetRef = useRef<HTMLElement>(null);
+  useFocusTrap(sheetRef);
   useEffect(() => registerModalDismiss((event) => {
     event.preventDefault();
     requestCloseRef.current();
@@ -585,6 +587,7 @@ export function EntryComposer({
       onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose(); }}
     >
       <section
+        ref={sheetRef}
         className="composer-sheet"
         role="dialog"
         aria-modal="true"

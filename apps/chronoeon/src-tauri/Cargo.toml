@@ -1,6 +1,6 @@
 [package]
 name = "chronoeon-app"
-version = "3.0.1"
+version = "3.0.2"
 description = "ChronoEon (时元) standalone application"
 authors = ["ChronoEon contributors"]
 edition = "2021"
@@ -23,6 +23,7 @@ eventsource-stream = "0.2"
 futures-util = "0.3"
 sha2 = "0.10"
 hex = "0.4"
+fs2 = "0.4"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"

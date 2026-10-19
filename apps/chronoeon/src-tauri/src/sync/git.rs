@@ -1,5 +1,6 @@
 use super::{BackendHead, EncodedObject, PublishResult, SyncBackend, TransportConfig, INDEX_NAME};
 use git2::{Cred, Direction, FetchOptions, Index, IndexEntry, IndexTime, ObjectType, Oid, PushOptions, RemoteCallbacks, Repository, Signature};
+use fs2::FileExt;
 use std::{fs, path::Path, sync::{Arc, Mutex}};
 #[cfg(not(target_os = "windows"))]
 const CACERT_PEM: &[u8] = include_bytes!("../../certs/cacert.pem");
@@ -10,7 +11,7 @@ use std::sync::OnceLock;
 #[cfg(target_os = "android")]
 use foreign_types::ForeignType;
 
-pub struct GitBackend { repo: Repository, remote: String, token: String, username: String, branch: String, head: Option<Oid> }
+pub struct GitBackend { repo: Repository, remote: String, token: String, username: String, branch: String, head: Option<Oid>, _cache_lock: fs::File }
 impl GitBackend {
     pub fn new(cache: &Path, config: &TransportConfig) -> Result<Self, String> {
         let remote = config.git_remote.as_deref().unwrap_or("").trim().to_string();
@@ -20,18 +21,29 @@ impl GitBackend {
             if url.scheme() != "https" || url.password().is_some() { return Err("SYNC_HTTPS_REQUIRED".into()); }
         }
         fs::create_dir_all(cache).map_err(|error| error.to_string())?;
+        // OS lock is released even when Android kills the process. Hold it for
+        // the entire repository lifetime, including fetch and publication.
+        let cache_lock = fs::OpenOptions::new().read(true).write(true).create(true).truncate(false)
+            .open(cache.join("chronoeon-cache.guard")).map_err(|error| error.to_string())?;
+        cache_lock.lock_exclusive().map_err(|error| error.to_string())?;
+        remove_stale_locks(cache)?;
         configure_network(cache)?;
         let repo = if cache.join("HEAD").is_file() { Repository::open_bare(cache) } else { Repository::init_bare(cache) }.map_err(|error| error.to_string())?;
         // An auxiliary Git setting only; business conflicts never reach Git merge.
         repo.config().and_then(|mut config| config.set_bool("rerere.enabled", true)).map_err(|error| error.to_string())?;
         let username = credential_usernames(&remote).first().cloned().unwrap_or_else(|| "oauth2".into());
-        Ok(Self { repo, remote, token: config.git_token.clone().unwrap_or_default(), username, branch: "refs/heads/main".into(), head: None })
+        Ok(Self { repo, remote, token: config.git_token.clone().unwrap_or_default(), username, branch: "refs/heads/main".into(), head: None, _cache_lock: cache_lock })
     }
     fn callbacks(&self) -> RemoteCallbacks<'static> {
         let token = self.token.trim().to_string();
         let username = self.username.clone();
+        let mut attempted = std::collections::HashSet::new();
         let mut callbacks = RemoteCallbacks::new();
         callbacks.credentials(move |_url, username_from_url, allowed| {
+            // libgit2 (especially WinHTTP) asks again after rejection. Returning
+            // the same credential forever hides the 401 behind a replay error.
+            let kind = if token.is_empty() { "default" } else if allowed.is_user_pass_plaintext() { "token" } else { "username" };
+            if !attempted.insert(kind) { return Err(git2::Error::new(git2::ErrorCode::Auth, git2::ErrorClass::Http, "SYNC_UNAUTHORIZED")); }
             if token.is_empty() { return Cred::default(); }
             if allowed.is_user_pass_plaintext() {
                 return Cred::userpass_plaintext(username_from_url.unwrap_or(&username), &token);
@@ -44,15 +56,21 @@ impl GitBackend {
         callbacks
     }
     fn fetch_head(&mut self) -> Result<(), String> {
+        self.with_authentication(Self::fetch_head_once)
+    }
+    fn with_authentication<T>(&mut self, mut operation: impl FnMut(&mut Self) -> Result<T, String>) -> Result<T, String> {
         let mut usernames = credential_usernames(&self.remote);
+        // Reuse a username that already worked earlier in this fetch/publish.
+        usernames.retain(|name| name != &self.username);
+        usernames.insert(0, self.username.clone());
         let mut last_error: Option<String> = None;
         let mut token_name_resolved = false;
         let mut index = 0;
         while index < usernames.len() {
             let username = usernames[index].clone();
             self.username = username;
-            match self.fetch_head_once() {
-                Ok(()) => return Ok(()),
+            match operation(self) {
+                Ok(value) => return Ok(value),
                 Err(error) if is_auth_http_error(&error) => {
                     last_error = Some(error);
                     if !token_name_resolved {
@@ -67,6 +85,21 @@ impl GitBackend {
             index += 1;
         }
         Err(last_error.unwrap_or_else(|| "SYNC_FETCH_FAILED".into()))
+    }
+    fn push_commit(&mut self) -> Result<PublishResult, String> {
+        let rejected = Arc::new(Mutex::new(None::<String>)); let status = rejected.clone();
+        let mut callbacks = self.callbacks();
+        callbacks.push_update_reference(move |_reference, message| { if let Some(message) = message { *status.lock().unwrap() = Some(message.to_string()); } Ok(()) });
+        let mut options = PushOptions::new(); options.remote_callbacks(callbacks);
+        let mut remote = self.repo.remote_anonymous(&self.connection_url()).map_err(|error| error.to_string())?;
+        // No '+', rebase, reset or text merge. A stale parent is retried by the engine.
+        if let Err(error) = remote.push(&[format!("refs/heads/chronoeon-upload:{}", self.branch)], Some(&mut options)) {
+            if error.code() == git2::ErrorCode::NotFastForward { return Ok(PublishResult { conflict: true }); }
+            let mapped = transport_error(error);
+            return Err(if is_auth_http_error(&mapped) { mapped } else { mapped.replacen("SYNC_FETCH:", "SYNC_PUSH:", 1) });
+        }
+        if rejected.lock().unwrap().is_some() { return Ok(PublishResult { conflict: true }); }
+        Ok(PublishResult { conflict: false })
     }
     fn fetch_head_once(&mut self) -> Result<(), String> {
         let mut remote = self.repo.remote_anonymous(&self.connection_url()).map_err(|error| error.to_string())?;
@@ -98,7 +131,7 @@ impl GitBackend {
     }
     fn connection_url(&self) -> String {
         let Ok(mut url) = reqwest::Url::parse(&self.remote) else { return self.remote.clone(); };
-        if url.scheme() == "https" && !self.token.trim().is_empty() && url.username().is_empty() {
+        if matches!(url.scheme(), "https" | "http") && !self.token.trim().is_empty() {
             // Supplying the username in the URL lets libgit2 request the token
             // directly on hosts that do not perform a separate username probe.
             let _ = url.set_username(&self.username);
@@ -150,24 +183,30 @@ impl SyncBackend for GitBackend {
         for path in deletes { let _ = index.remove_path(Path::new(path)); }
         add_blob(&self.repo, &mut index, INDEX_NAME, manifest)?;
         let tree_id = index.write_tree_to(&self.repo).map_err(|error| error.to_string())?;
+        if parent.as_ref().is_some_and(|parent| parent.tree_id() == tree_id) {
+            return Ok(PublishResult { conflict: false });
+        }
         let tree = self.repo.find_tree(tree_id).map_err(|error| error.to_string())?;
         let signature = Signature::now("ChronoEon", "sync@chronoeon.local").map_err(|error| error.to_string())?;
         let parents = parent.iter().collect::<Vec<_>>();
         let oid = self.repo.commit(None, &signature, &signature, "Sync changes", &tree, &parents).map_err(|error| error.to_string())?;
         self.repo.reference("refs/heads/chronoeon-upload", oid, true, "sync publication").map_err(|error| error.to_string())?;
-        let rejected = Arc::new(Mutex::new(None::<String>)); let status = rejected.clone();
-        let mut callbacks = self.callbacks();
-        callbacks.push_update_reference(move |_reference, message| { if let Some(message) = message { *status.lock().unwrap() = Some(message.to_string()); } Ok(()) });
-        let mut options = PushOptions::new(); options.remote_callbacks(callbacks);
-        let mut remote = self.repo.remote_anonymous(&self.connection_url()).map_err(|error| error.to_string())?;
-        // No '+', rebase, reset or text merge. A stale parent is retried by the engine.
-        if let Err(error) = remote.push(&[format!("refs/heads/chronoeon-upload:{}", self.branch)], Some(&mut options)) {
-            if error.code() == git2::ErrorCode::NotFastForward { return Ok(PublishResult { conflict: true }); }
-            return Err(format!("SYNC_PUSH: {error}"));
-        }
-        if rejected.lock().unwrap().is_some() { return Ok(PublishResult { conflict: true }); }
-        Ok(PublishResult { conflict: false })
+        drop(parents); drop(tree); drop(parent);
+        self.with_authentication(Self::push_commit)
     }
+}
+// This directory is an app-owned disposable mirror, never a user's checkout.
+// Only call while holding chronoeon-cache.guard; never follow symlinks.
+fn remove_stale_locks(directory: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let kind = entry.file_type().map_err(|error| error.to_string())?;
+        if kind.is_dir() { remove_stale_locks(&entry.path())?; }
+        else if kind.is_file() && entry.path().extension().is_some_and(|extension| extension == "lock") {
+            fs::remove_file(entry.path()).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 fn credential_usernames(remote: &str) -> Vec<String> {
     let mut names = Vec::new();
@@ -199,6 +238,7 @@ fn token_username(remote: &str, token: &str) -> Option<String> {
     let endpoint = identity_url(remote)?;
     let client = reqwest::blocking::Client::builder()
         .user_agent("ChronoEon/0.1")
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(8))
         .build().ok()?;
     let request = if endpoint.host_str()? == "gitee.com" {
@@ -214,14 +254,16 @@ fn token_username(remote: &str, token: &str) -> Option<String> {
 }
 fn is_auth_http_error(error: &str) -> bool {
     let normalized = error.to_ascii_lowercase();
-    ["unexpected http status code: 401", "unexpected http status code: 403"].iter()
+    ["sync_unauthorized", "sync_forbidden", "unexpected http status code: 401", "unexpected http status code: 403",
+        "request failed with status code: 401", "request failed with status code: 403", "too many redirects or authentication replays"].iter()
         .any(|needle| normalized.contains(needle))
 }
 fn transport_error(error: git2::Error) -> String {
     let message = error.to_string();
-    if message.contains("unexpected http status code: 403") {
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("unexpected http status code: 403") || normalized.contains("request failed with status code: 403") {
         format!("SYNC_FORBIDDEN: {message}")
-    } else if message.contains("unexpected http status code: 401") {
+    } else if error.code() == git2::ErrorCode::Auth || normalized.contains("unexpected http status code: 401") || normalized.contains("request failed with status code: 401") || message.contains("SYNC_UNAUTHORIZED") {
         format!("SYNC_UNAUTHORIZED: {message}")
     } else if message.starts_with("SYNC_FETCH: ") {
         message
@@ -288,7 +330,57 @@ mod tests {
         assert_eq!(identity_url("https://github.com/org/repo.git").unwrap().as_str(), "https://api.github.com/user");
         assert!(identity_url("D:/local/remote.git").is_none());
         assert!(is_auth_http_error("SYNC_FETCH: unexpected HTTP status code: 403"));
+        assert!(is_auth_http_error("SYNC_FETCH: too many redirects or authentication replays; class=Http (34)"));
+        assert!(is_auth_http_error("SYNC_UNAUTHORIZED: credentials rejected"));
+        assert!(is_auth_http_error("SYNC_FETCH: request failed with status code: 403; class=Http (34)"));
+        assert!(transport_error(git2::Error::from_str("request failed with status code: 403")).starts_with("SYNC_FORBIDDEN:"));
+        assert!(!is_auth_http_error("SYNC_FETCH: failed to resolve address"));
+        assert!(transport_error(git2::Error::new(git2::ErrorCode::Auth, git2::ErrorClass::Http, "rejected")).starts_with("SYNC_UNAUTHORIZED:"));
         assert!(transport_error(git2::Error::from_str("unexpected http status code: 403")).starts_with("SYNC_FORBIDDEN: "));
+    }
+    #[test]
+    fn rejected_http_credentials_are_bounded_and_next_username_recovers() {
+        use std::{io::{Read, Write}, net::TcpListener, sync::atomic::{AtomicBool, AtomicUsize, Ordering}, time::Duration};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let stop = Arc::new(AtomicBool::new(false)); let done = stop.clone();
+        let requests = Arc::new(AtomicUsize::new(0)); let count = requests.clone();
+        let accept_valid = Arc::new(AtomicBool::new(true)); let valid = accept_valid.clone();
+        let server = std::thread::spawn(move || {
+            while !done.load(Ordering::SeqCst) {
+                let Ok((mut socket, _)) = listener.accept() else { std::thread::sleep(Duration::from_millis(5)); continue; };
+                socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut input = Vec::new(); let mut chunk = [0; 1024];
+                while !input.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    let Ok(n) = socket.read(&mut chunk) else { break; }; if n == 0 { break; } input.extend_from_slice(&chunk[..n]);
+                }
+                count.fetch_add(1, Ordering::SeqCst);
+                // oauth2:secret. The first username is deliberately rejected.
+                let authorized = valid.load(Ordering::SeqCst) && String::from_utf8_lossy(&input).contains("b2F1dGgyOnNlY3JldA==");
+                let response = if authorized {
+                    let body = "001e# service=git-upload-pack\n00000000";
+                    format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-git-upload-pack-advertisement\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+                } else { "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=git\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into() };
+                let _ = socket.write_all(response.as_bytes());
+            }
+        });
+        let root = std::env::temp_dir().join(format!("chronoeon-auth-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        let config = TransportConfig { mode: "git".into(), git_remote: Some("https://wrong@example.test/repo.git".into()), git_token: Some("secret".into()), ..Default::default() };
+        let mut backend = GitBackend::new(&root, &config).unwrap();
+        backend.remote = format!("http://wrong@{address}/repo.git");
+        let recovered = backend.fetch_head();
+        let recovered_username = backend.username.clone();
+        accept_valid.store(false, Ordering::SeqCst);
+        let failed = backend.fetch_head();
+        stop.store(true, Ordering::SeqCst); server.join().unwrap();
+        assert!(recovered.is_ok(), "{recovered:?}");
+        assert_eq!(recovered_username, "oauth2");
+        assert!(failed.unwrap_err().starts_with("SYNC_UNAUTHORIZED:"));
+        assert!(requests.load(Ordering::SeqCst) < 25);
+        drop(backend);
+        let resolved = fs::canonicalize(&root).unwrap(); assert!(resolved.starts_with(fs::canonicalize(std::env::temp_dir()).unwrap()));
+        fs::remove_dir_all(resolved).unwrap();
     }
     #[test]
     fn git_is_a_cas_object_transport_and_never_merges_database_files() {
@@ -305,7 +397,27 @@ mod tests {
         assert!(a.publish(first.head.as_deref(), b"stale", &[], &[]).unwrap().conflict);
         assert_eq!(a.fetch_index().unwrap().bytes.unwrap(), b"{\"version\":2}");
         assert!(a.read_blob("data/chronoeon.db").unwrap().is_none());
+        let unchanged = a.fetch_index().unwrap().head;
+        for _ in 0..5 {
+            assert!(!a.publish(unchanged.as_deref(), b"{\"version\":2}", &[], &[]).unwrap().conflict);
+            assert_eq!(a.fetch_index().unwrap().head, unchanged);
+        }
         drop(a); drop(b);
+        for path in ["refs/heads/chronoeon-upload.lock", "packed-refs.lock", "config.lock", "refs/remotes/chronoeon/default.lock"] {
+            let path = root.join("a").join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"interrupted").unwrap();
+        }
+        let mut recovered = GitBackend::new(&root.join("a"), &config).unwrap();
+        assert!(!root.join("a/refs/heads/chronoeon-upload.lock").exists());
+        assert_eq!(recovered.fetch_index().unwrap().head, unchanged);
+        assert!(!recovered.publish(unchanged.as_deref(), b"{\"version\":3}", &[], &[]).unwrap().conflict);
+        // A second process/connection cannot claim or clean this active cache.
+        let guard = fs::OpenOptions::new().read(true).write(true).open(root.join("a/chronoeon-cache.guard")).unwrap();
+        assert!(guard.try_lock_exclusive().is_err());
+        drop(recovered);
+        guard.try_lock_exclusive().unwrap();
+        drop(guard);
         let resolved = fs::canonicalize(&root).unwrap(); assert!(resolved.starts_with(fs::canonicalize(std::env::temp_dir()).unwrap()));
         fs::remove_dir_all(resolved).unwrap();
     }

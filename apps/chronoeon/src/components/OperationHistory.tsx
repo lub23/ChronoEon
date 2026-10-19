@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useRef, useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { OperationHistoryChange, OperationHistoryRecord, SyncStore } from "@chronoeon/storage";
 import type { Locale } from "../domain/entry";
 import { useConfirmDialog } from "./ConfirmDialog";
 import { Icon } from "./Icon";
-import { useModalDismiss } from "./modalLayer";
+import { useFocusTrap, useModalDismiss } from "./modalLayer";
 
 interface Props {
   locale: Locale;
@@ -250,6 +250,8 @@ export function OperationHistory({ locale, journal, onRestored, onPreview }: Pro
   const zh = locale === "zh";
   const [records, setRecords] = useState<OperationHistoryRecord[]>([]);
   const [showAll, setShowAll] = useState(false);
+  const allRef = useRef<HTMLElement>(null);
+  useFocusTrap(allRef, showAll);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [limit, setLimit] = useState(100);
@@ -309,7 +311,7 @@ export function OperationHistory({ locale, journal, onRestored, onPreview }: Pro
     <ol className="recovery-list">{records.slice(0, PREVIEW_COUNT).map(record => card(record))}</ol>
     {showAll && createPortal(
       <div className="settings-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setShowAll(false); }}>
-        <section className="settings-modal" role="dialog" aria-modal="true" aria-label={zh ? "全部操作历史" : "All operation history"}>
+        <section ref={allRef} className="settings-modal" role="dialog" aria-modal="true" aria-label={zh ? "全部操作历史" : "All operation history"}>
           <header><h4>{zh ? "全部操作历史" : "All operation history"}</h4><div><button type="button" className="danger-button" disabled={busy || !records.length} onClick={() => void run()}>{zh ? "清空历史" : "Clear history"}</button><button type="button" className="secondary-button" onClick={() => setShowAll(false)}>{zh ? "关闭" : "Close"}</button></div></header>
           <ol className="recovery-list">{records.map(record => card(record))}{records.length >= limit && <li><button type="button" className="secondary-button" onClick={() => setLimit(value => value + 100)}>{zh ? "更早的操作" : "Load earlier"}</button></li>}</ol>
         </section>

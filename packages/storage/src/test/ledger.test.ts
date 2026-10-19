@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -7,6 +7,7 @@ import { createDefaultSettings, type ChronoEonSettings, type Entry, type LedgerI
 import type { PersistencePort, SqlParam } from "../persistence/PersistencePort";
 import { SqliteEntryStore } from "../SqliteEntryStore";
 import { SyncStore } from "../sync/SyncStore";
+import { SyncEngine, type SyncBackend, type RemoteIndex } from "../sync/SyncEngine";
 import { openMemoryStore } from "./helpers";
 
 const incomeId = "ledger-" + "a".repeat(24);
@@ -142,6 +143,41 @@ class NodeBackend implements PersistencePort {
 }
 
 describe("consistent ledger backup", () => {
+  it("keeps idle and failed sync disk usage bounded and never republishes unchanged data", async () => {
+    const folder = await mkdtemp(path.join(tmpdir(), "chronoeon-sync-wal-"));
+    const file = path.join(folder, "source.db");
+    const backend = new NodeBackend(new DatabaseSync(file));
+    cleanup.push(async () => { await backend.close(); await rm(folder, { recursive: true, force: true }); });
+    const store = await SqliteEntryStore.create(backend);
+    await store.create(entry());
+    const sync = new SyncStore(backend);
+    let index: RemoteIndex | null = null;
+    let commits = 0;
+    const remote: SyncBackend = {
+      id: "wal-test",
+      fetch: async () => ({ index, head: index ? String(commits) : null, documents: [] }),
+      publish: async (publication) => { index = publication.index; commits++; return { conflict: false }; },
+    };
+    let now = new Date("2026-10-13T01:00:00Z");
+    const engine = new SyncEngine(sync, remote, { deviceName: "disk test", now: () => now });
+    await engine.run();
+    const size = (await stat(file)).size;
+    for (let i = 0; i < 20; i++) {
+      now = new Date(now.getTime() + 1000);
+      await engine.run();
+      expect((await stat(file + "-wal")).size).toBe(0);
+      expect((await stat(file)).size).toBe(size);
+    }
+    expect(commits).toBe(1);
+    for (let i = 0; i < 20; i++) {
+      await sync.failed("offline", now.getTime(), 0);
+      expect((await stat(file + "-wal")).size).toBe(0);
+      expect((await stat(file)).size).toBe(size);
+    }
+    expect((await sync.status()).failures).toBe(20);
+    expect(await store.get(oldId)).not.toBeNull();
+    expect(await backend.select("PRAGMA integrity_check")).toEqual([{ integrity_check: "ok" }]);
+  });
   it("captures committed WAL rows into a valid independent file without overwriting a backup", async () => {
     const folder = await mkdtemp(path.join(tmpdir(), "chronoeon-ledger-backup-"));
     const backend = new NodeBackend(new DatabaseSync(path.join(folder, "source.db")));

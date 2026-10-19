@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { spawn, execFileSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
@@ -59,6 +59,7 @@ function webdavServer() {
 }
 
 describe.skipIf(!executable)("real native Git/WebDAV + Zstd + SQLite round trip",()=>{
+  afterEach(() => vi.useRealTimers());
   let host:Host;let root:string;const hosts:Host[]=[];const databases:MemorySqliteBackend[]=[];
   beforeAll(async()=>{root=await mkdtemp(path.join(tmpdir(),"chronoeon-native-sync-"));host=new Host();});
   afterAll(async()=>{
@@ -76,6 +77,7 @@ describe.skipIf(!executable)("real native Git/WebDAV + Zstd + SQLite round trip"
     const remote=path.join(folder,"remote.git");if(mode==="git")execFileSync("git",["init","--bare","--initial-branch=main",remote],{windowsHide:true,stdio:"pipe"});
     const config:SyncConfig={mode,gitRemote:remote,gitToken:"",webdavUrl:url,webdavUsername:"test",webdavPassword:"test"};
     let now=new Date("2026-09-07T12:00:00Z");
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now);
     async function device(name:string){
       const cache=path.join(folder,name,"cache");const images=path.join(folder,name,"attachments");await mkdir(images,{recursive:true});
       const db=await MemorySqliteBackend.open([]);databases.push(db);const store=await SqliteEntryStore.create(db);const sync=new SyncStore(db);
@@ -108,7 +110,10 @@ describe.skipIf(!executable)("real native Git/WebDAV + Zstd + SQLite round trip"
       };
       await b.engine.run();await a.engine.run();expect(raced).toBe(true);
       expect(await a.store.get(first.id)).toMatchObject({location:"from B",tags:["diary","from A"]});
-      now=new Date("2026-09-23T12:00:00Z");await a.store.update({...(await a.store.get(first.id))!,images:[]});await a.engine.run();
+      await a.store.update({...(await a.store.get(first.id))!,images:[]});
+      // Photos remain recoverable for seven days in local operation history.
+      // Expire that history before testing remote retirement/ack collection.
+      now=new Date("2026-09-23T12:00:00Z");vi.setSystemTime(now);await a.engine.run();
       const beforeAck=await a.backend.fetch(await a.sync.knownDocuments());expect(beforeAck.index!.snapshot!.generation).toBe(2);
       expect(beforeAck.index!.retired.some((ref)=>ref.path===reference)).toBe(true);
       const c=await device("C");await c.engine.run();expect((await c.store.get(first.id))?.images??[]).toEqual([]);

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 type DismissHandler = (event: KeyboardEvent) => void;
 
@@ -121,4 +121,69 @@ export function useModalDismiss(handler: DismissHandler, active = true): void {
   const latest = useRef(handler);
   latest.current = handler;
   useEffect(() => active ? registerModalDismiss((event) => latest.current(event)) : undefined, [active]);
+}
+
+const FOCUSABLE = "a[href],button,input,select,textarea,[tabindex]";
+const traps: Array<{ container: HTMLElement; previous: HTMLElement | null }> = [];
+let trapInstalled = false;
+
+function focusableItems(container: HTMLElement): HTMLElement[] {
+  return [...container.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((element) =>
+    !element.hasAttribute("disabled")
+    && element.tabIndex >= 0
+    && !element.closest("[hidden],[inert]")
+    && element.getAttribute("aria-hidden") !== "true",
+  );
+}
+
+function trapTab(event: KeyboardEvent) {
+  if (event.key !== "Tab" || !traps.length) return;
+  const trap = traps[traps.length - 1];
+  const items = focusableItems(trap.container);
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  if (!active || !trap.container.contains(active)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus({ preventScroll: true });
+  } else if (event.shiftKey && active === first) {
+    event.preventDefault();
+    last.focus({ preventScroll: true });
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+}
+
+/**
+ * Keep keyboard focus inside the topmost dialog and return it to the control
+ * that opened the dialog. The app used to rely on `aria-modal` alone, so Tab
+ * could walk into the page behind an open composer or settings sheet.
+ */
+export function useFocusTrap(ref: RefObject<HTMLElement | null>, active = true): void {
+  useEffect(() => {
+    if (!active) return;
+    const container = ref.current;
+    if (!container) return;
+    const trap = { container, previous: document.activeElement instanceof HTMLElement ? document.activeElement : null };
+    traps.push(trap);
+    if (!trapInstalled) {
+      trapInstalled = true;
+      document.addEventListener("keydown", trapTab, true);
+    }
+    if (!container.contains(document.activeElement)) {
+      (focusableItems(container)[0] ?? container).focus({ preventScroll: true });
+    }
+    return () => {
+      const wasTop = traps[traps.length - 1] === trap;
+      const index = traps.lastIndexOf(trap);
+      if (index >= 0) traps.splice(index, 1);
+      if (!traps.length && trapInstalled) {
+        trapInstalled = false;
+        document.removeEventListener("keydown", trapTab, true);
+      }
+      if (wasTop && trap.previous?.isConnected) trap.previous.focus({ preventScroll: true });
+    };
+  }, [active, ref]);
 }

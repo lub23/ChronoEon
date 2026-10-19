@@ -25,15 +25,28 @@ export interface MissingAttachmentDetail {
 interface Change { sequence: number; entity: EntityKind; entity_id: string; data_json: string | null; changed_at: string }
 const MAX_BATCH_BYTES = 1024 * 1024;
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
+const FLUSH_CHUNK = 200;
+/** History pruning is time-based, so a hash set is only safe to reuse briefly. */
+const ATTACHMENT_CACHE_MS = 5 * 60_000;
+
+interface FlushCounters { deviceId: string; sequence: number; lamport: number; dirty: boolean }
 
 /** Journal and semantic state share the business connection/transaction queue.
  * Triggers capture *every* business write atomically, including chat and deletes. */
 export class SyncStore {
   constructor(private readonly db: PersistencePort) {}
+  private attachmentRevision = 0;
+  private attachmentCache: { revision: number; computedAt: number; hashes: string[] } | null = null;
   recordLanguageChange(before: string, after: string) { return new OperationHistoryStore(this.db).recordLanguage(before, after); }
   history(limit = 100, offset = 0) { return new OperationHistoryStore(this.db).list(limit, offset); }
-  restoreHistory(id: string): Promise<void> { return new OperationHistoryStore(this.db).restore(id); }
-  clearHistory(): Promise<void> { return new OperationHistoryStore(this.db).clear(); }
+  async restoreHistory(id: string): Promise<void> {
+    await new OperationHistoryStore(this.db).restore(id);
+    this.attachmentRevision += 1;
+  }
+  async clearHistory(): Promise<void> {
+    await new OperationHistoryStore(this.db).clear();
+    this.attachmentRevision += 1;
+  }
   private run<T>(work: () => Promise<T>): Promise<T> { return runDatabaseOperation(this.db, work); }
   subscribe(listener: () => void): () => void { return subscribeLocalChanges(this.db, listener); }
   private async meta<T>(key: string, initial: T): Promise<T> {
@@ -41,7 +54,7 @@ export class SyncStore {
     return rows.length ? JSON.parse(rows[0].value) as T : initial;
   }
   private async putMeta(key: string, value: unknown): Promise<void> {
-    await this.db.execute("INSERT INTO sync_meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [key, JSON.stringify(value)]);
+    await this.db.execute("INSERT INTO sync_meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE sync_meta.value IS NOT excluded.value", [key, JSON.stringify(value)]);
   }
   private async identityDirect(): Promise<string> {
     let id = await this.meta("deviceId", "");
@@ -70,6 +83,7 @@ export class SyncStore {
   }
   private async saveState(state: EntityState): Promise<void> {
     if (state.entity === "settings") state = { ...state, fields: sharedSyncFields(state.fields) };
+    if (state.entity === "attachment" || state.entity === "asset") this.attachmentRevision += 1;
     await this.db.execute("INSERT INTO sync_entities(entity,id,state_json) VALUES (?,?,?) ON CONFLICT(entity,id) DO UPDATE SET state_json=excluded.state_json", [state.entity, state.id, JSON.stringify(packState(state))]);
     await this.db.execute("DELETE FROM sync_links WHERE entity=? AND id=?", [state.entity,state.id]);
     const data = materialize(state).data;
@@ -88,17 +102,23 @@ export class SyncStore {
       if (rows.length < 256) break;
     }
   }
-  private async newOperation(state: EntityState | undefined, entity: EntityKind, id: string, patch: { data: EntityData; base: EntityData }, timestamp: string): Promise<SyncOperation> {
-    const deviceId = await this.identityDirect();
-    const sequence = (await this.meta("sequence", 0)) + 1;
-    const revision = Math.max(await this.meta("lamport", 0), state?.revision ?? 0) + 1;
+  private async newOperation(state: EntityState | undefined, entity: EntityKind, id: string, patch: { data: EntityData; base: EntityData }, timestamp: string, counters?: FlushCounters): Promise<SyncOperation> {
+    const deviceId = counters?.deviceId ?? await this.identityDirect();
+    const sequence = counters ? counters.sequence + 1 : (await this.meta("sequence", 0)) + 1;
+    const revision = Math.max(counters?.lamport ?? await this.meta("lamport", 0), state?.revision ?? 0) + 1;
     const deleted = patch.data.$exists === false;
     const operation: SyncOperation = { version: 1, operationId: createEntryId(), deviceId, sequence, revision, timestamp,
       entity, id, op: deleted ? (entity === "attachment" ? "attachment.remove" : "delete")
         : !state ? (entity === "attachment" ? "attachment.add" : "create") : "update",
       context: { ...state?.clock }, ...patch };
     validateOperation(operation);
-    await this.putMeta("sequence", sequence); await this.putMeta("lamport", revision);
+    if (counters) {
+      counters.sequence = sequence;
+      counters.lamport = revision;
+      counters.dirty = true;
+    } else {
+      await this.putMeta("sequence", sequence); await this.putMeta("lamport", revision);
+    }
     await this.db.execute("INSERT INTO sync_outbox(id,operation_json) VALUES (?,?)", [operation.operationId, JSON.stringify(operation)]);
     return operation;
   }
@@ -106,8 +126,21 @@ export class SyncStore {
     const rows = await this.db.select<Change>("SELECT * FROM sync_changes ORDER BY sequence");
     const latest = new Map<string, Change>();
     for (const row of rows) latest.set(`${row.entity}/${row.entity_id}`, row);
+    // One prefetch per chunk instead of a SELECT per changed entity; the flush
+    // runs inside the write queue's transaction, so these states stay current.
+    const states = new Map<string, EntityState>();
+    const keys = [...latest.keys()];
+    for (let index = 0; index < keys.length; index += FLUSH_CHUNK) {
+      const chunk = [...latest.values()].slice(index, index + FLUSH_CHUNK);
+      const where = chunk.map(() => "(entity=? AND id=?)").join(" OR ");
+      const stateRows = await this.db.select<{ entity: EntityKind; id: string; state_json: string }>(
+        `SELECT entity,id,state_json FROM sync_entities WHERE ${where}`, chunk.flatMap((row) => [row.entity, row.entity_id]),
+      );
+      for (const row of stateRows) states.set(`${row.entity}/${row.id}`, unpackState(JSON.parse(row.state_json)));
+    }
+    let counters: FlushCounters | null = null;
     for (const row of latest.values()) {
-      const state = await this.state(row.entity, row.entity_id);
+      const state = states.get(`${row.entity}/${row.entity_id}`);
       const data = row.data_json === null ? null : JSON.parse(row.data_json) as EntityData;
       // An object created and deleted before capture has no remote existence.
       // Its FK-cascaded children must not leak unsynced/deleted chat or photos.
@@ -117,8 +150,13 @@ export class SyncStore {
       if (parent && latest.get(`${parent.entity}/${parent.id}`)?.data_json === null && !(await this.state(parent.entity,parent.id))) continue;
       const patch = localPatch(state, data);
       if (!Object.keys(patch.data).length) continue;
-      const operation = await this.newOperation(state, row.entity, row.entity_id, patch, row.changed_at);
+      counters ??= { deviceId: await this.identityDirect(), sequence: await this.meta("sequence", 0), lamport: await this.meta("lamport", 0), dirty: false };
+      const operation = await this.newOperation(state, row.entity, row.entity_id, patch, row.changed_at, counters);
       await this.saveState(applyOperation(state, operation));
+    }
+    if (counters?.dirty) {
+      await this.putMeta("sequence", counters.sequence);
+      await this.putMeta("lamport", counters.lamport);
     }
     if (rows.length) await this.db.execute("DELETE FROM sync_changes WHERE sequence<=?", [rows.at(-1)!.sequence]);
   }
@@ -194,9 +232,17 @@ export class SyncStore {
           if (header?.format !== "chronoeon.snapshot" || header.version !== 1 || header.datasetId !== datasetId || header.count !== lines.length) throw new Error("Invalid logical snapshot");
           for (const line of lines) {
             const incoming = unpackState(JSON.parse(line));
-            changed.set(`${incoming.entity}/${incoming.id}`, incoming);
             for (const [device, sequence] of Object.entries(incoming.clock)) frontier[device] = Math.max(frontier[device] ?? 0,sequence);
-            await this.saveState(mergeEntity(await this.state(incoming.entity, incoming.id), incoming));
+            const existing = await this.state(incoming.entity, incoming.id);
+            const merged = mergeEntity(existing, incoming);
+            // A snapshot normally describes exactly what this device already
+            // has after a reinstall or a second device. Rewriting every packed
+            // state and re-projecting every row made that common case the
+            // slowest sync path; only a real semantic change needs a write.
+            if (!existing || stableJson(packState(merged)) !== stableJson(packState(existing))) {
+              changed.set(`${incoming.entity}/${incoming.id}`, incoming);
+              await this.saveState(merged);
+            }
             lamport = Math.max(lamport, incoming.revision); received += 1;
           }
           if (!equal(header.frontier, frontier)) throw new Error("Invalid snapshot frontier");
@@ -297,14 +343,21 @@ export class SyncStore {
       await this.putMeta("lastBackend", backend);
       await this.putMeta(`pendingSnapshots:${backend}`, []);
       await this.putMeta("datasetPublished", true); await this.putMeta("failures", 0); await this.putMeta("nextAttempt", 0); await this.putMeta("lastError", null); await this.putMeta("lastSuccess", now.toISOString());
+    }).then(async () => {
+      // Status updates belong locally. Reclaim the transient WAL after commit,
+      // outside the transaction and on the same serialized connection queue.
+      await this.db.select("PRAGMA wal_checkpoint(TRUNCATE)");
     }));
   }
   failed(message: string, now = Date.now(), jitter = Math.random()): Promise<number> {
-    return this.run(async () => {
+    return this.run(() => this.db.transaction(async () => {
       const failures = (await this.meta("failures", 0)) + 1;
       const next = now + Math.round(Math.min(15 * 60_000, 5000 * 2 ** Math.min(failures - 1, 12)) * (0.8 + jitter * 0.4));
       await this.putMeta("failures", failures); await this.putMeta("nextAttempt", next); await this.putMeta("lastError", message); return next;
-    });
+    }).then(async (next) => {
+      await this.db.select("PRAGMA wal_checkpoint(TRUNCATE)");
+      return next;
+    }));
   }
   status(backend?: string): Promise<SyncLocalStatus> {
     return this.run(async () => {
@@ -409,6 +462,12 @@ export class SyncStore {
    * never point at bytes that were discarded by transport/compaction. */
   attachmentHashes(): Promise<string[]> {
     return this.run(async () => {
+      // The poll runs every minute; rescanning every history JSON and entity
+      // state for an unchanged set used to dominate an idle sync. State writes
+      // bump the revision, and stale hashes are only ever conservative.
+      if (this.attachmentCache?.revision === this.attachmentRevision && Date.now() - this.attachmentCache.computedAt < ATTACHMENT_CACHE_MS) {
+        return [...this.attachmentCache.hashes];
+      }
       await pruneRecovery(this.db);
       const hashes = new Set(await new OperationHistoryStore(this.db).attachmentHashesDirect());
       for await (const row of this.stateRows("WHERE entity IN ('attachment','asset')")) {
@@ -431,7 +490,9 @@ export class SyncStore {
           if (hash && /^[a-f0-9]{64}$/.test(hash)) hashes.add(hash);
         }
       }
-      return [...hashes].sort();
+      const result = [...hashes].sort();
+      this.attachmentCache = { revision: this.attachmentRevision, computedAt: Date.now(), hashes: result };
+      return [...result];
     });
   }
 }

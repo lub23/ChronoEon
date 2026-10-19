@@ -1,9 +1,9 @@
-import { useEffect } from "react";
+import { useRef } from "react";
 import { format, parseISO } from "date-fns";
 import type { ChronoEonSettings, DueReminder, Entry, Locale } from "@chronoeon/domain";
 import { formatEntryTime } from "@chronoeon/domain";
 import { categoryLabel, compositeCategoryLabel, t } from "../i18n";
-import { useModalDismiss } from "./modalLayer";
+import { useFocusTrap, useModalDismiss } from "./modalLayer";
 import { Icon } from "./Icon";
 
 interface ReminderDialogProps {
@@ -15,6 +15,8 @@ interface ReminderDialogProps {
 }
 
 export function ReminderDialog({ reminders, locale, settings, onClose, onOpen }: ReminderDialogProps) {
+  const sheetRef = useRef<HTMLElement>(null);
+  useFocusTrap(sheetRef);
   useModalDismiss((event) => {
     event.preventDefault();
     onClose();
@@ -24,7 +26,7 @@ export function ReminderDialog({ reminders, locale, settings, onClose, onOpen }:
     <div className="confirm-backdrop reminder-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-      <section className="reminder-sheet" role="alertdialog" aria-modal="true" aria-labelledby="reminder-title">
+      <section ref={sheetRef} className="reminder-sheet" role="alertdialog" aria-modal="true" aria-labelledby="reminder-title">
         <header>
           <span className="reminder-mark"><Icon name="bell" size={20} /></span>
           <div>

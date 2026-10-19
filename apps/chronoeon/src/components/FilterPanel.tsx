@@ -7,7 +7,7 @@ import type { ChronoEonSettings, EntryCategoryOption, Item } from "@chronoeon/do
 import { calendarDisplayName, t } from "../i18n";
 import { Icon } from "./Icon";
 import { SearchResults } from "./SearchResults";
-import { registerModalDismiss } from "./modalLayer";
+import { registerModalDismiss, useFocusTrap } from "./modalLayer";
 
 interface FilterPanelProps {
   locale: Locale;
@@ -40,6 +40,8 @@ export function FilterPanel({ locale, kind, filter, scheduleCategories, billCate
   settings, entries, items = [], onOpenItem, search, focusSearch, onSearch, onOpenEntry, onKindChange, onChange, onClose }: FilterPanelProps) {
   const [query, setQuery] = useState(search);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  useFocusTrap(panelRef);
   const closeRef = useRef(onClose); closeRef.current = onClose;
   useEffect(() => registerModalDismiss(event => { event.preventDefault(); closeRef.current(); }), []);
   useEffect(() => { if (focusSearch) { inputRef.current?.focus({ preventScroll: true }); inputRef.current?.select(); } }, [focusSearch]);
@@ -94,7 +96,7 @@ export function FilterPanel({ locale, kind, filter, scheduleCategories, billCate
 
   return createPortal(<div className={above ? "filter-panel-backdrop filter-panel-backdrop--above" : "filter-panel-backdrop"}
     role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className={above ? "filter-panel is-above" : "filter-panel"} role="dialog" aria-modal="true"
+    <section ref={panelRef} className={above ? "filter-panel is-above" : "filter-panel"} role="dialog" aria-modal="true"
       aria-label={t("filterPanelTitle", locale)} style={style} onPointerDown={event => event.stopPropagation()}>
       <header className="filter-panel-header">
         <strong>{t("filterPanelTitle", locale)}</strong>

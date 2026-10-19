@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { refineCapture, type EditableCapture } from "../domain/captureRefinement";
 import { format, parseISO } from "date-fns";
 import {
@@ -286,6 +286,62 @@ function normalizeCapturedDraft(draft: EntryDraft, timeScale: number): EntryDraf
   return end ? { ...draft, end } : draft;
 }
 
+function formatMessageTime(value: string, locale: Locale): string {
+  const date = new Date(value);
+  return date.toDateString() === new Date().toDateString()
+    ? date.toLocaleTimeString(localeTag[locale], { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleString(localeTag[locale], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+interface ChatMessageRowProps {
+  message: AiMessageRecord;
+  mode: ChatMode;
+  locale: Locale;
+  copied: boolean;
+  copyFailed: boolean;
+  onCopy: (message: AiMessageRecord) => void;
+  onOpenEntry: (entryId: string) => void;
+}
+
+/** A finished message never changes while the user types the next one. Keep the
+ *  markdown parse and the whole bubble behind an identity check; the composer's
+ *  draft state must not re-render every previous turn. */
+const ChatMessageRow = memo(function ChatMessageRow({ message, mode, locale, copied, copyFailed, onCopy, onOpenEntry }: ChatMessageRowProps) {
+  return (
+    <div className={`chat-message chat-message--${message.role}`}>
+      <span className={message.role === "user" ? "chat-avatar is-user" : "chat-avatar is-assistant"} aria-hidden="true">
+        <Icon name={message.role === "user" ? "day" : MODE_ICONS[mode]} size={13} />
+      </span>
+      <div className="chat-bubble">
+        {message.reasoningContent && (
+          <details className="chat-reasoning">
+            <summary>{t("aiChatShowThinking", locale)}</summary>
+            <div>{renderChatMarkdown(message.reasoningContent)}</div>
+          </details>
+        )}
+        <div className="chat-rich">{renderChatMarkdown(message.content)}</div>
+        <footer className="chat-meta">
+          <time>{formatMessageTime(message.createdAt, locale)}</time>
+          {message.role === "assistant" && (
+            <>
+              <button type="button" className="chat-meta-action" onClick={() => onCopy(message)}>
+                <Icon name={copied ? "check" : "copy"} size={12} />
+                {copied ? t("copied", locale) : t("copy", locale)}
+              </button>
+              {copyFailed && <span className="chat-copy-error">{t("aiCopyFailed", locale)}</span>}
+              {message.proposedEntryId && (
+                <button type="button" className="chat-meta-action is-accent" onClick={() => onOpenEntry(message.proposedEntryId!)}>
+                  <Icon name="arrow-right" size={12} />{t("aiChatOpenEntry", locale)}
+                </button>
+              )}
+            </>
+          )}
+        </footer>
+      </div>
+    </div>
+  );
+});
+
 export function ChatDialog({
   locale, entries, aiPreferences, conversations, settings, availableTags = [], availableAssets = [], initialMode = "capture", showArchivedOnly = false,
   refreshVersion = 0, onOpenEntry, onConfirmCapture, onOpenManualCapture, onOpenAssetCapture, onOpenLinkedCapture, onOpenSettings, onClose,
@@ -296,17 +352,35 @@ export function ChatDialog({
   const [captureCursor, setCaptureCursor] = useState<number | null>(null);
   const capturePrefix = draft.slice(0, captureCursor ?? draft.length);
   const completionQuery = /(?:^|\s)[/@#%&]([^\s]*)$/.exec(capturePrefix)?.[1] ?? "";
-  const captureCompletions = useMemo(() => completeCapture(capturePrefix, {
-    categories: isAssetCapture(draft)
+  const captureAssetMode = isAssetCapture(draft);
+  // Everything derived from the database is computed once per data change; only
+  // the prefix-dependent ranking reruns as the user types.
+  const captureHistoryEntries = useMemo(
+    () => entries.filter(entry => !entry.calendar || entry.calendar === settings.defaultCalendarID),
+    [entries, settings.defaultCalendarID],
+  );
+  const captureCategories = useMemo(
+    () => captureAssetMode
       ? (settings.calendars.find(calendar => calendar.id === settings.defaultCalendarID)?.itemCategories ?? []).map(value => ({ value: value.id, label: value.name }))
       : [...new Map(CAPTURE_KINDS.flatMap(kind => categoryOptionsForKind(kind, settings)).map(value => [value.value, { value: value.value, label: value.label }])).values()],
-    locations: locationFieldCandidates(capturePrefix.replace(/(?:^|\s)@[^\s]*$/, ""), completionQuery,
-      entries.filter(entry => !entry.calendar || entry.calendar === settings.defaultCalendarID), format(new Date(), "yyyy-MM-dd")).map(value => value.value),
-    tags: availableTags,
-    links: isAssetCapture(draft)
+    [captureAssetMode, settings],
+  );
+  const captureLinks = useMemo(
+    () => captureAssetMode
       ? entries.filter(entry => entry.kind === "bill" && billDirectionForCategory(entry.category, settings, entry.calendar) === "expense" && (!entry.calendar || entry.calendar === settings.defaultCalendarID)).map(entry => ({ value: entry.id, label: `${entry.title} · ${entry.date}` }))
       : availableAssets.filter(item => !item.purchaseEntryId && item.acquisition === "purchase" && item.calendarId === settings.defaultCalendarID).map(item => ({ value: item.id, label: item.name })),
-  }), [capturePrefix, completionQuery, draft, settings, entries, availableTags, availableAssets]);
+    [captureAssetMode, entries, settings, availableAssets],
+  );
+  const captureLocations = useMemo(
+    () => locationFieldCandidates(capturePrefix.replace(/(?:^|\s)@[^\s]*$/, ""), completionQuery, captureHistoryEntries, format(new Date(), "yyyy-MM-dd")).map(value => value.value),
+    [capturePrefix, completionQuery, captureHistoryEntries],
+  );
+  const captureCompletions = useMemo(() => completeCapture(capturePrefix, {
+    categories: captureCategories,
+    locations: captureLocations,
+    tags: availableTags,
+    links: captureLinks,
+  }), [capturePrefix, captureCategories, captureLocations, captureLinks, availableTags]);
   const chooseCaptureCompletion = useCallback((value: string) => {
     const cursor = composerRef.current?.selectionStart ?? draft.length;
     const before = draft.slice(0, cursor).replace(/(?:^|\s)[/@#%&][^\s]*$/, match => `${/^\s/.test(match) ? " " : ""}${value} `);
@@ -980,13 +1054,12 @@ export function ChatDialog({
       window.setTimeout(() => setCopyFailedId((current) => (current === message.id ? null : current)), 2400);
     }
   }, []);
-
-  const messageTime = (value: string) => {
-    const date = new Date(value);
-    return date.toDateString() === new Date().toDateString()
-      ? date.toLocaleTimeString(localeTag[locale], { hour: "2-digit", minute: "2-digit" })
-      : date.toLocaleString(localeTag[locale], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  };
+  // The parent may pass a fresh arrow every render; message rows keep their
+  // identity while the composer types, so they read the latest callback through
+  // a ref instead of taking it as a memo dependency.
+  const onOpenEntryRef = useRef(onOpenEntry);
+  onOpenEntryRef.current = onOpenEntry;
+  const openEntryFromMessage = useCallback((entryId: string) => onOpenEntryRef.current(entryId), []);
 
   const active = list.find((conversation) => conversation.id === activeId) ?? null;
   const providerConfig = activeAIProvider(aiPreferences);
@@ -1129,7 +1202,7 @@ export function ChatDialog({
                             </i>
                             {conversation.title?.replace(MODE_TITLE_PREFIX, "") || t("aiChatUntitled", locale)}
                           </strong>
-                          <small>{conversation.archivedAt ? `${t("aiChatArchived", locale)} · ` : ""}{messageTime(conversation.updatedAt)}</small>
+                          <small>{conversation.archivedAt ? `${t("aiChatArchived", locale)} · ` : ""}{formatMessageTime(conversation.updatedAt, locale)}</small>
                         </button>
                         <button type="button" className="icon-button subtle" disabled={busy && conversation.id === activeId} onClick={async () => {
                           if (archivedOnly) await conversations.unarchiveConversation(conversation.id);
@@ -1156,37 +1229,16 @@ export function ChatDialog({
             <div className="chat-thread">
               <div className="chat-messages" ref={scrollRef}>
                 {messages.map((message) => (
-                  <div key={message.id} className={`chat-message chat-message--${message.role}`}>
-                    <span className={message.role === "user" ? "chat-avatar is-user" : "chat-avatar is-assistant"} aria-hidden="true">
-                      <Icon name={message.role === "user" ? "day" : MODE_ICONS[mode]} size={13} />
-                    </span>
-                    <div className="chat-bubble">
-                      {message.reasoningContent && (
-                        <details className="chat-reasoning">
-                          <summary>{t("aiChatShowThinking", locale)}</summary>
-                          <div>{renderChatMarkdown(message.reasoningContent)}</div>
-                        </details>
-                      )}
-                      <div className="chat-rich">{renderChatMarkdown(message.content)}</div>
-                      <footer className="chat-meta">
-                        <time>{messageTime(message.createdAt)}</time>
-                        {message.role === "assistant" && (
-                          <>
-                            <button type="button" className="chat-meta-action" onClick={() => { void copyMessage(message); }}>
-                              <Icon name={copiedId === message.id ? "check" : "copy"} size={12} />
-                              {copiedId === message.id ? t("copied", locale) : t("copy", locale)}
-                            </button>
-                            {copyFailedId === message.id && <span className="chat-copy-error">{t("aiCopyFailed", locale)}</span>}
-                            {message.proposedEntryId && (
-                              <button type="button" className="chat-meta-action is-accent" onClick={() => onOpenEntry(message.proposedEntryId!)}>
-                                <Icon name="arrow-right" size={12} />{t("aiChatOpenEntry", locale)}
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </footer>
-                    </div>
-                  </div>
+                  <ChatMessageRow
+                    key={message.id}
+                    message={message}
+                    mode={mode}
+                    locale={locale}
+                    copied={copiedId === message.id}
+                    copyFailed={copyFailedId === message.id}
+                    onCopy={copyMessage}
+                    onOpenEntry={openEntryFromMessage}
+                  />
                 ))}
                 {busy && (
                   <div className="chat-message chat-message--assistant is-busy" aria-live="polite">

@@ -36,7 +36,7 @@ import { ReviewLineChart, type ReviewChartSeries } from "./ReviewLineChart";
 import { FadeText } from "./FadeText";
 import { Icon } from "./Icon";
 import { TaskSummaryList } from "./TaskSummaryList";
-import { registerModalDismiss } from "./modalLayer";
+import { registerModalDismiss, useFocusTrap } from "./modalLayer";
 import { usePersistentPreference } from "../hooks/usePersistentPreference";
 import { ItemsView } from "./ItemsView";
 
@@ -223,6 +223,8 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
   const [granularity, setGranularity] = usePersistentPreference<{ range: string; value: ReviewGranularity } | null>("stats-review-granularity", null);
   const [hiddenSeries, setHiddenSeries] = usePersistentPreference<Record<StatsTab, string[]>>("stats-review-hidden-series", { bills: [], tasks: [] });
  const [detail, setDetail] = useState<CategoryDetail | null>(null);
+ const detailRef = useRef<HTMLElement>(null);
+ useFocusTrap(detailRef, Boolean(detail));
  const [detailSort, setDetailSort] = useState<DetailSort>(null);
  const [isRangePending, startRangeTransition] = useTransition();
 
@@ -564,7 +566,7 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
 
      <MotionPresence>{detail && createPortal(
         <div className="stats-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetail(null); }}>
-          <section className="stats-detail panel" role="dialog" aria-modal="true" aria-label={detail.title}>
+          <section ref={detailRef} className="stats-detail panel" role="dialog" aria-modal="true" aria-label={detail.title}>
             <header className="stats-detail-header">
               <span className="stats-detail-swatch" style={{ background: detail.color }} aria-hidden="true" />
               <div>

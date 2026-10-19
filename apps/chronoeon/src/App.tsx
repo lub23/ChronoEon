@@ -1,5 +1,5 @@
 import { isMobilePlatform } from "./hooks/useTouchDevice";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { addDays, addMonths, differenceInCalendarDays, format, parseISO } from "date-fns";
@@ -171,6 +171,7 @@ function App() {
   const [compact, setCompact] = usePersistentPreference<boolean>("compact", new URLSearchParams(window.location.search).get("compact") === "1");
   const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterAnchor, setFilterAnchor] = useState({ top: 20, bottom: 54, right: 390 });
   const [focusFilterSearch, setFocusFilterSearch] = useState(false);
@@ -186,15 +187,15 @@ function App() {
     filterTriggerRef.current?.focus({ preventScroll: true });
   }, []);
   const searchedEntries = useMemo(
-    () => filteredEntries.filter((entry) => entryMatchesSearch(entry, search, locale, settings)),
-    [filteredEntries, locale, search, settings],
+    () => filteredEntries.filter((entry) => entryMatchesSearch(entry, deferredSearch, locale, settings)),
+    [filteredEntries, locale, deferredSearch, settings],
   );
   const searchedItems = useMemo(() => {
     if (!itemAllowed(filter)) return [];
-    const query = search.trim().toLocaleLowerCase();
+    const query = deferredSearch.trim().toLocaleLowerCase();
     return items.filter(item => (entryFilter.calendarIds.length === 0 || entryFilter.calendarIds.includes(item.calendarId))
       && (!query || [item.name, item.notes, item.location].some(value => value?.toLocaleLowerCase().includes(query))));
-  }, [entryFilter.calendarIds, filter, items, search]);
+  }, [entryFilter.calendarIds, filter, items, deferredSearch]);
   const [miniDayCountPref, setMiniDayCount] = usePersistentPreference<number>("miniDayCount", 1);
   const [composerOpen, setComposerOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
@@ -1119,8 +1120,8 @@ function App() {
     // still walks the whole archive instead of stopping at one window.
     if (view === "agenda") return photosOnly
       ? <PhotoWallView entries={searchedEntries} selectedDate={selectedDate} days={visibleDays} paged locale={locale} settings={settings} onSelectDate={setSelectedDate} />
-      : <AgendaView entries={itemEntries} selectedDate={selectedDate} locale={locale} settings={settings} filter={filter} search={search} lunar={lunar} onSelectDate={setSelectedDate} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onEdit={entry => viewActions.current.openComposer(entry)} onNew={(date) => (date ? viewActions.current.openComposerAt({ date, allDay: true }) : viewActions.current.openComposer())} onEntryMenu={(...args) => viewActions.current.openEntryMenu(...args)} />;
-    if (view === "month") return <MonthView entries={searchedEntries} selectedDate={selectedDate} locale={locale} settings={settings} filter={filter} search={search} weekStartsOn={settings.firstDay} showWeekNumbers={settings.showWeekNumbers} lunar={lunar} showPhotos={dayPhotos || photosOnly} photosOnly={photosOnly} onSelectDate={setSelectedDate} onOpenAgenda={() => viewActions.current.selectView("day")} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onEdit={entry => viewActions.current.openComposer(entry)} onEntryMenu={(...args) => viewActions.current.openEntryMenu(...args)} onNewAt={(date) => viewActions.current.openComposerAt({ date, allDay: true })} onReschedule={(...args) => viewActions.current.handleReschedule(...args)} />;
+      : <AgendaView entries={itemEntries} selectedDate={selectedDate} locale={locale} settings={settings} filter={filter} search={deferredSearch} lunar={lunar} onSelectDate={setSelectedDate} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onEdit={entry => viewActions.current.openComposer(entry)} onNew={(date) => (date ? viewActions.current.openComposerAt({ date, allDay: true }) : viewActions.current.openComposer())} onEntryMenu={(...args) => viewActions.current.openEntryMenu(...args)} />;
+    if (view === "month") return <MonthView entries={searchedEntries} selectedDate={selectedDate} locale={locale} settings={settings} filter={filter} search={deferredSearch} weekStartsOn={settings.firstDay} showWeekNumbers={settings.showWeekNumbers} lunar={lunar} showPhotos={dayPhotos || photosOnly} photosOnly={photosOnly} onSelectDate={setSelectedDate} onOpenAgenda={() => viewActions.current.selectView("day")} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onEdit={entry => viewActions.current.openComposer(entry)} onEntryMenu={(...args) => viewActions.current.openEntryMenu(...args)} onNewAt={(date) => viewActions.current.openComposerAt({ date, allDay: true })} onReschedule={(...args) => viewActions.current.handleReschedule(...args)} />;
     if (view === "day" || view === "week") {
       return (
         <DayView
@@ -1137,7 +1138,7 @@ function App() {
           showPhotos={dayPhotos || photosOnly}
           photosOnly={photosOnly}
           filter={filter}
-          search={search}
+          search={deferredSearch}
           onSelectDate={setSelectedDate}
           onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }}
           onEdit={entry => viewActions.current.openComposer(entry)}
@@ -1148,8 +1149,8 @@ function App() {
         />
       );
     }
-    if (view === "ideas") return <IdeasView entries={itemEntries} locale={locale} settings={settings} search={search} today={todayKey} onEdit={entry => viewActions.current.openComposer(entry)} onConvert={(id, date) => { void viewActions.current.convertIdea(id, date); }} onNew={() => viewActions.current.openComposerAt({ kind: "idea", date: todayKey, start: format(new Date(), "HH:mm") })} />;
-    return <StatsView tab={pageTab ?? "bills"} onTabChange={setInsightsTab} items={searchedItems} allEntries={entries} onAddItem={() => openItemComposer()} onEditItem={item => openItemComposer(item)} onOpenBill={entry => viewActions.current.openComposer(entry)} onEditEntry={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={search} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} />;
+    if (view === "ideas") return <IdeasView entries={itemEntries} locale={locale} settings={settings} search={deferredSearch} today={todayKey} onEdit={entry => viewActions.current.openComposer(entry)} onConvert={(id, date) => { void viewActions.current.convertIdea(id, date); }} onNew={() => viewActions.current.openComposerAt({ kind: "idea", date: todayKey, start: format(new Date(), "HH:mm") })} />;
+    return <StatsView tab={pageTab ?? "bills"} onTabChange={setInsightsTab} items={searchedItems} allEntries={entries} onAddItem={() => openItemComposer()} onEditItem={item => openItemComposer(item)} onOpenBill={entry => viewActions.current.openComposer(entry)} onEditEntry={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={deferredSearch} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} />;
   }
     // Keep JSX identity for the outgoing page when a neighbor mounts and when
     // that neighbor is promoted. Never rerender both heavy surfaces on lock.

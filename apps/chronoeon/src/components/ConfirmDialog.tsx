@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import type { Locale } from "../domain/entry";
 import { t, type MessageKey } from "../i18n";
 import { Icon } from "./Icon";
-import { registerModalDismiss } from "./modalLayer";
+import { registerModalDismiss, useFocusTrap } from "./modalLayer";
 import { createPortal } from "react-dom";
 
 export interface ConfirmRequest {
@@ -10,6 +10,36 @@ export interface ConfirmRequest {
   detail?: string;
   confirmLabel?: string;
   tone?: "normal" | "danger";
+}
+
+function ConfirmSheet({ request, locale, settle }: { request: ConfirmRequest; locale: Locale; settle: (value: boolean) => void }) {
+  const sheetRef = useRef<HTMLElement>(null);
+  useFocusTrap(sheetRef);
+  return (
+    <div
+      className="confirm-backdrop"
+      role="presentation"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) settle(false); }}
+    >
+      <section ref={sheetRef} className="confirm-sheet" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={request.detail ? "confirm-detail" : undefined}>
+        <span className={`confirm-mark${request.tone === "danger" ? " is-danger" : ""}`}>
+          <Icon name={request.tone === "danger" ? "trash" : "sparkle"} size={19} />
+        </span>
+        <h2 id="confirm-title">{request.title}</h2>
+        {request.detail && <p id="confirm-detail">{request.detail}</p>}
+        <div className="confirm-actions">
+          <button type="button" className="secondary-button" autoFocus onClick={() => settle(false)}>{t("cancel", locale)}</button>
+          <button
+            type="button"
+            className={request.tone === "danger" ? "danger-button is-solid" : "primary-action"}
+            onClick={() => settle(true)}
+          >
+            {request.confirmLabel ?? t("delete", locale)}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 /**
@@ -57,29 +87,7 @@ export function useConfirmDialog(locale: Locale): {
   }, [request, settle]);
 
   const dialog = request ? createPortal(
-    <div
-      className="confirm-backdrop"
-      role="presentation"
-      onMouseDown={(event) => { if (event.target === event.currentTarget) settle(false); }}
-    >
-      <section className="confirm-sheet" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={request.detail ? "confirm-detail" : undefined}>
-        <span className={`confirm-mark${request.tone === "danger" ? " is-danger" : ""}`}>
-          <Icon name={request.tone === "danger" ? "trash" : "sparkle"} size={19} />
-        </span>
-        <h2 id="confirm-title">{request.title}</h2>
-        {request.detail && <p id="confirm-detail">{request.detail}</p>}
-        <div className="confirm-actions">
-          <button type="button" className="secondary-button" autoFocus onClick={() => settle(false)}>{t("cancel", locale)}</button>
-          <button
-            type="button"
-            className={request.tone === "danger" ? "danger-button is-solid" : "primary-action"}
-            onClick={() => settle(true)}
-          >
-            {request.confirmLabel ?? t("delete", locale)}
-          </button>
-        </div>
-      </section>
-    </div>, document.body
+    <ConfirmSheet request={request} locale={locale} settle={settle} />, document.body
   ) : null;
 
   return { confirm, dialog };

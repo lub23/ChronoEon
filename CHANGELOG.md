@@ -1,5 +1,19 @@
 # Changelog / 更新记录
 
+## 3.0.2 — 2026-10-19
+
+### English
+- Day and week views project the visible range once instead of rescanning every entry per day; chat message bubbles no longer re-render for each draft keystroke and search filtering is deferred.
+- Dialogs trap Tab and return focus to the control that opened them; Escape and Android back still close exactly one layer.
+- Sync reuses the attachment hash set for five minutes, skips unchanged rows when applying a snapshot, prefetches entity states during flush and writes the sequence/lamport counters once per flush.
+- Operation history loads with one grouped query; schema v16 adds ordering and calendar range indexes; startup uses `quick_check` instead of the full integrity check.
+
+### 简体中文
+- 日/周视图一次投影可见日期范围，不再逐日重扫全部记录；聊天消息气泡不会因输入框每次按键而重渲染，全局搜索改为延迟过滤。
+- 弹窗限制 Tab 焦点并在关闭后还给触发控件；Escape 与 Android 返回仍只关闭一层。
+- 同步在 5 分钟内复用附件哈希集合，应用快照时跳过未变化的行，flush 时预取实体状态并将 sequence/lamport 计数改为每次 flush 写入一次。
+- 操作历史改为单次分组查询；schema v16 增加排序与日历范围索引；启动检查改用 `quick_check`，不再执行全量完整性检查。
+
 ## 3.0.1 — 2026-10-13
 
 ### English

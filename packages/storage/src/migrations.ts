@@ -1,4 +1,5 @@
 import { SCHEMA_V15_SQL } from "./schema/v15";
+import { SCHEMA_V16_SQL } from "./schema/v16";
 import type { PersistencePort } from "./persistence/PersistencePort";
 import { StorageError } from "./errors";
 import { SCHEMA_SQL, SCHEMA_V2_SQL, SCHEMA_V3_SQL, SCHEMA_V4_SQL, SCHEMA_V5_SQL, SCHEMA_V6_SQL, SCHEMA_V7_SQL, SCHEMA_V8_SQL, SCHEMA_V9_SQL, SCHEMA_V10_SQL, SCHEMA_V11_SQL, SCHEMA_V12_SQL, SCHEMA_V13_SQL, SCHEMA_V14_SQL } from "./schema/schemaSql";
@@ -25,6 +26,7 @@ export const MIGRATION_STEPS: MigrationStep[] = [
   { version: 13, sql: SCHEMA_V13_SQL },
   { version: 14, sql: SCHEMA_V14_SQL },
   { version: 15, sql: SCHEMA_V15_SQL },
+  { version: 16, sql: SCHEMA_V16_SQL },
 ];
 
 export const SCHEMA_VERSION = MIGRATION_STEPS[MIGRATION_STEPS.length - 1].version;
@@ -60,11 +62,13 @@ export async function ensureMigrated(backend: PersistencePort, steps: MigrationS
   }
 }
 
-/** Boot-time corruption gate; throws CorruptionDetected when SQLite reports anything but "ok". */
+/** Boot-time corruption gate; throws CorruptionDetected when SQLite reports anything but "ok".
+ *  `quick_check` still walks every b-tree, but skips the full index cross-check
+ *  whose cost grows with the whole database and blocked startup on large files. */
 export async function verifyIntegrity(backend: PersistencePort): Promise<void> {
-  const rows = await backend.select<{ integrity_check: string }>("PRAGMA integrity_check");
-  const verdict = rows.map((row) => row.integrity_check).join("\n");
-  if (rows.length !== 1 || rows[0].integrity_check !== "ok") {
-    throw new StorageError("CorruptionDetected", `SQLite integrity_check failed: ${verdict}`);
+  const rows = await backend.select<{ quick_check: string }>("PRAGMA quick_check");
+  const verdict = rows.map((row) => row.quick_check).join("\n");
+  if (rows.length !== 1 || rows[0].quick_check !== "ok") {
+    throw new StorageError("CorruptionDetected", `SQLite quick_check failed: ${verdict}`);
   }
 }

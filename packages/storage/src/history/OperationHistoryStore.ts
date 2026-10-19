@@ -66,9 +66,18 @@ export class OperationHistoryStore {
       await pruneRecovery(this.db, now);
       const records = await this.db.select<{ id: string; created_at: string; restored_from: string | null }>(
         "SELECT * FROM operation_history ORDER BY created_at DESC,rowid DESC LIMIT ? OFFSET ?", [Math.max(1, Math.min(500, Math.trunc(limit))), Math.max(0, Math.trunc(offset))]);
+      const grouped = new Map<string, StoredChange[]>();
+      if (records.length) {
+        const ids = records.map(record => record.id);
+        const rows = await this.db.select<StoredChange & { operation_id: string }>(
+          `SELECT operation_id,table_name,row_key,before_json,after_json FROM operation_history_changes WHERE operation_id IN (${ids.map(() => "?").join(",")}) ORDER BY operation_id,sequence`,
+          ids,
+        );
+        for (const row of rows) grouped.set(row.operation_id, [...(grouped.get(row.operation_id) ?? []), row]);
+      }
       const result: OperationHistoryRecord[] = [];
       for (const record of records) {
-        const changes = (await this.db.select<StoredChange>("SELECT * FROM operation_history_changes WHERE operation_id=? ORDER BY sequence", [record.id])).map(decode);
+        const changes = (grouped.get(record.id) ?? []).map(decode);
         const primary = changes.find(change => ["entries", "items", "sync_settings"].includes(change.table)) ?? changes[0];
         if (!primary) continue;
         const row = primary.after ?? primary.before;
