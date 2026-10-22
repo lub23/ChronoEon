@@ -208,9 +208,12 @@ export function CategoryCatalogManager({
 
   function confirmEdit() {
     if (!draft) return;
+    const name = draft.name.trim();
+    if (!name) { editingRef.current?.focus(); return; }
+    const normalized = { ...draft, name };
     onChange(categories.some(category => category.id === draft.id)
-      ? categories.map(category => category.id === draft.id ? draft : category)
-      : [...categories, draft]);
+      ? categories.map(category => category.id === draft.id ? normalized : category)
+      : [...categories, normalized]);
     setDraft(null);
   }
 
@@ -318,11 +321,12 @@ export function CategoryCatalogManager({
                 value={editing.name}
                 aria-label={`${t("categoryEdit", locale)} · ${editing.name}`}
                 onChange={(event) => patch(editing.id, (current) => ({ ...current, name: event.target.value, builtin: false }))}
-                onBlur={(event) => {
-                  const value = event.target.value.trim();
-                  if (!value) patch(editing.id, (current) => ({ ...current, name: t("categoryUntitled", locale) }));
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    confirmEdit();
+                  }
                 }}
-                onKeyDown={(event) => { if (event.key === "Enter") confirmEdit(); }}
               />
             </label>
 
@@ -406,7 +410,7 @@ export function CategoryCatalogManager({
             <footer>
               {isCreating ? (
                 <>
-                  <button type="button" className="primary-action" onClick={confirmEdit}><Icon name="check" size={14} />{t("confirmAction", locale)}</button>
+                  <button type="button" className="primary-action" disabled={!editing.name.trim()} onClick={confirmEdit}><Icon name="check" size={14} />{t("confirmAction", locale)}</button>
                 </>
               ) : pendingDelete ? (
                 <>
@@ -430,7 +434,7 @@ export function CategoryCatalogManager({
                       <Icon name="check" size={14} />{t("setDefaultCategory", locale)}
                     </button>
                   )}
-                  <button type="button" className="primary-action" onClick={confirmEdit}><Icon name="check" size={14} />{t("confirmAction", locale)}</button>
+                  <button type="button" className="primary-action" disabled={!editing.name.trim()} onClick={confirmEdit}><Icon name="check" size={14} />{t("confirmAction", locale)}</button>
                 </>
               )}
             </footer>

@@ -5,6 +5,8 @@ import { MotionPresence, createMotionPortal as createPortal } from "./MotionPres
 import {
   addDays,
   addMonths,
+  differenceInCalendarDays,
+  endOfWeek,
   endOfMonth,
   format,
   isSameDay,
@@ -132,16 +134,22 @@ export function GlassDatePicker({ value, onChange, ariaLabel, placeholder = "", 
 
   const days = useMemo(() => {
     const first = startOfWeek(startOfMonth(viewDate), { weekStartsOn: weekStartsOn ?? (locale === "zh" ? 1 : 0) });
-    const last = endOfMonth(viewDate);
-    return Array.from({ length: Math.ceil((last.getTime() - first.getTime()) / (24 * 60 * 60 * 1000) / 7) * 7 }, (_, index) => addDays(first, index));
-  }, [locale, viewDate]);
+    const last = endOfWeek(endOfMonth(viewDate), { weekStartsOn: weekStartsOn ?? (locale === "zh" ? 1 : 0) });
+    return Array.from({ length: differenceInCalendarDays(last, first) + 1 }, (_, index) => addDays(first, index));
+  }, [locale, viewDate, weekStartsOn]);
 
   const weekdays = useMemo(() => {
     const first = startOfWeek(new Date(), { weekStartsOn: weekStartsOn ?? (locale === "zh" ? 1 : 0) });
     return Array.from({ length: 7 }, (_, index) => format(addDays(first, index), "EEEEE", { locale: dateLocale }));
-  }, [dateLocale, locale]);
+  }, [dateLocale, locale, weekStartsOn]);
+
+  const dateAllowed = (day: Date) => {
+    const key = format(day, "yyyy-MM-dd");
+    return (!min || key >= min) && (!max || key <= max);
+  };
 
   function choose(day: Date) {
+    if (disabled || !dateAllowed(day)) return;
     onChange(format(day, "yyyy-MM-dd"));
     triggerRef.current?.focus();
     setOpen(false);
@@ -162,7 +170,7 @@ export function GlassDatePicker({ value, onChange, ariaLabel, placeholder = "", 
               <Icon name="chevron-left" size={14} />
             </button>
             <strong>{format(viewDate, locale === "zh" ? "yyyy年M月" : "MMMM yyyy", { locale: dateLocale })}</strong>
-            <button type="button" className="picker-today-btn" onClick={() => choose(new Date())} aria-label={locale === "zh" ? "今天" : "Today"} title={locale === "zh" ? "今天" : "Today"}>
+            <button type="button" className="picker-today-btn" disabled={disabled || !dateAllowed(new Date())} onClick={() => choose(new Date())} aria-label={locale === "zh" ? "今天" : "Today"} title={locale === "zh" ? "今天" : "Today"}>
               <Icon name="target" size={13} />
             </button>
             <button type="button" aria-label={locale === "zh" ? "下一月" : "Next month"} onClick={() => setViewDate(addMonths(viewDate, 1))}>
@@ -178,13 +186,13 @@ export function GlassDatePicker({ value, onChange, ariaLabel, placeholder = "", 
               const outside = !isSameMonth(day, viewDate);
               const dayKey = format(day, "yyyy-MM-dd");
               const inHighlight = Boolean(highlight && dayKey >= highlight.start && dayKey <= highlight.end);
-              const belowMin = Boolean(min && dayKey < min);
-              const aboveMax = Boolean(max && dayKey > max);
               return (
                 <button
                   key={day.toISOString()}
                   type="button"
                   role="gridcell"
+                  aria-label={format(day, "PPPP", { locale: dateLocale })}
+                  aria-current={isSameDay(day, new Date()) ? "date" : undefined}
                   aria-selected={selected ? isSameDay(day, selected) : undefined}
                   className={[
                     "glass-date-cell",
@@ -192,7 +200,7 @@ export function GlassDatePicker({ value, onChange, ariaLabel, placeholder = "", 
                     inHighlight ? "is-highlight" : "",
                     selected && isSameDay(day, selected) ? "is-selected" : "",
                   ].filter(Boolean).join(" ")}
-                  disabled={belowMin || aboveMax}
+                  disabled={disabled || !dateAllowed(day)}
                   onClick={() => choose(day)}
                 >
                   {format(day, "d")}

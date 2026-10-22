@@ -3,6 +3,10 @@
 ## 3.0.2 — 2026-10-19
 
 ### English
+- Second UX review: correct the Assets page title and filtered empty states; give calendar dates full localized accessible names and photo-viewer controls 44px touch targets.
+- Display each photo as soon as it resolves, without waiting for the rest of the album. Make every matching asset and entry reachable through paged search results.
+- Fix ascending/descending asset costs, date-picker bounds and complete weeks (including live week-start changes), and category names submitted with whitespace or Chinese IME Enter.
+- Distinguish opening a release page from installing an update and restore update checks after the system handoff.
 - UX review: keep select popups on the modal dismissal stack with one keyboard focus stop; show years for cross-year/historical dates and clear saving feedback in record/asset editors.
 - Give photo removal a 44px touch target while keeping its compact appearance; show a missing-photo state when image bytes cannot load.
 - Fix arrow-key navigation across mixed search results, tag completion after candidate updates, and calendar name validation/Chinese IME submission.
@@ -15,6 +19,10 @@
 - Move the remaining AI provider and operation-history copy into the shared catalog, remove dead animation/blur CSS left behind by the motion kill switch (about 10 KB in the built stylesheet), and split chat rows, the location input and the toast into focused modules.
 
 ### 简体中文
+- 第二轮体验审查：修正物品页标题及搜索空状态；日期格提供完整本地化名称，照片预览控件触屏区域增至 44px。
+- 照片逐张就绪即显示，不再等待整组；搜索支持加载更多，可访问全部匹配物品与记录。
+- 修复物品金额升降序、日期选择边界和月末整周（含即时周起始设置）、分类空白命名与中文输入法回车误提交。
+- 区分打开发行页与安装更新，系统交接后恢复检查更新按钮。
 - 体验审查：下拉选择器统一接入弹层关闭机制，键盘仅停留在触发器；跨年及非当前年日期显示年份，记录/物品编辑器明确显示保存中状态。
 - 照片移除按钮提供 44px 触屏区域并保持紧凑外观；图片读取失败显示缺失提示。
 - 修复混排搜索结果方向键导航、候选更新后的标签补全，以及日历名称校验与中文输入法误提交。

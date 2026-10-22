@@ -17,6 +17,9 @@ type UpdateState =
   | { kind: "available"; update: AppUpdate }
   | { kind: "downloading" }
   | { kind: "installing" }
+  | { kind: "opening-page" }
+  | { kind: "page-opened" }
+  | { kind: "handed-off" }
   | { kind: "failed" };
 
 const stateMessages: Record<Exclude<UpdateState["kind"], "idle" | "available">, MessageKey> = {
@@ -24,6 +27,9 @@ const stateMessages: Record<Exclude<UpdateState["kind"], "idle" | "available">, 
   latest: "updateLatest",
   downloading: "updateDownloading",
   installing: "updateInstalling",
+  "opening-page": "updateOpeningPage",
+  "page-opened": "updatePageOpened",
+  "handed-off": "updateInstalling",
   failed: "updateFailed",
 };
 
@@ -55,9 +61,10 @@ export function SidebarUpdate({ locale, collapsed }: SidebarUpdateProps) {
     // A release without an asset for this platform still tells the user where
     // to get it; the app never guesses an installer.
     if (!update.url) {
+      setState({ kind: "opening-page" });
       try {
         await openUpdatePage(update.pageUrl);
-        setState({ kind: "installing" });
+        setState({ kind: "page-opened" });
       } catch (error) {
         console.warn("Could not open the release page", error);
         setState({ kind: "failed" });
@@ -69,13 +76,14 @@ export function SidebarUpdate({ locale, collapsed }: SidebarUpdateProps) {
       const path = await downloadAppUpdate(update);
       setState({ kind: "installing" });
       await installAppUpdate(path);
+      setState({ kind: "handed-off" });
     } catch (error) {
       console.warn("Update install failed", error);
       setState({ kind: "failed" });
     }
   }, []);
 
-  const busy = state.kind === "checking" || state.kind === "downloading" || state.kind === "installing";
+  const busy = state.kind === "checking" || state.kind === "downloading" || state.kind === "installing" || state.kind === "opening-page";
   const note = state.kind === "available"
     ? t("updateAvailable", locale).replace("{version}", state.update.version)
     : state.kind === "idle" ? "" : t(stateMessages[state.kind], locale);
@@ -97,7 +105,7 @@ export function SidebarUpdate({ locale, collapsed }: SidebarUpdateProps) {
       {state.kind === "available" && (
         <button type="button" className="sidebar-update-install" onClick={() => { void install(state.update); }}>
           <Icon name="download" size={13} />
-          {t("updateInstall", locale)}
+          {t(state.update.url ? "updateInstall" : "updateOpenPage", locale)}
         </button>
       )}
       {!collapsed && (

@@ -27,6 +27,7 @@ interface ImagePreviewProps {
  */
 export function ImagePreview({ locale, items, index, onIndexChange, onClose }: ImagePreviewProps) {
   const [urls, setUrls] = useState<Record<string, string>>({});
+  const resolutions = useRef(new Map<string, Promise<string | null>>());
   const [dx, setDx] = useState(0);
   const [dragging, setDragging] = useState(false);
   const gesture = useRef<{ pointerId: number; startX: number; moved: boolean } | null>(null);
@@ -44,19 +45,19 @@ export function ImagePreview({ locale, items, index, onIndexChange, onClose }: I
 
   useEffect(() => {
     let disposed = false;
-    const pending = items.filter((item) => !(item in urls));
-    if (!pending.length) return;
-    void Promise.all(pending.map(async (item) => [item, await resolveAttachmentUrl(item).catch(() => null)] as const))
-      .then((pairs) => {
+    for (const item of new Set(items)) {
+      let pending = resolutions.current.get(item);
+      if (!pending) {
+        pending = resolveAttachmentUrl(item).catch(() => null);
+        resolutions.current.set(item, pending);
+      }
+      void pending.then((resolved) => {
         if (disposed) return;
-        setUrls((current) => {
-          const next = { ...current };
-          for (const [item, resolved] of pairs) next[item] = resolved ?? "";
-          return next;
-        });
+        setUrls(current => item in current ? current : { ...current, [item]: resolved ?? "" });
       });
+    }
     return () => { disposed = true; };
-  }, [items, urls]);
+  }, [items]);
 
   useModalDismiss((event) => {
     event.preventDefault();

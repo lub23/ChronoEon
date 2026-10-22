@@ -82,7 +82,7 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
   const bills = useMemo(() => new Map(entries.filter(entry => entry.kind === "bill").map(entry => [entry.id, entry])), [entries]);
   const visible = useMemo(() => items.filter(item => Boolean(item.disposal) === history && `${item.name} ${item.notes ?? ""}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).sort((a, b) => {
     const byDate = a.acquiredOn.localeCompare(b.acquiredOn);
-    const byMoney = (amount: (item: Item) => number) => a.currency.localeCompare(b.currency) || amount(b) - amount(a);
+    const byMoney = (amount: (item: Item) => number) => a.currency.localeCompare(b.currency) || amount(a) - amount(b);
     const natural = sortField === "date" ? byDate : sortField === "name" ? a.name.localeCompare(b.name, locale) : sortField === "cost" ? byMoney(item => item.cost) : byMoney(item => itemDailyCost(item, today));
     const result = sortDirection === "desc" ? -natural : natural;
     return result || a.id.localeCompare(b.id);
@@ -104,7 +104,7 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
 
   return <section className="items-view" aria-label={t("items", locale)}>
     <div className="items-toolbar page-title-row view-title-row">
-      <h2 className="view-heading"><span className="headline-leaf">{t("insightsTitle", locale)}</span></h2>
+      <h2 className="view-heading"><span className="headline-leaf">{t("items", locale)}</span></h2>
       <div className="items-toolbar-controls">
         <GlassSelect value={sortField} options={Object.entries(sortLabels).map(([value, label]) => ({ value, label: t(label, locale) }))} onChange={value => setSortField(value as ItemSortField)} ariaLabel={t("itemSort", locale)} />
         <button type="button" className={sortDirection === "asc" ? "item-sort-direction is-asc" : "item-sort-direction is-desc"}
@@ -120,7 +120,9 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
       <button type="button" aria-pressed={!history} className={!history ? "is-active" : ""} onClick={() => setHistory(false)}>{t("itemsCurrent", locale)} <small>{items.filter(item => !item.disposal).length}</small></button>
       <button type="button" aria-pressed={history} className={history ? "is-active" : ""} onClick={() => setHistory(true)}>{t("itemsHistory", locale)} <small>{items.filter(item => item.disposal).length}</small></button>
     </div>
-    {visible.length === 0 ? <p className="stats-card panel stats-empty">{t(history ? "itemsHistoryEmpty" : "itemsEmpty", locale)}</p> : <ul className="item-list">
+    {visible.length === 0 ? <p className="stats-card panel stats-empty" role="status">{search.trim()
+      ? <>{t("itemsSearchEmpty", locale)} {t("itemsSearchHint", locale)}</>
+      : t(history ? "itemsHistoryEmpty" : "itemsEmpty", locale)}</p> : <ul className="item-list">
       {visible.map(item => {
         const category = itemCategoryConfig(item.category, settings, item.calendarId);
         const calendarName = calendarNameFor(item);
