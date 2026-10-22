@@ -2687,6 +2687,15 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
 .attachment-thumb.is-missing small { display: block; overflow: hidden; max-width: 100%; text-overflow: clip; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 4px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 4px), transparent); white-space: nowrap; }
 .attachment-remove { position: absolute; top: 4px; right: 4px; display: grid; width: 21px; height: 21px; place-items: center; border-radius: 50%; background: rgba(24, 28, 25, .62); color: #fff; }
 .attachment-remove:hover { background: #c0392b; }
+@media (pointer: coarse), (max-width: 600px) {
+  .attachment-remove, .item-photo-grid .item-photo-remove { width: 44px; height: 44px; border: 0; background: transparent; }
+  .attachment-remove:hover { background: transparent; }
+  .attachment-remove::before, .item-photo-remove::before { content: ""; position: absolute; top: 0; right: 0; width: 21px; height: 21px; border-radius: 50%; background: rgba(24, 28, 25, .62); }
+  .attachment-remove:hover::before { background: #c0392b; }
+  .item-photo-remove::before { width: 18px; height: 18px; border: 1px solid var(--line-strong); background: var(--surface-solid); }
+  .attachment-remove svg { position: absolute; top: 4px; right: 4px; }
+  .item-photo-remove svg { position: absolute; top: 3px; right: 3px; }
+}
 .item-link-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; }
 .item-link-row > .item-bill-picker:only-child { grid-column: 1 / -1; }
 .item-note-link-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .82fr); gap: 10px; align-items: start; }

@@ -8,6 +8,13 @@ vi.mock("../platform/attachments", () => ({ resolveAttachmentUrl: resolveUrl }))
 let host: HTMLDivElement, root: Root;
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); resolveUrl.mockReset(); });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
+it("reports unreadable image bytes after a URL resolved", async () => {
+  resolveUrl.mockResolvedValue("blob:broken");
+  await act(async () => root.render(<AttachmentThumb locale="zh" reference="att:broken" />));
+  act(() => host.querySelector("img")!.dispatchEvent(new Event("error")));
+  expect(host.querySelector("img")).toBeNull();
+  expect(host.querySelector(".is-missing")?.getAttribute("aria-label")).toBeTruthy();
+});
 it("shows loading until resolution, and reports failed resolution without an unhandled rejection", async () => {
   let reject!: (error: Error) => void;
   resolveUrl.mockReturnValue(new Promise((_resolve, no) => { reject = no; }));

@@ -3,6 +3,7 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GlassSelect } from "./GlassSelect";
+import { useModalDismiss } from "./modalLayer";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -33,6 +34,37 @@ function render(onChange = vi.fn()) {
 }
 
 describe("GlassSelect", () => {
+  it("dismisses only the select inside a dialog and keeps popup options out of Tab order", () => {
+    const close = vi.fn();
+    function Dialog() {
+      useModalDismiss(close);
+      return <GlassSelect value="income" options={options} ariaLabel="Category" onChange={vi.fn()} />;
+    }
+    act(() => root.render(<Dialog />));
+    const trigger = host.querySelector<HTMLButtonElement>(".glass-select-trigger")!;
+    act(() => trigger.click());
+    expect([...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].every(option => option.tabIndex === -1)).toBe(true);
+    act(() => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(trigger);
+    expect(close).not.toHaveBeenCalled();
+    act(() => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("closes on Tab without selecting and ignores composition and empty option lists", () => {
+    const change = render();
+    const trigger = host.querySelector<HTMLButtonElement>(".glass-select-trigger")!;
+    act(() => trigger.click());
+    act(() => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })));
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(change).not.toHaveBeenCalled();
+    act(() => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true })));
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    act(() => root.render(<GlassSelect value="" options={[]} onChange={change} />));
+    act(() => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    expect(trigger.getAttribute("aria-activedescendant")).toBeNull();
+  });
   it("renders selected value, grouped glass options and category colors", () => {
     render();
     const trigger = host.querySelector<HTMLButtonElement>(".glass-select-trigger")!;

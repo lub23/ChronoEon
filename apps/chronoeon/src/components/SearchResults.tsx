@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { resolveEntryColors, type ChronoEonSettings, type Item } from "@chronoeon/domain";
 import { titleFor, type Entry, type Locale } from "../domain/entry";
 import { entrySearchMatches, searchExcerpt } from "../domain/search";
@@ -23,14 +23,12 @@ export function SearchResults({ entries, items = [], onOpenItem, search, locale,
   items?: Item[]; onOpenItem?: (item: Item) => void;
   entries: Entry[]; search: string; locale: Locale; settings: ChronoEonSettings; onOpen: (entry: Entry) => void;
 }) {
-  const [active, setActive] = useState(0);
   const matches = useMemo(() => entries.flatMap(entry => {
     const hits = entrySearchMatches(entry, search, locale, settings);
     return hits.length ? [{ entry, hits }] : [];
   }).sort((a, b) => (b.entry.date + (b.entry.start ?? "")).localeCompare(a.entry.date + (a.entry.start ?? ""))), [entries, search, locale, settings]);
   const itemMatches = items.filter(item => [item.name, item.notes, item.location].some(value => value?.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())));
   const results = matches.slice(0, 24);
-  useEffect(() => setActive(0), [search]);
   if (!search.trim()) return null;
   return <div className="filter-search-results" aria-label={t("searchResults", locale)}>
     <div className="filter-results-heading" role="status"><span>{t("searchResults", locale)}</span><small>{matches.length + itemMatches.length} {t("filterSearchCount", locale)}</small></div>
@@ -40,18 +38,19 @@ export function SearchResults({ entries, items = [], onOpenItem, search, locale,
       const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>(".filter-result");
       if (!buttons.length) return;
       event.preventDefault();
+      const active = [...buttons].findIndex(button => button === document.activeElement);
       const next = (active + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
-      setActive(next); buttons[next]?.focus({ preventScroll: true });
-      event.currentTarget.querySelectorAll<HTMLButtonElement>(".filter-result")[next]?.scrollIntoView?.({ block: "nearest" });
+      buttons[next]?.focus({ preventScroll: true });
+      buttons[next]?.scrollIntoView?.({ block: "nearest" });
     }}>
       {itemMatches.slice(0, 24).map(item => <button key={`item:${item.id}`} className="filter-result" type="button" onClick={() => onOpenItem?.(item)}><Icon name="box" size={16} /><span className="filter-result-content"><strong>{item.name}</strong><span className="filter-result-meta">{t("items", locale)} · {item.acquiredOn}</span></span><Icon name="chevron-right" size={12} /></button>)}
-      {results.map(({ entry, hits }, index) => {
+      {results.map(({ entry, hits }) => {
         const colors = resolveEntryColors(entry, settings);
         const title = titleFor(entry, locale);
         const contexts = hits.filter(hit => hit.field !== "Title" || hit.text !== title).slice(0, 2);
         const needle = search.trim().startsWith("#") ? "" : search.trim();
         const titleMatch = hits.some(hit => hit.field === "Title" && hit.text === title);
-        return <button key={entry.id} className="filter-result" type="button" onFocus={() => setActive(index)} onClick={() => onOpen(entry)}>
+        return <button key={entry.id} className="filter-result" type="button" onClick={() => onOpen(entry)}>
           <span className="filter-result-color" style={{ backgroundColor: colors.fill }} aria-label={categoryLabel(entry.category, locale, undefined, settings)} />
           <span className="filter-result-content">
             <strong className={titleMatch ? "is-match" : undefined}><Highlight text={titleMatch ? searchExcerpt(title, needle, locale, 64) : title} needle={needle} locale={locale} /></strong>

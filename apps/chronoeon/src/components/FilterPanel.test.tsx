@@ -87,3 +87,19 @@ it("shows matching assets in the filter popup and opens their preview", () => {
   expect(document.querySelector(".filter-empty")?.textContent).not.toContain("没有匹配");
   click(row); expect(open).toHaveBeenCalledWith(item); expect(close).toHaveBeenCalledOnce();
 });
+
+it("navigates mixed item and entry results from the actual focused row", () => {
+  const item = draftToItem({ name: "会议相机", calendarId: "default", acquiredAt: "12:00", category: "electronics", acquisition: "gift", acquiredOn: "2026-10-05", cost: 0, currency: "CNY" });
+  act(() => root.render(<FilterPanel locale="zh" settings={createDefaultSettings("zh")} entries={[entry, { ...entry, id: "second" }]} items={[item]} onOpenItem={vi.fn()}
+    kind={[]} filter={EMPTY_ENTRY_FILTER} search="会议" scheduleCategories={[]} billCategories={[]} calendars={[]}
+    anchor={{ top: 12, bottom: 45, right: 390 }} onSearch={vi.fn()} onOpenEntry={vi.fn()} onKindChange={vi.fn()} onChange={vi.fn()} onClose={vi.fn()} />));
+  const rows = [...document.querySelectorAll<HTMLButtonElement>(".filter-result")];
+  expect(rows).toHaveLength(3);
+  const press = (key: string) => act(() => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })));
+  act(() => rows[1].focus()); // A pointer click or Tab may land on any result.
+  press("ArrowDown"); expect(document.activeElement).toBe(rows[2]);
+  press("ArrowDown"); expect(document.activeElement).toBe(rows[0]);
+  press("ArrowUp"); expect(document.activeElement).toBe(rows[2]);
+  act(() => rows[0].focus());
+  press("ArrowDown"); expect(document.activeElement).toBe(rows[1]);
+});

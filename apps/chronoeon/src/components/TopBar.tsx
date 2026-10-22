@@ -29,26 +29,19 @@ interface TopBarProps {
   mini?: boolean;
 }
 
-function headingFor(view: AppView, selectedDate: Date, locale: Locale, weekStartsOn: ChronoEonSettings["firstDay"], dayCount = 1): string {
+export function headingFor(view: AppView, selectedDate: Date, locale: Locale, weekStartsOn: ChronoEonSettings["firstDay"], dayCount = 1): string {
   const dateLocale = locale === "zh" ? zhCN : enUS;
   if (view === "month") return format(selectedDate, locale === "zh" ? "yyyy年M月" : "MMM yyyy", { locale: dateLocale });
-  if (view === "week") {
-    const start = startOfWeek(selectedDate, { weekStartsOn });
-    const end = addDays(start, 6);
-    return locale === "zh"
-      ? `${format(start, "M月d日", { locale: dateLocale })} – ${format(end, "M月d日", { locale: dateLocale })}`
-      : `${format(start, "MMM d", { locale: dateLocale })} – ${format(end, "MMM d", { locale: dateLocale })}`;
+  const currentYear = new Date().getFullYear();
+  if (view === "week" || (view === "day" && dayCount > 1)) {
+    const start = view === "week" ? startOfWeek(selectedDate, { weekStartsOn }) : selectedDate;
+    const end = addDays(start, view === "week" ? 6 : dayCount - 1);
+    const showYear = start.getFullYear() !== end.getFullYear() || start.getFullYear() !== currentYear;
+    const pattern = locale === "zh" ? (showYear ? "yyyy年M月d日" : "M月d日") : (showYear ? "MMM d, yyyy" : "MMM d");
+    return `${format(start, pattern, { locale: dateLocale })} – ${format(end, pattern, { locale: dateLocale })}`;
   }
-  if (view === "day") {
-    if (dayCount > 1) {
-      const end = addDays(selectedDate, dayCount - 1);
-      return locale === "zh"
-        ? `${format(selectedDate, "M\u6708d\u65e5", { locale: dateLocale })} \u2013 ${format(end, "M\u6708d\u65e5", { locale: dateLocale })}`
-        : `${format(selectedDate, "MMM d", { locale: dateLocale })} \u2013 ${format(end, "MMM d", { locale: dateLocale })}`;
-    }
-    return format(selectedDate, locale === "zh" ? "M\u6708d\u65e5 EEE" : "EEE, MMM d", { locale: dateLocale });
-  }
-  return format(selectedDate, locale === "zh" ? "M月d日 EEE" : "EEE, MMM d", { locale: dateLocale });
+  const showYear = selectedDate.getFullYear() !== currentYear;
+  return format(selectedDate, locale === "zh" ? (showYear ? "yyyy年M月d日 EEE" : "M月d日 EEE") : (showYear ? "EEE, MMM d, yyyy" : "EEE, MMM d"), { locale: dateLocale });
 }
 
 export function highlightedRange(view: AppView, selectedDate: Date, weekStartsOn: ChronoEonSettings["firstDay"], dayCount = 1) {

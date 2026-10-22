@@ -78,6 +78,10 @@ export function ItemPhotoField({ value, icon, locale, settings, entryDate, busy,
   onChange: (images: string[]) => void; onNotice?: (message: string) => void;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importingRef = useRef(false);
+  const latest = useRef({ value, onChange });
+  latest.current = { value, onChange };
   const dragRef = useRef<number | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
   const suppressPreviewUntil = useRef(0);
@@ -149,14 +153,18 @@ export function ItemPhotoField({ value, icon, locale, settings, entryDate, busy,
         </ul>
       )}
       <div className="item-photo-actions">
-        <button type="button" className="secondary-button" disabled={disabled || busy} onClick={async () => {
+        <button type="button" className="secondary-button" disabled={disabled || busy || importing} onClick={async () => {
+          if (disabled || busy || importingRef.current) return;
+          importingRef.current = true;
+          setImporting(true);
           try {
             const { picked, skipped } = await pickEntryAttachments({ settings, entryDate });
             if (skipped.length) onNotice?.(skipped.join(", "));
-            if (picked.length) onChange([...value, ...picked.map(photo => photo.reference)]);
+            if (picked.length) latest.current.onChange([...new Set([...latest.current.value, ...picked.map(photo => photo.reference)])]);
           } catch { onNotice?.(t("attachmentSaveFailed", locale)); }
+          finally { importingRef.current = false; setImporting(false); }
         }}>
-          <Icon name="image" size={14} />{busy ? t("importExportBusy", locale) : t("itemCoverPick", locale)}
+          <Icon name="image" size={14} />{busy || importing ? t("importExportBusy", locale) : t("itemCoverPick", locale)}
         </button>
       </div>
     </section>

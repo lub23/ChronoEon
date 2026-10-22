@@ -39,6 +39,14 @@ afterEach(() => {
 });
 
 describe("enlarged photo viewer", () => {
+  it("shows missing-photo feedback after a decode failure and can still view another photo", async () => {
+    await render([PHOTO, PHOTO_B], 0);
+    act(() => document.querySelector(".image-preview-main img")!.dispatchEvent(new Event("error")));
+    expect(document.querySelector(".image-preview-main img")).toBeNull();
+    expect(document.querySelector('[role="status"]')?.textContent).not.toBe("");
+    await render([PHOTO, PHOTO_B], 1);
+    expect(document.querySelector(".image-preview-main img")?.getAttribute("src")).toBe(PHOTO_B);
+  });
   it("needs a second photo before it offers the arrows or the film", async () => {
     await render([PHOTO], 0);
     expect(document.querySelectorAll(".image-preview-nav")).toHaveLength(0);

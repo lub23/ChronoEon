@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { attachmentLabel, type ChronoEonSettings, type Locale } from "@chronoeon/domain";
 import { pickEntryAttachments, releaseAttachment } from "../platform/attachments";
 import { isMobilePlatform } from "../hooks/useTouchDevice";
@@ -38,19 +38,24 @@ export function AttachmentField({
   onNotice
 }: AttachmentFieldProps) {
   const [busy, setBusy] = useState(false);
+  const importing = useRef(false);
+  const latest = useRef({ value, onChange });
+  latest.current = { value, onChange };
   const showCamera = camera && isMobilePlatform();
 
   async function add(capture = false) {
-    if (disabled || busy) return;
+    if (disabled || importing.current) return;
+    importing.current = true;
     setBusy(true);
     try {
       const { picked, skipped } = await pickEntryAttachments({ settings, entryDate, capture });
       if (skipped.length) onNotice?.(`${t("attachmentImportFailed", locale)} · ${skipped.join(", ")}`, "warning");
-      if (picked.length) onChange([...value, ...picked.map((item) => item.reference)]);
+      if (picked.length) latest.current.onChange([...new Set([...latest.current.value, ...picked.map((item) => item.reference)])]);
     } catch (error) {
       console.warn("Could not attach photos", error);
       onNotice?.(t("attachmentSaveFailed", locale), "warning");
     } finally {
+      importing.current = false;
       setBusy(false);
     }
   }

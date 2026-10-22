@@ -22,6 +22,24 @@ afterEach(() => {
 });
 
 describe("EntryComposer defaults", () => {
+  it.each(["entry", "item"])("shows saving feedback until an asynchronous %s write finishes", async kind => {
+    let finish!: () => void;
+    const save = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    act(() => root.render(<EntryComposer locale="zh" selectedDate="2026-09-09" editing={null}
+      initialDraft={{ kind: "idea", title: "测试记录" }}
+      initialItemDraft={kind === "item" ? { name: "测试物品", acquisition: "gift" } : null}
+      settings={createDefaultSettings("zh")} onClose={vi.fn()} onDelete={vi.fn()} onSave={save} onSaveItem={save} />));
+    const button = host.querySelector<HTMLButtonElement>('.composer-footer button[type="submit"]')!;
+    await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(save).toHaveBeenCalledOnce();
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toContain("正在保存…");
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    await act(async () => finish());
+    expect(button.disabled).toBe(false);
+    expect(button.textContent).toContain("保存");
+    expect(button.getAttribute("aria-busy")).toBe("false");
+  });
   it("opens a brand-new entry as an event", () => {
     act(() => {
       root.render(

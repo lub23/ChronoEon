@@ -31,6 +31,6 @@ export function AttachmentThumb({ locale, reference }: AttachmentThumbProps) {
     return <span className="attachment-thumb is-missing" aria-label={t("attachmentMissing", locale)}><Icon name="image" size={18} /><small>{label}</small></span>;
   }
   return url
-    ? <img className="attachment-thumb" src={url} alt={t("photoPreview", locale)} loading="lazy" />
+    ? <img className="attachment-thumb" src={url} alt={t("photoPreview", locale)} loading="lazy" onError={() => setFailed(true)} />
     : <span className="attachment-thumb is-loading" aria-label={t("loading", locale)} />;
 }

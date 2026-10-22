@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { MotionPresence, createMotionPortal as createPortal } from "./MotionPresence";
 import { Icon } from "./Icon";
+import { useModalDismiss } from "./modalLayer";
 
 export interface GlassSelectOption {
   value: string;
@@ -65,6 +66,11 @@ export function GlassSelect(props: GlassSelectProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const baseId = useId();
   const selected = options.find((option) => selectedValues.has(option.value));
+  useModalDismiss(event => {
+    event.preventDefault();
+    triggerRef.current?.focus({ preventScroll: true });
+    setOpen(false);
+  }, open);
 
   const place = () => {
     const trigger = triggerRef.current;
@@ -110,19 +116,11 @@ export function GlassSelect(props: GlassSelectProps) {
       if (rootRef.current?.contains(target) || popupRef.current?.contains(target)) return;
       setOpen(false);
     };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      triggerRef.current?.focus();
-      setOpen(false);
-    };
     window.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", onKey);
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     return () => {
       window.removeEventListener("pointerdown", close);
-      window.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
@@ -150,6 +148,7 @@ export function GlassSelect(props: GlassSelectProps) {
   }
 
   function onTriggerKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (event.nativeEvent.isComposing || !options.length) return;
     if (!open && ["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
       event.preventDefault();
       setActiveIndex(flatIndex(options, firstValue));
@@ -195,6 +194,7 @@ export function GlassSelect(props: GlassSelectProps) {
           type="button"
           id={optionId(baseId, index)}
           role="option"
+          tabIndex={-1}
           aria-selected={isSelected}
           className={[
             "glass-select-option",
@@ -202,6 +202,7 @@ export function GlassSelect(props: GlassSelectProps) {
             index === activeIndex ? "is-active" : "",
           ].filter(Boolean).join(" ")}
           onPointerEnter={() => setActiveIndex(index)}
+          onPointerDown={event => event.preventDefault()}
           onClick={() => select(index)}
         >
           {props.multiple && <span className={isSelected ? "glass-select-checkbox is-checked" : "glass-select-checkbox"} aria-hidden="true">
@@ -227,12 +228,13 @@ export function GlassSelect(props: GlassSelectProps) {
       <button
         ref={triggerRef}
         type="button"
+        role="combobox"
         disabled={disabled}
         className="glass-select-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? `${baseId}-listbox` : undefined}
-        aria-activedescendant={open ? optionId(baseId, activeIndex) : undefined}
+        aria-activedescendant={open && options[activeIndex] ? optionId(baseId, activeIndex) : undefined}
         aria-label={ariaLabel}
         onClick={() => setOpen((current) => !current)}
         onKeyDown={onTriggerKeyDown}

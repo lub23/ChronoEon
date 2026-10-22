@@ -28,6 +28,7 @@ export function TagInput({ value = [], available, onChange, locale }: {
     return [...new Set(available)].filter((tag) => !selected.has(tag.toLocaleLowerCase())
       && tag.toLocaleLowerCase().includes(query)).sort((a, b) => a.localeCompare(b)).slice(0, 8);
   }, [available, text]);
+  const activeIndex = Math.min(active, Math.max(0, suggestions.length - 1));
   function change(next: string) {
     setText(next);
     const tags = parseTags(next);
@@ -35,7 +36,8 @@ export function TagInput({ value = [], available, onChange, locale }: {
     onChange(tags.length ? tags : undefined);
     setActive(0);
   }
-  function choose(tag: string) {
+  function choose(tag: string | undefined) {
+    if (!tag) return;
     const parts = text.split(/[,，]/); parts.pop();
     change([...parseTags(parts.join(",")), tag].join(", ") + ", ");
     setOpen(false);
@@ -46,23 +48,23 @@ export function TagInput({ value = [], available, onChange, locale }: {
   return <div className="tag-input">
     <input ref={input} role="combobox" aria-label={t("tags", locale)} aria-autocomplete="list"
       aria-expanded={expanded} aria-controls={expanded ? id : undefined}
-      aria-activedescendant={expanded ? `${id}-${active}` : undefined} autoComplete="off"
+      aria-activedescendant={expanded ? `${id}-${activeIndex}` : undefined} autoComplete="off"
       value={text} placeholder={t("tagsPlaceholder", locale)}
       onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
       onChange={(event) => { change(event.target.value); setOpen(true); }}
       onKeyDown={(event) => {
         if (event.nativeEvent.isComposing) return;
         if (expanded && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-          event.preventDefault(); setActive((index) => (index + (event.key === "ArrowDown" ? 1 : -1) + suggestions.length) % suggestions.length);
+          event.preventDefault(); setActive((activeIndex + (event.key === "ArrowDown" ? 1 : -1) + suggestions.length) % suggestions.length);
         } else if (expanded && event.key === "Enter") {
-          event.preventDefault(); event.stopPropagation(); choose(suggestions[active]);
+          event.preventDefault(); event.stopPropagation(); choose(suggestions[activeIndex]);
         } else if (expanded && event.key === "Escape") {
           event.preventDefault(); event.stopPropagation(); setOpen(false);
         }
       }} />
     {expanded && <div id={id} className="tag-suggestions" role="listbox" aria-label={t("existingTags", locale)}>
       {suggestions.map((tag, index) => <button type="button" role="option" id={`${id}-${index}`} key={tag}
-        aria-selected={index === active} onPointerDown={(event) => event.preventDefault()}
+        tabIndex={-1} aria-selected={index === activeIndex} onPointerDown={(event) => event.preventDefault()}
         onClick={() => choose(tag)}>#{tag}</button>)}
     </div>}
   </div>;

@@ -991,7 +991,7 @@ export function EntryComposer({
                 ? <button className="danger-button" type="button" disabled={deleting || itemBusy} onClick={() => void remove()}><Icon name="trash" size={16} />{t("delete", locale)}</button>
                 : <span />
               : source ? <button className="danger-button" type="button" disabled={deleting || submitting} onClick={() => void remove()}><Icon name="trash" size={16} />{t(recurringSeries ? "deleteSeries" : "delete", locale)}</button> : <span />}
-            <div><button className="primary-action" type="submit" disabled={deleting || (activeKind === "item" ? itemBusy : submitting)}>{t(occurrenceOnly ? "moveOccurrence" : "save", locale)}<Icon name="arrow-right" size={16} /></button></div>
+            <div><button className="primary-action" type="submit" aria-busy={activeKind === "item" ? itemBusy : submitting} disabled={deleting || (activeKind === "item" ? itemBusy : submitting)}>{t((activeKind === "item" ? itemBusy : submitting) ? "saving" : occurrenceOnly ? "moveOccurrence" : "save", locale)}<Icon name="arrow-right" size={16} /></button></div>
             </>}
           </footer>
         </form>

@@ -135,8 +135,9 @@ export function ImagePreview({ locale, items, index, onIndexChange, onClose }: I
           }}
         >
           {url
-            ? <img key={index} className="image-preview-image" src={url} alt="" draggable={false} />
-            : <span className="image-preview-loading">{active in urls ? t("attachmentMissing", locale) : t("loading", locale)}</span>}
+            ? <img key={active} className="image-preview-image" src={url} alt="" draggable={false}
+                onError={() => setUrls(current => ({ ...current, [active]: "" }))} />
+            : <span className="image-preview-loading" role="status">{active in urls ? t("attachmentMissing", locale) : t("loading", locale)}</span>}
         </div>
         {steppable && (
           <button type="button" className="image-preview-nav is-next" onClick={() => step(1)} aria-label={t("next", locale)}>›</button>

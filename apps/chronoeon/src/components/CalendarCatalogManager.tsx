@@ -83,9 +83,12 @@ export function CalendarCatalogManager({
 
   function confirmEdit() {
     if (!draft) return;
+    const name = draft.name.trim();
+    if (!name) { nameInputRef.current?.focus(); return; }
+    const normalized = { ...draft, name };
     onChange(calendars.some(calendar => calendar.id === draft.id)
-      ? calendars.map(calendar => calendar.id === draft.id ? draft : calendar)
-      : [...calendars, draft]);
+      ? calendars.map(calendar => calendar.id === draft.id ? normalized : calendar)
+      : [...calendars, normalized]);
     onSelect?.(draft.id);
     setDraft(null);
   }
@@ -153,18 +156,19 @@ export function CalendarCatalogManager({
                 value={editing.name}
                 aria-label={t("calendarName", locale)}
                 onChange={(event) => patch(editing.id, (current) => ({ ...current, name: event.target.value }))}
-                onBlur={(event) => {
-                  const value = event.target.value.trim();
-                  if (!value) patch(editing.id, (current) => ({ ...current, name: t("categoryUntitled", locale) }));
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    confirmEdit();
+                  }
                 }}
-                onKeyDown={(event) => { if (event.key === "Enter") confirmEdit(); }}
               />
             </label>
 
             <footer>
               {isCreating ? (
                 <>
-                  <button type="button" className="primary-action" onClick={confirmEdit}><Icon name="check" size={14} />{t("confirmAction", locale)}</button>
+                  <button type="button" className="primary-action" disabled={!editing.name.trim()} onClick={confirmEdit}><Icon name="check" size={14} />{t("confirmAction", locale)}</button>
                 </>
               ) : <>
               <button
@@ -184,7 +188,7 @@ export function CalendarCatalogManager({
                   <Icon name="check" size={14} />{t("setDefaultCalendar", locale)}
                 </button>
               )}
-              <button type="button" className="primary-action" onClick={confirmEdit}><Icon name="check" size={14} />{t("confirmAction", locale)}</button>
+              <button type="button" className="primary-action" disabled={!editing.name.trim()} onClick={confirmEdit}><Icon name="check" size={14} />{t("confirmAction", locale)}</button>
               </>}
             </footer>
           </section>

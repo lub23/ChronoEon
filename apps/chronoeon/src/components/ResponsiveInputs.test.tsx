@@ -21,6 +21,20 @@ function type(input: HTMLInputElement, value: string) {
 }
 
 describe("responsive inputs", () => {
+  it("keeps a valid active tag after candidates shrink and ignores IME Enter", () => {
+    const change = vi.fn();
+    const renderTags = (available: string[]) => act(() => root.render(<TagInput available={available} onChange={change} locale="zh" />));
+    renderTags(["alpha", "beta", "gamma"]);
+    const input = host.querySelector("input")!;
+    act(() => input.focus());
+    for (let i = 0; i < 2; i++) act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
+    renderTags(["alpha"]);
+    expect(document.getElementById(input.getAttribute("aria-activedescendant")!)?.textContent).toBe("#alpha");
+    act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true, cancelable: true })));
+    expect(change).not.toHaveBeenCalled();
+    act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+    expect(change).toHaveBeenLastCalledWith(["alpha"]);
+  });
   it("searches existing tags without losing the unfinished token or delimiter", () => {
     const onChange = vi.fn();
     function Tags() { const [value, setValue] = useState<string[]>(); return <TagInput value={value} available={["工作", "工作/项目", "日记"]} locale="zh" onChange={(next) => { setValue(next); onChange(next); }} />; }

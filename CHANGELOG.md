@@ -3,6 +3,10 @@
 ## 3.0.2 — 2026-10-19
 
 ### English
+- UX review: keep select popups on the modal dismissal stack with one keyboard focus stop; show years for cross-year/historical dates and clear saving feedback in record/asset editors.
+- Give photo removal a 44px touch target while keeping its compact appearance; show a missing-photo state when image bytes cannot load.
+- Fix arrow-key navigation across mixed search results, tag completion after candidate updates, and calendar name validation/Chinese IME submission.
+- Merge photo imports into the latest selection with deduplication and an in-flight lock; keep the interface usable when preference storage is denied or full, and remove obsolete preference-key reads.
 - Day and week views project the visible range once instead of rescanning every entry per day; chat message bubbles no longer re-render for each draft keystroke and search filtering is deferred.
 - Dialogs trap Tab and return focus to the control that opened them; Escape and Android back still close exactly one layer.
 - Sync reuses the attachment hash set for five minutes, skips unchanged rows when applying a snapshot, prefetches entity states during flush and writes the sequence/lamport counters once per flush.
@@ -11,6 +15,10 @@
 - Move the remaining AI provider and operation-history copy into the shared catalog, remove dead animation/blur CSS left behind by the motion kill switch (about 10 KB in the built stylesheet), and split chat rows, the location input and the toast into focused modules.
 
 ### 简体中文
+- 体验审查：下拉选择器统一接入弹层关闭机制，键盘仅停留在触发器；跨年及非当前年日期显示年份，记录/物品编辑器明确显示保存中状态。
+- 照片移除按钮提供 44px 触屏区域并保持紧凑外观；图片读取失败显示缺失提示。
+- 修复混排搜索结果方向键导航、候选更新后的标签补全，以及日历名称校验与中文输入法误提交。
+- 照片导入按最新选择合并、去重并防止重复进行；偏好存储被拒绝或配额已满时界面仍可用，移除旧偏好键读取。
 - 日/周视图一次投影可见日期范围，不再逐日重扫全部记录；聊天消息气泡不会因输入框每次按键而重渲染，全局搜索改为延迟过滤。
 - 弹窗限制 Tab 焦点并在关闭后还给触发控件；Escape 与 Android 返回仍只关闭一层。
 - 同步在 5 分钟内复用附件哈希集合，应用快照时跳过未变化的行，flush 时预取实体状态并将 sequence/lamport 计数改为每次 flush 写入一次。

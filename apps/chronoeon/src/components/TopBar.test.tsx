@@ -1,6 +1,18 @@
 // @vitest-environment jsdom
-import { expect, it, vi } from "vitest";
-import { minimumTitlebarWidth } from "./TopBar";
+import { afterEach, expect, it, vi } from "vitest";
+import { headingFor, minimumTitlebarWidth } from "./TopBar";
+afterEach(() => vi.useRealTimers());
+
+it("disambiguates cross-year and historical dates in both languages", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(2026, 9, 22));
+  expect(headingFor("week", new Date(2026, 11, 31), "en", 1)).toBe("Dec 28, 2026 – Jan 3, 2027");
+  expect(headingFor("week", new Date(2026, 11, 31), "zh", 1)).toBe("2026年12月28日 – 2027年1月3日");
+  expect(headingFor("day", new Date(2025, 11, 31), "en", 1, 2)).toBe("Dec 31, 2025 – Jan 1, 2026");
+  expect(headingFor("day", new Date(2025, 9, 22), "zh", 1)).toContain("2025年10月22日");
+  expect(headingFor("day", new Date(2025, 9, 22), "en", 1)).toContain("2025");
+  expect(headingFor("day", new Date(2026, 9, 22), "en", 1)).toBe("Thu, Oct 22");
+});
 it("includes the drawer margin and gaps in the desktop minimum width",()=>{
   const bar=document.createElement("header");bar.style.cssText="padding:4px 10px;column-gap:2px";
   bar.innerHTML='<div class="topbar-mobile-brand" style="margin-right:13px"><button style="width:23px"></button></div><div class="date-navigation"></div><div class="topbar-actions"></div>';
