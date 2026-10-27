@@ -6,7 +6,7 @@ import type { StorageUsage, SyncConfig } from "./types";
 export class NativeSyncBackend implements SyncBackend {
   readonly id: string;
   constructor(private readonly config: SyncConfig) {
-    this.id = JSON.stringify([config.mode,(config.mode === "git" ? config.gitRemote : config.webdavUrl).trim().replace(/\/+$/, ""),config.mode === "webdav" ? config.webdavUsername : ""]);
+    this.id = JSON.stringify(["webdav",config.webdavUrl.trim().replace(/\/+$/, ""),config.webdavUsername]);
   }
   fetch(known: Record<string, string>): Promise<RemoteFetch> {
     return invoke("sync_backend_fetch", { config: this.config, known });

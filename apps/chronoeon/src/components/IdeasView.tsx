@@ -17,7 +17,6 @@ interface IdeasViewProps {
   search: string;
   today: string;
   onEdit: (entry: Entry) => void;
-  onConvert: (id: string, today: string) => void;
   onNew: () => void;
 }
 
@@ -36,7 +35,7 @@ function sealInitial(name: string): string {
   return /[a-z]/i.test(first) ? first.toUpperCase() : first;
 }
 
-export function IdeasView({ entries, locale, settings, search, today, onEdit, onConvert, onNew }: IdeasViewProps) {
+export function IdeasView({ entries, locale, settings, search, today, onEdit, onNew }: IdeasViewProps) {
   const query = search.trim().toLowerCase();
   const ideas = useMemo(() => entries.filter((entry) => entry.kind === "idea" && (!query || entryMatchesSearch(entry, search, locale))), [entries, query, search, locale]);
   const dateLocale = locale === "zh" ? zhCN : enUS;
@@ -77,7 +76,6 @@ export function IdeasView({ entries, locale, settings, search, today, onEdit, on
       >
         <div className="idea-card-top">
           <h3><button type="button" className="idea-title-button" onClick={() => onEdit(entry)}>{titleFor(entry, locale)}</button></h3>
-          <button type="button" className="idea-card-action" onClick={() => onConvert(entry.id, today)} aria-label={t("convertTask", locale)} title={t("convertTask", locale)}><Icon name="arrow-right" size={15} /></button>
           <button type="button" className="idea-card-action" onClick={() => onEdit(entry)} aria-label={t("edit", locale)} title={t("edit", locale)}><Icon name="edit" size={15} /></button>
         </div>
         <div className={locale === "zh" ? "idea-body is-zh" : "idea-body"}>

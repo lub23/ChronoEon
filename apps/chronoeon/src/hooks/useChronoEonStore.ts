@@ -64,20 +64,6 @@ export function useChronoEonStore(settings: ChronoEonSettings = DEFAULT_CHRONOEO
       : entry));
   }, []);
 
-  const convertIdea = useCallback((id: string, date: string) => {
-    setEntries((current) => current.map((entry) => entry.id === id
-      ? {
-          ...entry,
-          kind: "task",
-          date,
-          allDay: true,
-          status: "open" as EntryStatus,
-          color: resolveEntryColor(entry.category, "task", settings, entry.calendar),
-          source: "local"
-        }
-      : entry));
-  }, [settings]);
-
   const mergeImported = useCallback((incoming: Entry[]): number => {
     // Calculate the count before scheduling the state update. React may defer
     // an updater, so returning a counter assigned inside setEntries would make
@@ -106,5 +92,5 @@ export function useChronoEonStore(settings: ChronoEonSettings = DEFAULT_CHRONOEO
     return (a.start ?? "99:99").localeCompare(b.start ?? "99:99");
   }), [entries]);
 
-  return { entries: sorted, add, insert, prepareUpdate, update, remove, toggleTask, convertIdea, mergeImported, replaceEntries, replace };
+  return { entries: sorted, add, insert, prepareUpdate, update, remove, toggleTask, mergeImported, replaceEntries, replace };
 }

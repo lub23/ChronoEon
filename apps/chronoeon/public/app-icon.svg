@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="16" y="16" width="992" height="992" rx="224" fill="#FAF7ED"/>
+  <!-- An open blue time-orbit and a golden sun; the centre is an original
+       rounded seal-script interpretation of 元, the beginning of a cycle. -->
+  <path d="M737 270A330 330 0 1 0 829 420" fill="none" stroke="#2877B5" stroke-width="56" stroke-linecap="round"/>
+  <circle cx="817" cy="324" r="35" fill="#E9B83E"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="54">
+    <path d="M420 350H604M354 462H670" stroke="#E9B83E"/>
+    <path d="M455 464C455 581 418 651 354 688M574 464V628Q574 679 626 679H654Q695 679 695 638" stroke="#2877B5"/>
+  </g>
+</svg>

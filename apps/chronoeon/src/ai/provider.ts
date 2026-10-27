@@ -9,7 +9,7 @@ export type AIProviderPreset = "compatible" | "openai" | "deepseek" | "gemini" |
 export interface AIProviderProfile extends AIProviderConfig { id: string; name: string; preset: AIProviderPreset; }
 export interface AIAskPreferences { thinking: boolean; mode: "ai"; }
 
-/** 随心记 is always the on-device parser. */
+/** Text uses on-device parsing; images and explicit refinement use the active AI. */
 export interface AICapturePreferences {
   mode: CaptureParseMode;
 }

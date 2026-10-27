@@ -97,22 +97,5 @@ describe("ViewDock", () => {
     expect(handlers.onQuickNote).toHaveBeenCalledTimes(1);
   });
 
-  it("mini keeps the list, day, quick note, ideas, timer and restore actions only", () => {
-    const onRestore = vi.fn();
-    render({ mini: true, onRestore, activeView: "day", dayCount: 2, filterControl: <button aria-label="筛选条目" /> });
-    expect(host.querySelector("nav > button")?.getAttribute("aria-label")).toBe("筛选条目");
-    expect(host.querySelector('[aria-label="月历"]')).toBeNull();
-    expect(host.querySelector(".view-dock")?.classList.contains("is-mini")).toBe(true);
-    expect(host.querySelector('[aria-label="统计"]')).toBeNull();
-    expect(host.querySelector('[aria-label="灵感"]')).toBeTruthy();
-    expect(host.querySelector('[aria-label="还原"]')).toBeTruthy();
 
-    act(() => { host.querySelector<HTMLButtonElement>('[aria-label="日视图 · 2"]')!.click(); });
-    const menu = host.querySelector<HTMLElement>(".view-dock-days-menu")!;
-    expect([...menu.querySelectorAll("button")].map((button) => button.textContent?.trim()))
-      .toEqual(["1 天", "2 天", "3 天"]);
-
-    act(() => { host.querySelector<HTMLButtonElement>('[aria-label="还原"]')!.click(); });
-    expect(onRestore).toHaveBeenCalledTimes(1);
-  });
 });

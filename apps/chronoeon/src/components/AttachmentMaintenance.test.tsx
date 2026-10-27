@@ -16,7 +16,7 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
-const journal = { attachmentHashes: vi.fn(async () => ["a".repeat(64)]) } as unknown as SyncStore;
+const journal = { maintainAttachments: vi.fn(async (collect: (hashes: string[]) => Promise<unknown>) => collect(["a".repeat(64)])) } as unknown as SyncStore;
 const flush = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
 
 it("previews unused photos and only deletes after confirmation", async () => {

@@ -19,7 +19,6 @@ interface SidebarProps {
   onInsightsTabChange?: (tab: InsightsTab) => void;
   onCollapsedChange: (collapsed: boolean) => void;
   onNew: () => void;
-  onCompact: () => void;
   onOpenSettings: () => void;
 }
 
@@ -43,7 +42,6 @@ export function Sidebar({
   onInsightsTabChange,
   onCollapsedChange,
   onNew,
-  onCompact,
   onOpenSettings,
 }: SidebarProps) {
   const touchDevice = useTouchDevice();
@@ -236,9 +234,6 @@ export function Sidebar({
 
       <div className="sidebar-spacer" />
 
-      <button type="button" className="sidebar-utility" onClick={onCompact} aria-label={label("miniWindow")} title={label("miniWindow")}>
-        <Icon name="pin" size={15} />{!collapsed && <span>{t("miniWindow", locale)}</span>}
-      </button>
       <button type="button" className="sidebar-utility" onClick={onOpenSettings} aria-label={label("settings")} title={label("settings")}>
         <Icon name="settings" size={15} />{!collapsed && <span>{t("settings", locale)}</span>}
         {!collapsed && !touchDevice && <kbd>{formatAccelerator("Control+,")}</kbd>}

@@ -92,7 +92,7 @@ describe("seven-day snapshot wake-ups", () => {
     await vi.advanceTimersByTimeAsync(1); expect(f.engine.run).toHaveBeenCalledTimes(2 + polls);
     f.scheduler.dispose();
   });
-  it("polls the remote index each minute so online peers receive changes",async()=>{
+  it("polls the remote index every five minutes so online peers receive changes",async()=>{
     vi.useFakeTimers(); const f=fixture(); f.scheduler.start(); await vi.advanceTimersByTimeAsync(0);
     expect(f.engine.run).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(REMOTE_POLL_MS - 1); expect(f.engine.run).toHaveBeenCalledTimes(1);

@@ -9,7 +9,6 @@ import { isTauri } from "./desktop";
  */
 
 export const DEFAULT_CAPTURE_SHORTCUT = "CommandOrControl+Shift+Space";
-export const DEFAULT_MINI_SHORTCUT = "CommandOrControl+Shift+M";
 
 export type ShortcutRegistration =
   | { status: "registered"; accelerator: string }
@@ -90,14 +89,7 @@ export function unregisterCaptureShortcut(): Promise<void> {
   return unregisterNamed("capture");
 }
 
-/** Global mini window: enter the mini window, or show/hide it when already compact. */
-export function registerMiniShortcut(accelerator: string, onTrigger: () => void): Promise<ShortcutRegistration> {
-  return registerNamed("mini", accelerator, onTrigger);
-}
 
-export function unregisterMiniShortcut(): Promise<void> {
-  return unregisterNamed("mini");
-}
 
 /** Human-readable accelerator using the symbols of the current platform. */
 export function formatAccelerator(accelerator: string, platform = navigator.platform): string {

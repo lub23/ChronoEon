@@ -8,6 +8,35 @@ import { openMemoryStore } from "./helpers";
 
 afterEach(() => vi.useRealTimers());
 
+it("attachment maintenance protects local items and unsaved reviews without enabling sync", async () => {
+  const { backend } = await openMemoryStore();
+  const sync = new SyncStore(backend);
+  const itemHash = "a".repeat(64), reviewHash = "b".repeat(64);
+  const items = new SqliteItemStore(backend);
+  await items.save(draftToItem({ name: "Local camera", calendarId: "default", category: "electronics", acquisition: "purchase", acquiredOn: "2026-10-01", acquiredAt: "09:00", cost: 100, currency: "CNY", images: [`attachments/${itemHash}.webp`] }), DEFAULT_CHRONOEON_SETTINGS);
+  const chat = new AiConversationStore(backend);
+  const conversation = await chat.createConversation({ providerKind:"openai-compatible",baseUrl:"",model:"offline",mode:"capture",title:"Pending" });
+  const message = await chat.appendMessage(conversation.id, {role:"assistant",content:"Review"});
+  await chat.saveCaptureReview({ conversationId:conversation.id,messageId:message.id,source:"image",drafts:[{draft:{images:[`attachments/${reviewHash}.webp`]}}],edited:true,saved:false,updatedAt:new Date().toISOString() });
+  const hashes = await sync.maintainAttachments(async hashes => hashes);
+  expect(hashes).toContain(itemHash); expect(hashes).toContain(reviewHash);
+  expect(await sync.attachmentHashes()).not.toContain(reviewHash);
+  await backend.close();
+});
+
+it("attachment cleanup holds the write queue until the native deletion finishes", async () => {
+  const { backend, store } = await openMemoryStore(); const sync = new SyncStore(backend);
+  let release!: () => void; let entered!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const collecting = sync.maintainAttachments(async () => { entered(); await gate; });
+  await started;
+  let saved = false; const write = store.create(entry()).then(() => { saved = true; });
+  await Promise.resolve(); expect(saved).toBe(false);
+  release(); await collecting; await write; expect(saved).toBe(true);
+  await backend.close();
+});
+
 class MemoryBackend implements SyncBackend {
   readonly id = createEntryId();
   index: RemoteIndex | null = null;

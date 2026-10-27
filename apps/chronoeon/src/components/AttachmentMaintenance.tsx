@@ -23,8 +23,7 @@ export function AttachmentMaintenance({ locale, journal, onChanged }: {
     setBusy(true);
     setMessage(null);
     try {
-      const hashes = await journal.attachmentHashes();
-      const preview = await pruneUnreferencedAttachments(hashes, MINIMUM_AGE_MS, false);
+      const preview = await journal.maintainAttachments(hashes => pruneUnreferencedAttachments(hashes, MINIMUM_AGE_MS, false));
       if (!preview.files) {
         setMessage({ ok: true, text: t("attachmentCleanupNone", locale) });
         return;
@@ -36,7 +35,7 @@ export function AttachmentMaintenance({ locale, journal, onChanged }: {
         tone: "danger",
       });
       if (!approved) return;
-      const removed = await pruneUnreferencedAttachments(hashes, MINIMUM_AGE_MS, true);
+      const removed = await journal.maintainAttachments(hashes => pruneUnreferencedAttachments(hashes, MINIMUM_AGE_MS, true));
       setMessage({
         ok: true,
         text: `${t("attachmentCleanupDone", locale)} ${removed.files} ${t("attachmentCleanupFiles", locale)} · ${formatBytes(removed.bytes, locale)}`,

@@ -18,7 +18,7 @@ function type(label: string, text: string) {
   act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text); input.dispatchEvent(new Event("input", { bubbles: true })); });
 }
 
-it("saves one provider with its key and headers, while capture stays offline", async () => {
+it("saves credentials separately and explains automatic image routing", async () => {
   let latest = DEFAULT_AI_PROVIDER_PREFERENCES;
   function Panel() {
     const [preferences, set] = useState(DEFAULT_AI_PROVIDER_PREFERENCES);
@@ -39,7 +39,8 @@ it("saves one provider with its key and headers, while capture stays offline", a
   expect(JSON.stringify(latest)).not.toContain("secret");
   expect(host.textContent).not.toContain("Archived");
   const modes = [...host.querySelectorAll<HTMLButtonElement>(".ai-parsing-settings .settings-segmented button")];
-  expect(modes.map(value => [value.textContent, value.disabled])).toEqual([["Offline", false], ["AI", true], ["Offline", true], ["AI", false]]);
+  expect(modes).toHaveLength(0);
+  expect(host.textContent).toContain("Text parses automatically on device");
 });
 
 it("does not replace an active provider until its replacement passes the test", async () => {

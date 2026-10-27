@@ -118,13 +118,8 @@ export function AISettingsPanel({ locale, preferences, onChange, onTest }: Props
     {busy && <p role="status" className="settings-footnote">{t("aiProviderWorking", locale)}</p>}
     {result && <p role={result.ok ? "status" : "alert"} className={`settings-footnote ${result.ok ? "is-success" : "is-error"}`}>{result.text}</p>}
     <div className="ai-parsing-settings">
-      {(["capture", "ask"] as const).map(surface => <div className="settings-option" key={surface}>
-        <strong>{t(surface === "capture" ? "quickNote" : "aiChatTitle", locale)}</strong>
-        <div className="settings-segmented" role="group" aria-label={t(surface === "capture" ? "quickNote" : "aiChatTitle", locale)}>
-          <button type="button" disabled={surface !== "capture"} className={surface === "capture" ? "is-active" : ""} aria-pressed={surface === "capture"}>{t("aiProviderOffline", locale)}</button>
-          <button type="button" disabled={surface !== "ask"} className={surface === "ask" ? "is-active" : ""} aria-pressed={surface === "ask"}>{t("aiProviderAI", locale)}</button>
-        </div>
-      </div>)}
+      <div className="settings-option"><span className="settings-option-copy"><strong>{t("quickNote", locale)}</strong><small>{t("aiCaptureRouting", locale)}</small></span></div>
+      <div className="settings-option"><span className="settings-option-copy"><strong>{t("aiChatTitle", locale)}</strong><small>{t("aiAskRouting", locale)}</small></span></div>
       <label className="settings-toggle-row"><span className="settings-option-copy"><strong>{t("aiAskThinking", locale)}</strong></span>
         <span className={preferences.ask.thinking ? "settings-switch is-on" : "settings-switch"} aria-hidden="true"><i /></span>
         <input type="checkbox" checked={preferences.ask.thinking} onChange={event => onChange({ ...preferences, ask: { ...preferences.ask, thinking: event.target.checked } })} aria-label={t("aiAskThinking", locale)} />

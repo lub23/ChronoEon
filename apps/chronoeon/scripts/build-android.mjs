@@ -20,7 +20,7 @@
  *   CHRONOEON_KEYSTORE_PASSWORD      store + key password   (default: android)
  *   CHRONOEON_KEY_ALIAS              key alias              (default: androiddebugkey)
  *   CHRONOEON_SKIP_CARGO=1           reuse the existing Rust library. Needed when
- *                                    `perl` is absent: git2 vendors OpenSSL, whose
+ *                                    `perl` is absent: Android vendors OpenSSL, whose
  *                                    Configure step is a Perl script.
  *
  * Usage: npm run android:apk
@@ -95,7 +95,7 @@ if (process.env.CHRONOEON_SKIP_CARGO === "1") {
   }
   console.log("\n▸ Rust library\n  skipped (CHRONOEON_SKIP_CARGO=1): reusing the built library");
 } else if (!process.env.CHRONOEON_PERL && !hasCommand("perl")) {
-  fail("`perl` is not on PATH. The Rust library vendors OpenSSL (git2), whose Configure step is a Perl script.\n"
+  fail("`perl` is not on PATH. The Rust library vendors OpenSSL, whose Configure step is a Perl script.\n"
     + "  Install Strawberry Perl, set CHRONOEON_PERL to its bin folder, or set CHRONOEON_SKIP_CARGO=1 to repackage the existing library.");
 } else {
   // cargo does not track Android-only build-script environment. On a fresh

@@ -15,19 +15,11 @@ interface ViewDockProps {
   dayCount: number;
   /** Insights content type; the Dock owns this switch so no extra toolbar is needed. */
   insightsTab?: InsightsTab;
-  /**
-   * Mini window: the same dock minus the week, month, 4/5/6-day and
-   * statistics entries, plus the "restore the normal window" action.
-   */
-  mini?: boolean;
   onViewChange: (view: AppView) => void;
   onDayCountChange: (days: number) => void;
   onInsightsTabChange?: (tab: InsightsTab) => void;
-  /** Mini only: the shared filter trigger occupies the old New slot. */
-  filterControl?: ReactNode;
   onTimer: () => void;
   onQuickNote: () => void;
-  onRestore?: () => void;
   /** Floating content anchored above the dock's timer button (the live pill). */
   children?: ReactNode;
 }
@@ -40,7 +32,6 @@ const dockItems: Array<{ view: PlainView; icon: IconName; label: "agenda" | "ide
 ];
 
 const FULL_DAY_OPTIONS = [1, 2, 3, 4, 5, 6];
-const MINI_DAY_OPTIONS = [1, 2, 3];
 /** A single centered add mark. */
 function QuickNoteGlyph() {
   return (
@@ -61,14 +52,11 @@ export function ViewDock({
   timerActive = false,
   dayCount,
   insightsTab = "bills",
-  mini = false,
   onViewChange,
   onDayCountChange,
   onInsightsTabChange,
-  filterControl,
   onTimer,
   onQuickNote,
-  onRestore,
   children,
 }: ViewDockProps) {
   const [switchOpen, setSwitchOpen] = useState(false);
@@ -78,7 +66,7 @@ export function ViewDock({
   const calendarActive = activeView === "day" || activeView === "week";
   const calendarIcon: IconName = calendarView === "week" ? "week" : "day";
   const calendarLabel = calendarView === "week" ? t("week", locale) : t("day", locale);
-  const dayOptions = mini ? MINI_DAY_OPTIONS : FULL_DAY_OPTIONS;
+  const dayOptions = FULL_DAY_OPTIONS;
 
   useEffect(() => {
     if (!switchOpen) return;
@@ -111,8 +99,7 @@ export function ViewDock({
   }, [insightsOpen]);
   useEffect(() => { if (activeView !== "insights") setInsightsOpen(false); }, [activeView]);
   return (
-    <nav className={`view-dock is-icon-only${mini ? " is-mini" : ""}`} aria-label={t("views", locale)}>
-      {mini && filterControl && <>{filterControl}<span className="view-dock-divider" aria-hidden="true" /></>}
+    <nav className="view-dock is-icon-only" aria-label={t("views", locale)}>
       <div className="view-dock-views">
         <button
           className={activeView === "agenda" ? "view-dock-item is-active" : "view-dock-item"}
@@ -156,7 +143,7 @@ export function ViewDock({
                   {locale === "zh" ? `${count} 天` : count === 1 ? "1 day" : `${count} days`}
                 </button>
               ))}
-              {!mini && <>
+              <>
                 <span className="view-dock-menu-separator" aria-hidden="true" />
                 {([["week", "week", "week"]] as const).map(([view, icon, label]) => (
                   <button
@@ -172,17 +159,17 @@ export function ViewDock({
                     {t(label, locale)}
                   </button>
                 ))}
-              </>}
+              </>
             </div>
           )}</MotionPresence>
         </div>
 
-        {!mini && <button
+        <button
           className={activeView === "month" ? "view-dock-item is-active" : "view-dock-item"}
           type="button"
           onClick={() => { setSwitchOpen(false); onViewChange("month"); }}
           aria-label={t("month", locale)} aria-current={activeView === "month" ? "page" : undefined} title={t("month", locale)}
-        ><Icon name="month" size={18} /></button>}
+        ><Icon name="month" size={18} /></button>
 
         <button
           className="view-dock-item view-dock-quicknote"
@@ -194,7 +181,7 @@ export function ViewDock({
           <QuickNoteGlyph />
         </button>
 
-        {dockItems.filter((item) => !(mini && item.view === "insights")).map((item) => item.view === "insights"
+        {dockItems.map((item) => item.view === "insights"
           ? <div key={item.view} className="view-dock-day-group" ref={insightsGroupRef}>
               <button
                 className={activeView === item.view ? "view-dock-item is-active" : "view-dock-item"}
@@ -245,17 +232,6 @@ export function ViewDock({
       >
         <Icon name="timer" size={17} />
       </button>
-      {mini && onRestore && (
-        <button
-          className="view-dock-action"
-          type="button"
-          onClick={onRestore}
-          aria-label={t("restore", locale)}
-          title={t("restore", locale)}
-        >
-          <Icon name="restore" size={17} />
-        </button>
-      )}
       {children}
     </nav>
   );

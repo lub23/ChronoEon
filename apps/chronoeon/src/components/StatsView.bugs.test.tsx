@@ -104,7 +104,7 @@ describe("bill category split", () => {
       );
     });
 
-    expect(host.querySelector(".stats-page .page-title-row h2")?.textContent).toContain("Numbers, with a clear mind");
+    expect(host.querySelector(".stats-page .page-title-row h2")?.textContent).toContain("Surplus and need, weighed");
     expect(host.querySelectorAll(".stats-custom-range .glass-date-picker")).toHaveLength(2);
     expect(host.querySelector(".heatmap-cell.is-today")?.getAttribute("aria-label")).toContain("2026-09-01");
   });

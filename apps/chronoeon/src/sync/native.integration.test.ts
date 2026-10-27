@@ -48,6 +48,12 @@ function webdavServer() {
       if((req.headers["if-none-match"] && old)||(req.headers["if-match"] && req.headers["if-match"]!==etag)){res.writeHead(412).end();return;}
       files.set(key,body);res.writeHead(201,{ETag:`"${createHash("sha256").update(body).digest("hex")}"`}).end();return;
     }
+    if(req.method==="MOVE") {
+      const destination=new URL(String(req.headers.destination)).pathname;
+      if(files.has(destination)){res.writeHead(412).end();return;}
+      if(!old){res.writeHead(404).end();return;}
+      files.set(destination,old);files.delete(key);res.writeHead(201).end();return;
+    }
     if(req.method==="GET"){if(old)res.writeHead(200,{ETag:etag!,"Content-Length":old.length}).end(old);else res.writeHead(404).end();return;}
     if(req.method==="DELETE"){if(deletionPause?.path===key){const pause=deletionPause;deletionPause=null;pause.entered();await pause.resume;}files.delete(key);res.writeHead(204).end();return;}
     res.writeHead(405).end();
@@ -58,7 +64,7 @@ function webdavServer() {
   }};
 }
 
-describe.skipIf(!executable)("real native Git/WebDAV + Zstd + SQLite round trip",()=>{
+describe.skipIf(!executable)("real native WebDAV + Zstd + SQLite round trip",()=>{
   afterEach(() => vi.useRealTimers());
   let host:Host;let root:string;const hosts:Host[]=[];const databases:MemorySqliteBackend[]=[];
   beforeAll(async()=>{root=await mkdtemp(path.join(tmpdir(),"chronoeon-native-sync-"));host=new Host();});
@@ -67,22 +73,21 @@ describe.skipIf(!executable)("real native Git/WebDAV + Zstd + SQLite round trip"
     if(!path.resolve(root).startsWith(path.resolve(tmpdir())+path.sep)||!path.basename(root).startsWith("chronoeon-native-sync-"))throw new Error("Unsafe test cleanup path");
     await rm(root,{recursive:true,force:true});
   });
-  it.each(["git","webdav"] as const)("rebuilds a device, merges offline edits/messages and compacts safely using %s",async(mode)=>{
+  it.each(["webdav"] as const)("rebuilds a device, merges offline edits/messages and compacts safely using %s",async(mode)=>{
     const folder=path.join(root,mode);await mkdir(folder,{recursive:true});
     const dav=webdavServer();let url="";
     if(mode==="webdav"){
       await new Promise<void>((resolve)=>dav.server.listen(0,"127.0.0.1",resolve));
       const address=dav.server.address() as {port:number};url=`http://127.0.0.1:${address.port}/ChronoEon/`;
     }
-    const remote=path.join(folder,"remote.git");if(mode==="git")execFileSync("git",["init","--bare","--initial-branch=main",remote],{windowsHide:true,stdio:"pipe"});
-    const config:SyncConfig={mode,gitRemote:remote,gitToken:"",webdavUrl:url,webdavUsername:"test",webdavPassword:"test"};
+    const config:SyncConfig={webdavUrl:url,webdavUsername:"test",webdavPassword:"test"};
     let now=new Date("2026-09-07T12:00:00Z");
     vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now);
     async function device(name:string){
       const cache=path.join(folder,name,"cache");const images=path.join(folder,name,"attachments");await mkdir(images,{recursive:true});
       const db=await MemorySqliteBackend.open([]);databases.push(db);const store=await SqliteEntryStore.create(db);const sync=new SyncStore(db);
       const worker=new Host();hosts.push(worker);
-      const backend:SyncBackend={id:`${mode}:${mode==="git"?remote:url}`,fetch:(known)=>worker.request<RemoteFetch>({op:"fetch",config,cache,images,known}),publish:(publication)=>worker.request<{conflict:boolean}>({op:"publish",config,cache,images,publication})};
+      const backend:SyncBackend={id:`webdav:${url}`,fetch:(known)=>worker.request<RemoteFetch>({op:"fetch",config,cache,images,known}),publish:(publication)=>worker.request<{conflict:boolean}>({op:"publish",config,cache,images,publication})};
       const engine=new SyncEngine(sync,backend,{deviceName:name,now:()=>now});return{cache,images,store,sync,engine,chat:new AiConversationStore(db),backend};
     }
     try {
@@ -131,12 +136,7 @@ describe.skipIf(!executable)("real native Git/WebDAV + Zstd + SQLite round trip"
         expect(dav.files.has(`/ChronoEon/${reference}`)).toBe(true);
       } else await b.engine.run();
       const afterAck=await b.backend.fetch(await b.sync.knownDocuments());expect(afterAck.index!.retired).toEqual([]);
-      if(mode==="git"){
-        const files=execFileSync("git",["--git-dir",remote,"ls-tree","-r","--name-only","main"],{encoding:"utf8",windowsHide:true});
-        expect(files).not.toMatch(/\.db|\.sqlite|data\//);expect(files).not.toContain(reference);
-        expect(files.split("\n").filter(Boolean).every((file)=>file==="index.json"||file.endsWith(".jsonl.zst")||/^attachments\/[a-f0-9]{64}\.webp$/.test(file))).toBe(true);
-        expect(execFileSync("git",["--git-dir",path.join(a.cache,"git"),"config","--get","rerere.enabled"],{encoding:"utf8",windowsHide:true}).trim()).toBe("true");
-      }
+
     } finally {if(mode==="webdav"){dav.server.closeAllConnections();await new Promise<void>((resolve)=>dav.server.close(()=>resolve()));}}
   },90000);
 });

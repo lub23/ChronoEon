@@ -148,7 +148,7 @@ describe("app: create flow (browser demo)", () => {
     window.localStorage.setItem("chronoeon.preference.view", JSON.stringify("insights"));
     act(() => { root.render(<App />); });
     await flush(150);
-    expect(host.textContent).toContain("澄怀观数");
+    expect(host.textContent).toContain("权衡盈虚");
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, cancelable: true }));

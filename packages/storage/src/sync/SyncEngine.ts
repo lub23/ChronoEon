@@ -17,7 +17,7 @@ export interface RemoteIndex {
 }
 export interface RemoteFetch { head: string | null; index: RemoteIndex | null; documents: SyncDocument[] }
 export interface Publication { expectedHead: string | null; index: RemoteIndex; documents: SyncDocument[]; deletePaths: string[] }
-/** Git and WebDAV implement transport/CAS only. No business merge in a backend. */
+/** WebDAV implements transport/CAS only. No business merge in a backend. */
 export interface SyncBackend {
   /** Stable, non-secret connection identity; changing destinations needs a full logical checkpoint. */
   readonly id: string;
@@ -157,7 +157,7 @@ export class SyncEngine {
         await this.store.cacheSnapshot(snapshot, this.backend.id);
         if (index.snapshot) index.retired.push({ path: index.snapshot.path, hash: index.snapshot.hash, retiredIn: generation });
         // Unpublished local batches are already in this logical cut; no need to
-        // upload them just to retire them immediately in the same Git commit.
+        // upload them just to retire them immediately with the same manifest.
         for (const batch of remote.index?.batches ?? []) index.retired.push({ path: batch.path, hash: batch.hash, retiredIn: generation });
         index.snapshot = { path: snapshot.path, hash: snapshot.hash, generation, createdAt: JSON.parse(content.slice(0,content.indexOf("\n"))).createdAt };
         index.batches = []; documents = [snapshot];

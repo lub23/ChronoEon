@@ -758,8 +758,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .month-day-list .entry-main { padding: 8px 0; }
 .month-day-list .entry-title { font-size: 11px; }
 .month-day-list .entry-kind-icon, .month-day-list .task-check { width: 23px; height: 23px; }
-.mini-empty { display: flex; min-height: 110px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--ink-faint); font-family: var(--font-serif); }
-.mini-empty svg { color: var(--green); }
 .open-agenda-button { width: 100%; justify-content: center; }
 .open-agenda-button svg { margin-left: auto; }
 
@@ -1955,16 +1953,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .quick-note-plus { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
 .quick-note-plus { stroke-width: 2; }
 
-/* Mini window: the normal shell at 320px. No sidebar, no maximise, and a
-   dock that keeps only the views this window can actually show. */
-.is-mini .topbar.is-mini { padding-inline: 7px; }
-.is-mini .sidebar-wrap, .is-mini .mobile-sidebar-backdrop { display: none; }
-.is-mini .content-inner { padding: 10px 10px 3px; }
-.is-mini .list-view-scroll { padding-bottom: 4px; }
-.is-mini .view-dock { right: 8px; left: 8px; bottom: 8px; gap: 2px; padding-inline: 6px; }
-.is-mini .view-dock.is-icon-only .view-dock-item, .is-mini .view-dock.is-icon-only .view-dock-action { width: 33px; min-width: 33px; }
-.is-mini .view-dock-days-menu { max-height: 62vh; overflow-y: auto; }
-
 /* Day/Week timeline. Headers, the all-day lane and the 24-hour canvas live in
    ONE scroll container, with the head made sticky. A separately-scrolled header
    is the classic source of drifting column rules: the moment the body grows a
@@ -2349,7 +2337,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 /* ── Live timer ─────────────────────────────────────────────────────────── */
 .timer-backdrop { position: fixed; inset: 0; z-index: 170; display: grid; place-items: center; padding: 20px; background: rgba(24, 28, 25, .38); }
 .timer-sheet { display: flex; width: min(470px, 100%); flex-direction: column; gap: 14px; padding: 22px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface-solid); box-shadow: var(--shadow); }
-.timer-sheet--compact { width: min(372px, 100%); padding: 17px; }
 .timer-header { display: flex; align-items: center; gap: 10px; }
 .timer-header-main { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .timer-header h2 { min-width: 0; flex: 1 1 auto; margin: 4px 0 0; overflow: hidden; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
@@ -2862,11 +2849,11 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
   background-color: color-mix(in srgb, var(--accent-wash) 24%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
 }
-.capture-syntax-help { min-width: 0; margin-block: 4px; color: var(--ink-faint); font-size: 10px; }
-.capture-syntax-help summary { display: flex; align-items: center; gap: 7px; min-height: 26px; width: fit-content; cursor: pointer; list-style: none; }
+.capture-syntax-help { min-width: 0; margin-block: 6px; color: var(--ink-muted); font-size: 12px; }
+.capture-syntax-help summary { display: flex; align-items: center; gap: 7px; min-height: 32px; width: fit-content; cursor: pointer; list-style: none; }
 .capture-syntax-help summary::-webkit-details-marker { display: none; }
 .capture-syntax-help summary:hover { color: var(--ink); }
-.capture-syntax-help code { color: var(--accent-dark); font-size: 10px; }
+.capture-syntax-help code { color: var(--accent-dark); font-size: 11px; overflow-wrap: anywhere; }
 .capture-syntax-help summary code { margin-left: 10px; }
 .capture-syntax-help dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; margin: 4px 0 8px; padding: 8px 0; border-block: 1px solid var(--line); }
 .capture-syntax-help dl > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; min-width: 0; }
@@ -3975,7 +3962,6 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
 .entry-hover-badges { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 0; font-size: 10px; color: var(--ink-soft); }
 .entry-hover-badge { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 99px; }
 .entry-hover-note { margin: 8px 0 0; font-size: 11px; color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.mini-timer { flex: 1; margin: 8px; padding: 18px 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); display: flex; flex-direction: column; gap: 12px; overflow: auto; }
 .list-view-scroll .list-day + .list-day { margin-top: 4px; }
 .list-view-scroll .list-week-header:not(:first-of-type) { border-top: 1px solid var(--line); }
 
@@ -4052,7 +4038,7 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
 .is-low-end .eyebrow::after, .is-low-end .date-title-button::after,
 .is-low-end .item-chip--month::after, .is-low-end .item-chip--all-day::after { display: none !important; }
 .is-low-end *:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.is-low-end .topbar, .is-low-end .compact-topbar, .is-low-end .mini-dock, .is-low-end .filter-panel, .is-low-end .entry-hover-card { background: var(--surface-solid) !important; }
+.is-low-end .topbar, .is-low-end .filter-panel, .is-low-end .entry-hover-card { background: var(--surface-solid) !important; }
 .is-low-end .sidebar { background: var(--surface-solid) !important; }
 .is-low-end .sidebar-glow::before, .is-low-end .sidebar-glow::after { display: none; }
 
@@ -4063,7 +4049,6 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
    "transparency" floor for any dropdown is 0.6 and this clears it. */
 .view-dock-days-menu,
 .view-dock-filter-menu,
-.mini-day-menu,
 .context-menu,
 .month-peek,
 .entry-hover-card,
@@ -4077,7 +4062,6 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
 
 .view-dock-days-menu button,
 .view-dock-filter-menu button,
-.mini-day-menu button,
 .context-menu button,
 .filter-chip,
 .filter-check,
@@ -4087,7 +4071,6 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
 
 .view-dock-days-menu button:hover,
 .view-dock-filter-menu button:hover,
-.mini-day-menu button:hover,
 .context-menu button:hover,
 .month-peek-actions button:hover {
   background: color-mix(in srgb, var(--accent-wash) 48%, transparent);
@@ -4096,7 +4079,6 @@ button.heatmap-cell:hover { outline: 1px solid var(--accent); }
 
 .view-dock-days-menu button.is-selected,
 .view-dock-filter-menu button.is-selected,
-.mini-day-menu button.is-active,
 .context-menu button.is-active {
   background: color-mix(in srgb, var(--accent-wash) 72%, transparent);
   color: var(--accent-dark);
@@ -4663,18 +4645,14 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
 
 /* Location field with the device-position action */
 
-@media (max-width: 360px) {
-  .is-mini .list-view-scroll { padding-bottom: 0; }
-}
 .location-locate { width: 20px; height: 20px; flex: 0 0 20px; color: var(--accent-dark); }
 .location-locate:disabled { opacity: .45; }
 
 .view-dock-menu-separator { display: block; height: 1px; margin: 3px 2px; background: var(--line); }
 
 /* Capture is a primary action, not another small view selector. Keep this after
-   the narrow/mini icon rules so a phone never shrinks its glyph to 13px. */
-.view-dock.is-icon-only .view-dock-quicknote,
-.view-dock.is-icon-only.is-mini .view-dock-quicknote {
+   the narrow icon rules so a phone never shrinks its glyph to 13px. */
+.view-dock.is-icon-only .view-dock-quicknote {
   width: 68px; min-width: 68px; height: 56px; margin: 0 7px; padding: 8px 14px;
   border: 1px solid color-mix(in srgb, var(--line-strong) 62%, transparent) !important;
   border-radius: 999px; background: color-mix(in srgb, var(--surface-solid) 90%, var(--paper)) !important;
@@ -4683,7 +4661,7 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
 }
 .view-dock.is-icon-only .view-dock-quicknote .quick-note-glyph { width: 36px; height: 36px; flex: 0 0 36px; }
 @media (max-width: 430px) {
-  .view-dock.is-icon-only .view-dock-quicknote, .view-dock.is-icon-only.is-mini .view-dock-quicknote { width: 60px; min-width: 60px; height: 54px; margin-inline: 4px; padding-inline: 10px; }
+  .view-dock.is-icon-only .view-dock-quicknote { width: 60px; min-width: 60px; height: 54px; margin-inline: 4px; padding-inline: 10px; }
 }
 
 /* Lightweight entrance AND exit for dialogs. Portals share the same presence
@@ -4856,3 +4834,11 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
 .item-chip.is-touch-selected .calendar-resize-handle { height: 18px; max-height: 50%; touch-action: none; background: color-mix(in srgb, var(--chip-accent) 25%, transparent); }
 
 .item-chip.is-touch-selected .calendar-span-handle { width: 18px; touch-action: none; background: color-mix(in srgb, var(--chip-accent) 25%, transparent); }
+
+.capture-review-footer { display: flex; justify-content: flex-end; padding-top: 8px; }
+.capture-ai-optimize { font-size: 11px; min-height: 32px; gap: 5px; }
+.capture-syntax-help dl > div:has(dt code) { padding: 4px 6px; border-radius: 6px; background: var(--surface); }
+.capture-syntax-help dt { flex-shrink: 0; }
+.capture-syntax-help dd { color: var(--ink-muted); }
+
+.capture-syntax-help dl > div:nth-last-child(-n+2) { grid-column: 1 / -1; }

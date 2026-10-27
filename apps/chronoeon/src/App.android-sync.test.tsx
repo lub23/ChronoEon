@@ -33,7 +33,7 @@ beforeEach(async()=>{
   vi.stubGlobal("crypto",webcrypto);vi.stubGlobal("ResizeObserver",class {observe(){}unobserve(){}disconnect(){}});
   Element.prototype.scrollTo=vi.fn();Element.prototype.scrollBy=vi.fn();
   Object.defineProperty(navigator,"userAgent",{configurable:true,value:"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Mobile"});
-  localStorage.clear();localStorage.setItem("chronoeon.preference.locale", JSON.stringify("zh"));localStorage.setItem("chronoeon.preference.syncConfig",JSON.stringify({mode:"git",gitRemote:"https://gitee.com/example/data.git",gitToken:"test",webdavUrl:"",webdavUsername:"",webdavPassword:""}));
+  localStorage.clear();localStorage.setItem("chronoeon.preference.locale", JSON.stringify("zh"));localStorage.setItem("chronoeon.preference.syncConfig",JSON.stringify({webdavUrl:"https://example.com/dav/ChronoEon/",webdavUsername:"",webdavPassword:""}));
   const backend=await MemorySqliteBackend.open([]); const store=await SqliteEntryStore.create(backend);
   mobile.session={store,sync:new SyncStore(backend),conversations:new AiConversationStore(backend),timers:new TimerStore(backend),dispose:vi.fn(()=>backend.close())};
   mobile.remote=new Remote();mobile.boots=0;mobile.fetches=0;mobile.enabled=true;

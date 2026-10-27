@@ -17,7 +17,7 @@ function service(patch: Partial<Service> = {}): Service {
   };
 }
 function render(sync: Service, locale: "en" | "zh" = "zh", configured = true) {
-  root.render(<SyncSettingsPanel locale={locale} config={{ ...DEFAULT_SYNC_CONFIG, gitRemote: configured ? "https://example.test/sync.git" : "" }} service={sync} entries={[]} onChange={vi.fn()} />);
+  root.render(<SyncSettingsPanel locale={locale} config={{ ...DEFAULT_SYNC_CONFIG, webdavUrl: configured ? "https://example.test/sync.git" : "" }} service={sync} entries={[]} onChange={vi.fn()} />);
 }
 const rebuildButton = () => host.querySelector<HTMLButtonElement>(".sync-rebuild-button")!;
 const confirmation = () => document.querySelector<HTMLElement>('[role="alertdialog"]')!;
@@ -85,11 +85,11 @@ describe("storage usage", () => {
     await act(async () => render(sync, "zh"));
     expect(refreshUsage).toHaveBeenCalledTimes(1);
     const usage = host.querySelector(".sync-usage")!;
-    expect(usage.textContent).toContain("同步缓存（远端压缩副本）");
+    expect(usage.textContent).toContain("同步缓存");
     expect(usage.textContent).toContain("12 MB");
     expect(usage.textContent).toContain("2 KB");
     expect(usage.querySelector(".sync-usage-total")?.textContent).toContain("1 MB");
-    expect(host.textContent).toContain("不计入本地总占用");
+    expect(host.textContent).toContain("仅传输压缩变更");
   });
   it("does not measure or render figures while sync is unconfigured", async () => {
     const refreshUsage = vi.fn(async () => {});

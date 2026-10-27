@@ -104,7 +104,7 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
 
   return <section className="items-view" aria-label={t("items", locale)}>
     <div className="items-toolbar page-title-row view-title-row">
-      <h2 className="view-heading"><span className="headline-leaf">{t("items", locale)}</span></h2>
+      <h2 className="view-heading"><span className="headline-leaf">{t("itemsPoeticTitle", locale)}</span></h2>
       <div className="items-toolbar-controls">
         <GlassSelect value={sortField} options={Object.entries(sortLabels).map(([value, label]) => ({ value, label: t(label, locale) }))} onChange={value => setSortField(value as ItemSortField)} ariaLabel={t("itemSort", locale)} />
         <button type="button" className={sortDirection === "asc" ? "item-sort-direction is-asc" : "item-sort-direction is-desc"}

@@ -28,34 +28,6 @@ export async function readAppVersion(): Promise<string> {
 export type DesktopWindowAction = "minimize" | "toggle-maximize" | "close";
 export type DesktopResizeDirection = "East" | "North" | "NorthEast" | "NorthWest" | "South" | "SouthEast" | "SouthWest" | "West";
 
-interface NormalWindowGeometry {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  maximized: boolean;
-}
-
-const NORMAL_GEOMETRY_KEY = "chronoeon.window.normal.v1";
-
-function readNormalGeometry(): NormalWindowGeometry | null {
-  try {
-    const value = JSON.parse(window.localStorage.getItem(NORMAL_GEOMETRY_KEY) ?? "null") as NormalWindowGeometry | null;
-    if (!value || ["x", "y", "width", "height", "maximized"].some((key) => !(key in value))) return null;
-    return value;
-  } catch {
-    return null;
-  }
-}
-
-function writeNormalGeometry(geometry: NormalWindowGeometry): void {
-  try {
-    window.localStorage.setItem(NORMAL_GEOMETRY_KEY, JSON.stringify(geometry));
-  } catch {
-    // Without storage the next restore uses the standard desktop size.
-  }
-}
-
 let requestedMinimumWidth: number | undefined;
 let appliedMinimumWidth: number | undefined;
 let pendingMinimumWidth: number | undefined;
@@ -105,96 +77,6 @@ export async function startDesktopDrag(): Promise<void> {
   if (!isTauri()) return;
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
   await getCurrentWindow().startDragging();
-}
-
-/** Hide or re-show the mini window; returns the new visibility. */
-export async function toggleMiniWindowVisible(): Promise<boolean> {
-  if (!isTauri()) return false;
-  const { getCurrentWindow } = await import("@tauri-apps/api/window");
-  const appWindow = getCurrentWindow();
-  if (await appWindow.isVisible()) {
-    await appWindow.hide();
-    return false;
-  }
-  await appWindow.show();
-  await appWindow.setFocus();
-  return true;
-}
-
-export async function setCompactWindow(
-  compact: boolean,
-  options: { captureNormal?: boolean } = {},
-): Promise<void> {
-  if (!isTauri()) return;
-  const [{ getCurrentWindow, currentMonitor }, { LogicalPosition, LogicalSize }, { clampGeometryToMonitor, readMiniGeometry }] = await Promise.all([
-    import("@tauri-apps/api/window"),
-    import("@tauri-apps/api/dpi"),
-    import("./miniWindow")
-  ]);
-  const appWindow = getCurrentWindow();
-
-  if (compact && options.captureNormal !== false) {
-    const monitor = await currentMonitor();
-    const scale = monitor?.scaleFactor ?? 1;
-    const maximized = await appWindow.isMaximized();
-    const position = await appWindow.outerPosition();
-    const size = await appWindow.outerSize();
-    writeNormalGeometry({
-      x: position.x / scale,
-      y: position.y / scale,
-      width: size.width / scale,
-      height: size.height / scale,
-      maximized,
-    });
-    if (maximized) await appWindow.unmaximize();
-  }
-
-  await appWindow.setAlwaysOnTop(compact);
-  // The mini window remains resizable so both its list and one-day timeline
-  // can adapt instead of being locked to one hard-coded viewport.
-  await appWindow.setResizable(true);
-  // Resize can reset native chrome permissions on some platforms, so the
-  // maximize rejection is deliberately the last window-capability call.
-  await appWindow.setMaximizable(!compact);
-  if (compact) {
-    const saved = await readMiniGeometry();
-    if (saved) {
-      // Clamp to the current monitor so a changed display layout never parks
-      // the window off-screen or larger than the desktop.
-      const { currentMonitor } = await import("@tauri-apps/api/window");
-      const monitor = await currentMonitor();
-      const scale = monitor?.scaleFactor ?? 1;
-      const target = monitor
-        ? clampGeometryToMonitor(saved, {
-            x: monitor.position.x / scale,
-            y: monitor.position.y / scale,
-            width: monitor.size.width / scale,
-            height: monitor.size.height / scale,
-          })
-        : saved;
-      // Geometry memory keeps position and a bounded height; every mini entry
-      // resets width so a utility switch cannot reopen as a wide window.
-      await appWindow.setSize(new LogicalSize(320, Math.max(480, Math.min(target.height, 660))));
-      await appWindow.setPosition(new LogicalPosition(target.x, target.y));
-      return;
-    }
-    await appWindow.setSize(new LogicalSize(320, 660));
-    await appWindow.center();
-    return;
-  }
-
-  const original = readNormalGeometry();
-  if (original?.maximized) {
-    await appWindow.maximize();
-    return;
-  }
-  if (original) {
-    await appWindow.setSize(new LogicalSize(original.width, original.height));
-    await appWindow.setPosition(new LogicalPosition(original.x, original.y));
-    return;
-  }
-  await appWindow.setSize(new LogicalSize(1240, 800));
-  await appWindow.center();
 }
 
 /** The titlebar measures its own non-shrinking controls; never hide native actions. */

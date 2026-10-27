@@ -44,8 +44,6 @@ export interface AppDisplayPreferences {
   remindersEnabled?: boolean;
   captureShortcut?: string;
   captureShortcutEnabled?: boolean;
-  miniShortcut?: string;
-  miniShortcutEnabled?: boolean;
   lowEndMode?: boolean;
 }
 
@@ -385,10 +383,10 @@ function settingsExportPayload(settings: ChronoEonSettings, preferences: AppDisp
   if (preferences.theme === "dark" || preferences.theme === "light") safe.theme = preferences.theme;
   if (["terracotta", "jade", "ocean", "violet"].includes(preferences.accentTheme ?? "")) safe.accentTheme = preferences.accentTheme;
   if (["auto", "always", "never"].includes(preferences.lunar ?? "")) safe.lunar = preferences.lunar;
-  for (const key of ["dayPhotos", "remindersEnabled", "captureShortcutEnabled", "miniShortcutEnabled", "lowEndMode"] as const) {
+  for (const key of ["dayPhotos", "remindersEnabled", "captureShortcutEnabled", "lowEndMode"] as const) {
     if (typeof preferences[key] === "boolean") safe[key] = preferences[key];
   }
-  for (const key of ["captureShortcut", "miniShortcut"] as const) if (typeof preferences[key] === "string") safe[key] = preferences[key];
+  for (const key of ["captureShortcut"] as const) if (typeof preferences[key] === "string") safe[key] = preferences[key];
   return { format: "chronoeon-settings", version: 1, settings: normalizeChronoEonSettings(settings), preferences: safe };
 }
 export function exportSettingsJson(settings: ChronoEonSettings, preferences: AppDisplayPreferences = {}): string {

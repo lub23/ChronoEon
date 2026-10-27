@@ -6,10 +6,9 @@ import { Icon } from "./Icon";
 
 interface WindowControlsProps {
   locale: Locale;
-  mini?: boolean;
 }
 
-export function WindowControls({ locale, mini = false }: WindowControlsProps) {
+export function WindowControls({ locale }: WindowControlsProps) {
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -27,11 +26,11 @@ export function WindowControls({ locale, mini = false }: WindowControlsProps) {
   }, []);
 
   return (
-    <div className={mini ? "window-controls window-controls--mini" : "window-controls"} role="group" aria-label={t("windowControls", locale)}>
+    <div className="window-controls" role="group" aria-label={t("windowControls", locale)}>
       <button type="button" onClick={() => { void performDesktopWindowAction("minimize"); }} aria-label={t("minimize", locale)} title={t("minimize", locale)}>
         <Icon name="minimize" size={14} />
       </button>
-      {!mini && (
+      {(
         <button
           type="button"
           onClick={() => { void performDesktopWindowAction("toggle-maximize").then(setMaximized); }}

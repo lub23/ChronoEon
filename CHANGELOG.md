@@ -1,5 +1,25 @@
 # Changelog / 更新记录
 
+## 3.0.3 — 2026-10-27
+
+### English
+
+- Capture sends images and optional text to the active AI model, using representative local naming and category habits. Text stays on-device by default, with an explicit Refine with AI action and editable review.
+- Ask bounds and deduplicates read-only tool requests and keeps simple answers concise. Photo-only messages are supported.
+- WebDAV is the sole sync transport. Compressed immutable changes and content-addressed photos remain incremental; conditional GETs reduce idle traffic. Atomic first publication and conditional updates support Nutstore's WebDAV behavior.
+- Automatically reclaim unreferenced local photos while protecting live items, pending capture reviews and seven-day recovery history.
+- New original blue/gold time-orbit and 元 icon, improved syntax help, and distinct bilingual bill, schedule and item statistics headings.
+- Remove the mini window, its shortcuts and the idea-to-task action. Settings explain image parsing and first-device/multi-device synchronization.
+
+### 简体中文
+
+- 随心记图片和可选文字共用当前 AI 模型，参考少量代表性历史记录的命名与分类习惯；文字默认本地解析，可点击“AI 优化”并核对字段。
+- 随心问限制并去重只读工具调用，简单问题简洁回答；支持只发图片。
+- 同步全面转为 WebDAV，使用压缩增量日志与内容寻址图片，条件读取减少空闲流量；首次原子发布及条件更新适配坚果云的实际行为。
+- 自动回收无引用本地照片，保留有效物品、待确认草稿和七天可恢复历史引用。
+- 新增原创蓝黄时间环与“元”字图标，优化快捷语法，账单、日程及物品统计使用各自中英文标题。
+- 删除迷你视图及快捷键、灵感转任务操作，设置说明图片解析与首次及多设备同步。
+
 ## 3.0.2 — 2026-10-19
 
 ### English

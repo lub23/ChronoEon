@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe("Sidebar", () => {
-  it("renders mini window and settings with one shared utility class", () => {
+  it("renders settings and update utilities without a mini window", () => {
     act(() => {
       root.render(
         <Sidebar
@@ -30,13 +30,12 @@ describe("Sidebar", () => {
           onViewChange={vi.fn()}
           onCollapsedChange={vi.fn()}
           onNew={vi.fn()}
-          onCompact={vi.fn()}
           onOpenSettings={vi.fn()}
         />,
       );
     });
     const buttons = [...host.querySelectorAll<HTMLButtonElement>("button.sidebar-utility")];
-    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["迷你窗口", "设置", "检查更新"]);
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["设置", "检查更新"]);
     expect(host.querySelector(".sidebar-action, .sidebar-chat-button, .sidebar-settings-button")).toBeNull();
     for (const button of buttons) {
       expect(button.querySelector("svg")?.getAttribute("width")).toBe("15");
@@ -56,7 +55,6 @@ describe("Sidebar", () => {
           onDayCountChange={onDayCountChange}
           onCollapsedChange={vi.fn()}
           onNew={vi.fn()}
-          onCompact={vi.fn()}
           onOpenSettings={vi.fn()}
         />,
       );
@@ -84,7 +82,6 @@ describe("Sidebar", () => {
             onDayCountChange={vi.fn()}
             onCollapsedChange={vi.fn()}
             onNew={vi.fn()}
-            onCompact={vi.fn()}
             onOpenSettings={vi.fn()}
           />,
         );
@@ -108,7 +105,6 @@ describe("Sidebar", () => {
           onDayCountChange={onDayCountChange}
           onCollapsedChange={vi.fn()}
           onNew={vi.fn()}
-          onCompact={vi.fn()}
           onOpenSettings={vi.fn()}
         />,
       );
@@ -141,7 +137,6 @@ describe("Sidebar", () => {
           onInsightsTabChange={onInsightsTabChange}
           onCollapsedChange={vi.fn()}
           onNew={vi.fn()}
-          onCompact={vi.fn()}
           onOpenSettings={vi.fn()}
         />,
       );
@@ -166,7 +161,6 @@ describe("Sidebar", () => {
           onInsightsTabChange={onInsightsTabChange}
           onCollapsedChange={vi.fn()}
           onNew={vi.fn()}
-          onCompact={vi.fn()}
           onOpenSettings={vi.fn()}
         />,
       );
@@ -188,7 +182,6 @@ describe("Sidebar", () => {
           onViewChange={vi.fn()}
           onCollapsedChange={vi.fn()}
           onNew={vi.fn()}
-          onCompact={vi.fn()}
           onOpenSettings={vi.fn()}
         />,
       );

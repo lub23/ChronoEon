@@ -35,7 +35,7 @@ function fill(input: HTMLInputElement, value: string) {
 
 it.each(["en", "zh"] as const)("names the asset page and explains unmatched searches in %s", locale => {
   act(() => root.render(<ItemsView items={[asset("one")]} entries={[]} locale={locale} settings={settings} today={today} search="missing" />));
-  expect(host.querySelector("h2")?.textContent).toBe(t("items", locale));
+  expect(host.querySelector("h2")?.textContent).toBe(t("itemsPoeticTitle", locale));
   expect(host.querySelector(".stats-empty")?.textContent).toContain(t("itemsSearchEmpty", locale));
   expect(host.querySelector(".stats-empty")?.textContent).not.toBe(t("itemsEmpty", locale));
 });

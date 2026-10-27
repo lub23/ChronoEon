@@ -20,23 +20,18 @@ import { useReminders } from "./hooks/useReminders";
 import { useSqliteEntries } from "./hooks/useSqliteEntries";
 import {
   isTauri,
-  setCompactWindow,
   startDesktopDrag,
-  toggleMiniWindowVisible,
 } from "./platform/desktop";
-import { observeMiniWindowGeometry, rememberMiniGeometry } from "./platform/miniWindow";
 import { saveTextDocument } from "./platform/fileTransfer";
 import {
   DEFAULT_CAPTURE_SHORTCUT,
-  DEFAULT_MINI_SHORTCUT,
   registerCaptureShortcut,
-  registerMiniShortcut,
   unregisterCaptureShortcut,
-  unregisterMiniShortcut,
 } from "./platform/globalShortcut";
 import { focusAppWindow, showSystemNotification } from "./platform/notifications";
 import { createSqliteStoreSession, storageBootErrorMessage } from "./platform/sqliteSession";
 import { isStorageError, type OperationHistoryRecord, type SqliteEntryStore, type SyncStore, type TimerStore } from "@chronoeon/storage";
+import { useAttachmentMaintenance } from "./hooks/useAttachmentMaintenance";
 import { useSyncService } from "./sync/useSyncService";
 import { DEFAULT_SYNC_CONFIG, type SyncConfig } from "./sync/types";
 import { calendarDisplayName, categoryLabel, t } from "./i18n";
@@ -163,7 +158,6 @@ function App() {
   const [calendarViewPreference, setCalendarView] = usePersistentPreference<AppView>("calendarView", "day");
   const calendarView = calendarViewPreference === "week" ? "week" : "day";
   const [dayCount, setDayCount] = usePersistentPreference<number>("dayCount", 1);
-  const [compact, setCompact] = usePersistentPreference<boolean>("compact", new URLSearchParams(window.location.search).get("compact") === "1");
   const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
@@ -191,7 +185,6 @@ function App() {
     return items.filter(item => (entryFilter.calendarIds.length === 0 || entryFilter.calendarIds.includes(item.calendarId))
       && (!query || [item.name, item.notes, item.location].some(value => value?.toLocaleLowerCase().includes(query))));
   }, [entryFilter.calendarIds, filter, items, deferredSearch]);
-  const [miniDayCountPref, setMiniDayCount] = usePersistentPreference<number>("miniDayCount", 1);
   const [composerOpen, setComposerOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [editingSourceEntry, setEditingSourceEntry] = useState<Entry | null>(null);
@@ -223,14 +216,7 @@ function App() {
   const [captureShortcut, setCaptureShortcut] = usePersistentPreference<string>("captureShortcut", DEFAULT_CAPTURE_SHORTCUT);
   const [captureShortcutEnabled, setCaptureShortcutEnabled] = usePersistentPreference<boolean>("captureShortcutEnabled", true);
   const [shortcutStatus, setShortcutStatus] = useState<"registered" | "conflict" | "unsupported" | "off">("off");
-  const [miniShortcut, setMiniShortcut] = usePersistentPreference<string>("miniShortcut", DEFAULT_MINI_SHORTCUT);
-  const [miniShortcutEnabled, setMiniShortcutEnabled] = usePersistentPreference<boolean>("miniShortcutEnabled", true);
-  const [miniShortcutStatus, setMiniShortcutStatus] = useState<"registered" | "conflict" | "unsupported" | "off">("off");
   const [timerOpen, setTimerOpen] = useState(false);
-  const [compactJumpOpen, setCompactJumpOpen] = useState(false);
-  const [compactJumpAnchor, setCompactJumpAnchor] = useState({ left: 70, top: 60 });
-  const compactJumpTriggerRef = useRef<HTMLButtonElement>(null);
-  const compactJumpPopRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [entryMenu, setEntryMenu] = useState<EntryMenuTarget | null>(null);
   // Writes are queued, never dropped: a second save arriving while the first
@@ -246,9 +232,7 @@ function App() {
   // A per-entry guard so a double-click cannot queue a second write that
   // would flip the first one back and fail the compare-and-swap.
   const busyEntryIds = useRef(new Set<string>());
-  const compactNativeInitialized = useRef(false);
 
-  const safeMiniDayCount = Math.min(3, Math.max(1, Math.round(miniDayCountPref) || 1));
 
   // Day/week share the range button. Month never replaces that choice.
   useEffect(() => {
@@ -297,7 +281,7 @@ function App() {
   const navigation = useSwipeNavigation({
     insightsTab,
     onInsightsTabChange: setInsightsTab,
-    enabled: mobileViewport && !compact,
+    enabled: mobileViewport,
     activeView,
     selectedDate,
     onDateChange: setSelectedDate,
@@ -331,58 +315,6 @@ function App() {
     if (provider && askIsReady(aiPreferences)) void warmUpAIProvider(provider);
   }, [aiPreferences]);
   useEffect(() => { warmCaptureProvider(); }, [warmCaptureProvider]);
-
-  useEffect(() => {
-    // Snap to today when entering the mini window, then leave navigation alone
-    // so the compact header's arrows actually work.
-    if (compact) setSelectedDate((current) => (format(current, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd") ? current : new Date()));
-    const initialized = compactNativeInitialized.current;
-    if (!initialized && !compact) {
-      compactNativeInitialized.current = true;
-      return;
-    }
-    compactNativeInitialized.current = true;
-    // A URL/profile can boot straight into mini mode. That initial shape is not
-    // the user's normal window, so only later transitions sample the original.
-    void setCompactWindow(compact, { captureNormal: initialized }).catch((error) => {
-      console.warn("Could not update native mini window", error);
-    });
-  }, [compact]);
-
-  useEffect(() => {
-    if (!compactJumpOpen) return;
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (target.closest(".glass-picker-popup")) return;
-      if (compactJumpTriggerRef.current?.contains(target) || compactJumpPopRef.current?.contains(target)) return;
-      setCompactJumpOpen(false);
-    };
-    const close = () => setCompactJumpOpen(false);
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    window.addEventListener("resize", close);
-    return () => {
-      document.removeEventListener("mousedown", closeOnOutsideClick);
-      window.removeEventListener("resize", close);
-    };
-  }, [compactJumpOpen]);
-
-  // While the mini window is active, remember its geometry per display so it
-  // reopens where the user left it (size, position and monitor-specific shape).
-  useEffect(() => {
-    if (!compact) return;
-    let disposed = false;
-    let cleanup: (() => void) | undefined;
-    void observeMiniWindowGeometry((geometry) => {
-      if (!disposed) void rememberMiniGeometry(geometry);
-    }).then((unsubscribe) => {
-      if (disposed) unsubscribe();
-      else cleanup = unsubscribe;
-    });
-    return () => {
-      disposed = true;
-      cleanup?.();
-    };
-  }, [compact]);
 
   /** Reuse the booting/ready session for early local writes. */
   const ensureSqliteStore = useCallback(async (): Promise<SqliteEntryStore> => {
@@ -435,6 +367,7 @@ function App() {
     onMaintenance: async active => { ledgerBusyRef.current = active; if (active) await writeQueue.current; },
     onConflicts: (count) => notify(`${t("syncConflictNotice", locale)} (${count})`, "warning"),
   });
+  useAttachmentMaintenance(syncJournal, syncService.busy || composerOpen || chatOpen);
 
 
   /**
@@ -768,11 +701,11 @@ function App() {
     void notifyTimer(event, session, elapsedMs, locale, label).catch((error) => console.warn("Timer notification failed", error));
     if (!desktopTimerWindow) return;
     // The pinned window follows the recording: it appears with the first
-    // segment (unless the app itself is already the pinned mini window) and
+    // segment and
     // leaves with the last.
-    if (event === "start" && !compact) void openTimerWindow(locale).catch((error) => console.warn("Could not open the timer window", error));
+    if (event === "start") void openTimerWindow(locale).catch((error) => console.warn("Could not open the timer window", error));
     if (event === "stop" || event === "cancel") void closeTimerWindow().catch((error) => console.warn("Could not close timer window", error));
-  }, [compact, desktopTimerWindow, locale]);
+  }, [desktopTimerWindow, locale]);
 
   const timer = useLiveTimer(timerStore, finishTimer, onTimerEvent, reportWriteFailure);
 
@@ -862,76 +795,12 @@ function App() {
     }
   }, [entries, locale, notify, todayKey]);
 
-  const toggleCompact = useCallback(() => {
-    // The mini window is the same shell, so search and the filter carry over
-    // untouched; only the window geometry and the dock change.
-    setCompact(!compact);
-  }, [compact, setCompact]);
-
-  // The mini window has no week, month or statistics entry, so a view it
-  // cannot show falls back to the agenda rather than rendering off-menu.
-  useEffect(() => {
-    if (!compact) return;
-    if (activeView === "week" || activeView === "month" || activeView === "insights") setActiveView("agenda");
-  }, [activeView, compact, setActiveView]);
-
-  /** Global mini shortcut: enter the mini window, or hide/show it when compact. */
-  const triggerMiniWindow = useCallback(() => {
-    void focusAppWindow();
-    if (!compact) toggleCompact();
-    else void toggleMiniWindowVisible();
-  }, [compact, toggleCompact]);
-
-  useEffect(() => {
-    if (!miniShortcutEnabled) {
-      setMiniShortcutStatus("off");
-      void unregisterMiniShortcut();
-      return;
-    }
-    let disposed = false;
-    void registerMiniShortcut(miniShortcut, triggerMiniWindow).then((result) => {
-      if (!disposed) setMiniShortcutStatus(result.status);
-    });
-    return () => {
-      disposed = true;
-      void unregisterMiniShortcut();
-    };
-  }, [miniShortcut, miniShortcutEnabled, triggerMiniWindow]);
-
-  // Mini-window keyboard navigation: arrows walk the days. Typing fields and
-  // open dialogs keep every key for themselves.
-  useEffect(() => {
-    if (!compact) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target) {
-        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) return;
-        if (target.closest('[role="dialog"]')) return;
-      }
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        navigate(-1);
-      } else if (event.key === "ArrowRight") {
-        event.preventDefault();
-        navigate(1);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [compact, navigate]);
-
   function navigate(direction: -1 | 0 | 1) {
     if (direction === 0) {
       setSelectedDate(new Date());
       return;
     }
     if (activeView === "month") { navigation.stepMonth(direction); return; }
-    if (compact) {
-      // The title-bar arrows always step one civil day on phones and in the
-      // mini window, whatever the visible day count is.
-      setSelectedDate((current) => addDays(current, direction));
-      return;
-    }
     // Day steps one day at a time: the arrows are a title-bar control, not a
     // page-turn for a multi-day board. Week keeps its whole-week step and
     // Month keeps its month step.
@@ -977,44 +846,7 @@ function App() {
     }
   }
 
-  async function convertIdea(id: string, date: string) {
-    if (!writable) {
-      notify(t("entrySaveFailed", locale), "warning");
-      return;
-    }
-    if (busyEntryIds.current.has(id)) return;
-    const source = entries.find((candidate) => candidate.id === sourceEntryId({ id }));
-    if (!source) return;
-    // Keep the source id: the converted entry is written by `persistUpdated`,
-    // which addresses the row by id. Reassigning the id here orphaned the row
-    // (same snap-back as the old drag bug). The id is minted once at creation.
-    const updated: Entry = {
-      ...source,
-      kind: "task",
-      date,
-      start: source.start,
-      end: source.end,
-      endDate: undefined,
-      allDay: Boolean(source.allDay),
-      status: "open",
-      recurrence: "none",
-      recurringDays: undefined,
-      recurringEnd: undefined,
-      recurrenceExceptions: undefined,
-      recurrenceMoves: undefined,
-      color: resolveEntryColor(source.category, "task", settings, source.calendar),
-    };
-    busyEntryIds.current.add(id);
-    try {
-      await withSaving(() => persistUpdated(updated));
-    } catch (error) {
-      reportWriteFailure(error);
-      return;
-    } finally {
-      busyEntryIds.current.delete(id);
-    }
-    notify(t("converted", locale));
-  }
+
 
   const openEntryMenu = useCallback((entry: Entry, event: React.MouseEvent) => {
     event.stopPropagation();
@@ -1091,8 +923,8 @@ function App() {
     }
   }, [locale, notify]);
 
-  const viewActions = useRef({ toggleTask, setEntryStatus, convertIdea, openComposerAt, openComposer, selectView, openEntryMenu, handleReschedule });
-  viewActions.current = { toggleTask, setEntryStatus, convertIdea, openComposerAt, openComposer, selectView, openEntryMenu, handleReschedule };
+  const viewActions = useRef({ toggleTask, setEntryStatus, openComposerAt, openComposer, selectView, openEntryMenu, handleReschedule });
+  viewActions.current = { toggleTask, setEntryStatus, openComposerAt, openComposer, selectView, openEntryMenu, handleReschedule };
   // A clock tick, speech update or toast must not rebuild a whole calendar.
   // Keep just the active/incoming JSX surfaces stable; events read live actions.
   const currentPageKey = navigationPageKey(activeView, selectedDate, insightsTab);
@@ -1104,7 +936,7 @@ function App() {
       ? [current, { key: incomingKey!, view: incoming.view, date: incoming.date, insightsTab: incoming.insightsTab }] : [current];
   }, [activeView, selectedDate, insightsTab, navigation.preview?.view, navigation.preview?.date, navigation.preview?.insightsTab]);
   const renderPage = useMemo(() => {
-  /** `visibleDays` lets the mini window use its own 1-3 day range. */
+  /** Render the requested civil-day range. */
     function renderView(visibleDays: number, view: AppView, selectedDate: Date, pageTab?: InsightsTab) {
     // "Photos only" hides every item chip. The calendar views keep the entries
     // themselves because they read the day's photos from them; the list-like
@@ -1144,7 +976,7 @@ function App() {
         />
       );
     }
-    if (view === "ideas") return <IdeasView entries={itemEntries} locale={locale} settings={settings} search={deferredSearch} today={todayKey} onEdit={entry => viewActions.current.openComposer(entry)} onConvert={(id, date) => { void viewActions.current.convertIdea(id, date); }} onNew={() => viewActions.current.openComposerAt({ kind: "idea", date: todayKey, start: format(new Date(), "HH:mm") })} />;
+    if (view === "ideas") return <IdeasView entries={itemEntries} locale={locale} settings={settings} search={deferredSearch} today={todayKey} onEdit={entry => viewActions.current.openComposer(entry)} onNew={() => viewActions.current.openComposerAt({ kind: "idea", date: todayKey, start: format(new Date(), "HH:mm") })} />;
     return <StatsView tab={pageTab ?? "bills"} onTabChange={setInsightsTab} items={searchedItems} allEntries={entries} onAddItem={() => openItemComposer()} onEditItem={item => openItemComposer(item)} onOpenBill={entry => viewActions.current.openComposer(entry)} onEditEntry={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={deferredSearch} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} />;
   }
     // Keep JSX identity for the outgoing page when a neighbor mounts and when
@@ -1153,16 +985,16 @@ function App() {
     return (page: { key: string; view: AppView; date: Date; insightsTab?: InsightsTab }) => {
       const key = `${page.key}:${page.date.toISOString()}`;
       if (!pages.has(key)) {
-        pages.set(key, renderView(compact ? safeMiniDayCount : safeDayCount, page.view, page.date, page.insightsTab));
+        pages.set(key, renderView(safeDayCount, page.view, page.date, page.insightsTab));
         if (pages.size > 3) pages.delete(pages.keys().next().value!);
       }
       return pages.get(key)!;
     };
-  }, [compact, safeMiniDayCount, safeDayCount, entryFilter.photosOnly,
+  }, [safeDayCount, entryFilter.photosOnly,
     searchedEntries, searchedItems, entries, locale, settings, filter, search, lunar, dayPhotos, todayKey]);
   const renderedViews = useMemo(() => new Map(visiblePages.map(page => [page.key, renderPage(page)])), [visiblePages, renderPage]);
 
-  const preferences: AppPreferences = { resizeStep, lunar, dayPhotos, accentTheme, remindersEnabled, captureShortcut, captureShortcutEnabled, miniShortcut, miniShortcutEnabled, lowEndMode };
+  const preferences: AppPreferences = { resizeStep, lunar, dayPhotos, accentTheme, remindersEnabled, captureShortcut, captureShortcutEnabled, lowEndMode };
 
   function applyPreferences(patch: Partial<AppPreferences>) {
     if (patch.resizeStep === 5 || patch.resizeStep === 10) setResizeStep(patch.resizeStep);
@@ -1172,8 +1004,6 @@ function App() {
     if (patch.remindersEnabled !== undefined) setRemindersEnabled(patch.remindersEnabled);
     if (patch.captureShortcut !== undefined) setCaptureShortcut(patch.captureShortcut);
     if (patch.captureShortcutEnabled !== undefined) setCaptureShortcutEnabled(patch.captureShortcutEnabled);
-    if (patch.miniShortcut !== undefined) setMiniShortcut(patch.miniShortcut);
-    if (patch.miniShortcutEnabled !== undefined) setMiniShortcutEnabled(patch.miniShortcutEnabled);
     if (patch.lowEndMode !== undefined) setLowEndMode(patch.lowEndMode);
   }
 
@@ -1200,7 +1030,7 @@ function App() {
   ) : null;
 
   const timerNode = timerOpen ? (
-    <TimerWidget locale={locale} settings={settings} timer={timer} open={timerOpen} compact={compact} history={entries} onConfirm={confirm} onNotice={notify} onPin={desktopTimerWindow && !compact ? () => { void openTimerWindow(locale).catch((error) => console.warn("Could not open the timer window", error)); } : undefined} onClose={() => setTimerOpen(false)} />
+    <TimerWidget locale={locale} settings={settings} timer={timer} open={timerOpen} history={entries} onConfirm={confirm} onNotice={notify} onPin={desktopTimerWindow ? () => { void openTimerWindow(locale).catch((error) => console.warn("Could not open the timer window", error)); } : undefined} onClose={() => setTimerOpen(false)} />
   ) : null;
 
   const changeAIPreferences = useCallback((next: AIProviderPreferences) => {
@@ -1233,7 +1063,6 @@ function App() {
     transferBusy={transferBusy}
     notificationPermission={reminders.permission}
     shortcutStatus={shortcutStatus}
-    miniShortcutStatus={miniShortcutStatus}
     initialSection={settingsInitialSection}
     aiPreferences={aiPreferences}
     onAIPreferencesChange={changeAIPreferences}
@@ -1332,7 +1161,7 @@ function App() {
   /> : null;
 
   const filterControl = <button ref={filterTriggerRef} type="button"
-    className={(compact ? "view-dock-action view-dock-filter" : "icon-button topbar-filter-trigger")
+    className={"icon-button topbar-filter-trigger"
       + (filter.length || filterActive(entryFilter) || search.trim() ? " is-active" : "")}
     aria-label={t("filterPanelTitle", locale)} title={t("filterPanelTitle", locale)} aria-expanded={filterOpen} aria-haspopup="dialog"
     onClick={() => { if (filterOpen) closeFilter(); else showFilter(); }}>
@@ -1400,82 +1229,6 @@ function App() {
     if (collapsed) setMobileMenuOpen(false);
   }
 
-  if (compact) {
-    // The mini window is the normal shell at its narrowest: the same top bar
-    // (filter moved to the dock), the same views, and the same dock minus the
-    // sidebar, maximise, 4/5/6-day, week, month and statistics entries. The
-    // effect below has already moved an unsupported view back to the agenda.
-    const miniView = activeView;
-    const miniCalendarView = miniView === "day";
-    return (
-      <div className={`app-shell is-mini${miniCalendarView ? " is-calendar-shell" : ""}${lowEndMode ? " is-low-end" : ""}`}>
-        {!lowEndMode && !mobileViewport && <AmbientParticles />}
-        {!isMobilePlatform() && <WindowResizeHandles />}
-        <main className="main-shell">
-          <TopBar
-            locale={locale}
-            view={miniView}
-            selectedDate={selectedDate}
-            weekStartsOn={settings.firstDay}
-            dayCount={miniView === "day" ? safeMiniDayCount : undefined}
-            filterControl={filterControl}
-            onNavigate={navigate}
-            onJumpDate={setSelectedDate}
-            onMobileMenu={navigation.openSidebar}
-            saving={saving}
-            mini
-            showWindowControls={!isMobilePlatform()}
-          />
-          <div className="content-scroll">
-            <section className={miniCalendarView
-              ? "content-inner content-inner--calendar"
-              : miniView === "agenda" ? "content-inner content-inner--list"
-              : "content-inner content-inner--ideas"}>
-              <div key={miniView} className="view-stage">
-                {miniView === "agenda" && <>
-                  <header className="hero-header view-title-row">
-                    <div>
-                      <h1 className="view-heading"><span className="headline-leaf">{t("listTitle", locale)}</span></h1>
-                    </div>
-                  </header>
-                </>}
-                {renderedViews.get(miniView)}
-              </div>
-            </section>
-          </div>
-          <ViewDock
-            locale={locale}
-            activeView={miniView}
-            timerActive={timer.active}
-            dayCount={safeMiniDayCount}
-            mini
-            onViewChange={(view) => {
-              setActiveView(view === "day" ? "day" : view === "ideas" ? "ideas" : "agenda");
-              setMobileMenuOpen(false);
-            }}
-            onDayCountChange={setMiniDayCount}
-            filterControl={filterControl}
-            onTimer={() => setTimerOpen(true)}
-            onQuickNote={() => openUnifiedDialog("capture")}
-            onRestore={toggleCompact}
-          >
-            <TimerPill locale={locale} timer={timer} onOpen={() => setTimerOpen(true)} />
-          </ViewDock>
-        </main>
-        {createPortal(<MotionPresence>{captureDialog}</MotionPresence>, document.body)}
-        <MotionPresence>{chatDialog}</MotionPresence>
-        <MotionPresence>{filterPanel}</MotionPresence>
-        <MotionPresence>{settingsDialog}</MotionPresence>
-        <MotionPresence>{reminderDialog}</MotionPresence>
-        <MotionPresence>{imagePreviewNode}</MotionPresence>
-        <MotionPresence>{timerNode}</MotionPresence>
-        <MotionPresence>{entryMenuNode}</MotionPresence>
-        <MotionPresence>{confirmDialog}</MotionPresence>
-        {toast && <Toast toast={toast} locale={locale} onDismiss={dismissToast} />}
-      </div>
-    );
-  }
-
   const calendarShell = activeView === "month" || activeView === "day" || activeView === "week";
   // The sidebar stays clickable above the chat backdrop, so the chat surface
   // gives up exactly the width the navigation occupies instead of hiding
@@ -1490,7 +1243,7 @@ function App() {
       {/* The drawer must never inherit the collapsed rail's 72px width, or the
           opened menu wraps every label into a vertical sliver. */}
       <div ref={navigation.sidebarRef} data-side={navigation.sidebarSide} aria-hidden={mobileViewport && !mobileMenuOpen ? true : undefined} inert={mobileViewport && !mobileMenuOpen} className={[mobileMenuOpen ? "sidebar-wrap is-open" : "sidebar-wrap", sidebarCollapsed && !mobileViewport && !mobileMenuOpen ? "is-collapsed" : ""].filter(Boolean).join(" ")}>
-        <Sidebar locale={locale} activeView={activeView} collapsed={sidebarCollapsed && !mobileViewport && !mobileMenuOpen} dayCount={activeView === "day" ? safeDayCount : undefined} insightsTab={insightsTab} onViewChange={selectView} onDayCountChange={setDayCount} onInsightsTabChange={setInsightsTab} onCollapsedChange={setSidebarCollapsedState} onNew={() => openComposer()} onCompact={toggleCompact} onOpenSettings={() => { openSettings(); setMobileMenuOpen(false); }} />
+        <Sidebar locale={locale} activeView={activeView} collapsed={sidebarCollapsed && !mobileViewport && !mobileMenuOpen} dayCount={activeView === "day" ? safeDayCount : undefined} insightsTab={insightsTab} onViewChange={selectView} onDayCountChange={setDayCount} onInsightsTabChange={setInsightsTab} onCollapsedChange={setSidebarCollapsedState} onNew={() => openComposer()} onOpenSettings={() => { openSettings(); setMobileMenuOpen(false); }} />
       </div>
       <main className="main-shell">
         {!lowEndMode && <TreeCanopy />}

@@ -1,18 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { MotionPresence, createMotionPortal as createPortal } from "./MotionPresence";
 import { useConfirmDialog } from "./ConfirmDialog";
-import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import type { Entry, Locale } from "../domain/entry";
 import type { SyncConflict } from "@chronoeon/storage";
 import type { useSyncService } from "../sync/useSyncService";
-import { formatBytes, syncConfigured, type SyncConfig, type SyncMode } from "../sync/types";
+import { formatBytes, syncConfigured, type SyncConfig } from "../sync/types";
 import { localeTag, t, type MessageKey } from "../i18n";
 import { Icon } from "./Icon";
 
 interface Props { locale: Locale; config: SyncConfig; onChange: (config: SyncConfig) => void; service: ReturnType<typeof useSyncService>; entries: Entry[] }
 const errors: Record<string, MessageKey> = {
-  SYNC_OFFLINE: "syncOffline",
-  SYNC_USE_EMPTY_REMOTE: "syncUseEmptyRemote", SYNC_DIFFERENT_DATASET: "syncDifferentDataset",
+  SYNC_OFFLINE: "syncOffline", SYNC_QUOTA_EXCEEDED: "syncQuotaExceeded",
+  SYNC_DIFFERENT_DATASET: "syncDifferentDataset",
   SYNC_WEBDAV_CAS_REQUIRED: "syncWebdavCasRequired", SYNC_HTTPS_REQUIRED: "syncHttpsRequired",
   SYNC_ATTACHMENT_MISSING: "syncAttachmentMissing", SYNC_CHECKSUM_FAILED: "syncChecksumFailed",
   SYNC_REMOTE_BUSY: "syncRemoteBusy", SYNC_ENTITY_TOO_LARGE: "syncEntityTooLarge",
@@ -30,10 +29,6 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
   const [resolving, setResolving] = useState("");
   const [missingBusy, setMissingBusy] = useState("");
   const set = (patch: Partial<SyncConfig>) => { onChange({ ...config, ...patch }); setNotice(""); };
-  const pasteToken = async () => {
-    try { const token = (await readText()).trim(); if (token) set({ gitToken: token }); else setNotice(t("syncPasteEmpty", locale)); }
-    catch { setNotice(t("syncPasteFailed", locale)); }
-  };
   async function rebuildSnapshot() {
     if (rebuildPending.current || service.busy || !service.available || !syncConfigured(config)) return;
     rebuildPending.current = true;
@@ -56,27 +51,12 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
   return <>
     <header className="settings-section-heading"><h3>{t("settingsSync", locale)}</h3><p>{t("syncDetail", locale)}</p></header>
     <div className="settings-card ai-settings-card">
-      <div className="settings-option">
-        <span className="settings-option-copy"><strong>{t("syncMode", locale)}</strong></span>
-        <div className="settings-segmented" role="group" aria-label={t("syncMode", locale)}>
-          {(["git", "webdav"] as SyncMode[]).map((mode) => <button type="button" key={mode} aria-pressed={config.mode === mode}
-            className={config.mode === mode ? "is-active" : ""} onClick={() => set({ mode })}>{t(mode === "git" ? "syncGit" : "syncWebdav", locale)}</button>)}
-        </div>
-      </div>
-      {config.mode === "git" ? <>
-        <label className="settings-field ai-settings-field"><span><strong>{t("gitRemote", locale)}</strong><small>{t("gitRemoteHint", locale)}</small></span>
-          <input value={config.gitRemote} placeholder="https://gitee.com/…/chronoeon-sync.git" spellCheck={false} inputMode="url" onChange={(event) => set({ gitRemote: event.target.value })} /></label>
-        <label className="settings-field ai-settings-field"><span><span className="settings-label-row"><strong>{t("gitToken", locale)}</strong>
-          <button type="button" className="icon-button subtle paste-token-button" aria-label={t("syncPasteToken", locale)} onClick={() => void pasteToken()}><Icon name="clipboard" size={13} /></button></span><small>{t("gitTokenHint", locale)}</small></span>
-          <input type="password" value={config.gitToken} autoComplete="off" spellCheck={false} onChange={(event) => set({ gitToken: event.target.value })} /></label>
-      </> : <>
         <label className="settings-field ai-settings-field"><span><strong>{t("webdavUrl", locale)}</strong><small>{t("webdavUrlHint", locale)}</small></span>
           <input value={config.webdavUrl} placeholder="https://cloud.example.com/dav/ChronoEon/" inputMode="url" spellCheck={false} onChange={(event) => set({ webdavUrl: event.target.value })} /></label>
         <label className="settings-field ai-settings-field"><span><strong>{t("webdavUser", locale)}</strong></span>
           <input value={config.webdavUsername} autoComplete="username" onChange={(event) => set({ webdavUsername: event.target.value })} /></label>
         <label className="settings-field ai-settings-field"><span><strong>{t("webdavPass", locale)}</strong></span>
           <input type="password" value={config.webdavPassword} autoComplete="current-password" onChange={(event) => set({ webdavPassword: event.target.value })} /></label>
-      </>}
     </div>
     <div className="ai-settings-actions sync-actions">
       <button type="button" className="secondary-button" disabled={service.busy || rebuilding || !service.available || !syncConfigured(config)} onClick={() => void service.run()}>
@@ -101,7 +81,7 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
         <div><dt>{t("syncStorageDatabase", locale)}</dt><dd>{formatBytes(service.usage.databaseBytes, locale)}</dd></div>
         <div><dt>{t("syncStoragePhotos", locale)}</dt><dd>{formatBytes(service.usage.attachmentBytes, locale)}</dd></div>
         <div className="sync-usage-total"><dt>{t("syncStorageTotal", locale)}</dt><dd>{formatBytes(service.usage.attachmentBytes + service.usage.databaseBytes, locale)}</dd></div>
-        <div><dt>{t(config.mode === "git" ? "syncStorageRepository" : "syncStorageRepositoryWebdav", locale)}</dt><dd>{formatBytes(service.usage.syncCacheBytes, locale)}</dd></div>
+        <div><dt>{t("syncStorageRepositoryWebdav", locale)}</dt><dd>{formatBytes(service.usage.syncCacheBytes, locale)}</dd></div>
       </dl>
       <p className="settings-footnote">{t("syncStorageExplanation", locale)}</p>
     </>}
@@ -167,8 +147,9 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
         </ul>
       </section>
     )}
+    <p className="settings-footnote">{t("syncFirstRunHelp", locale)}</p>
     <p className="settings-footnote">{t("syncDataNote", locale)}</p>
-    {config.mode === "webdav" && <p className="settings-footnote">{t("syncWebdavRetention", locale)}</p>}
+    <p className="settings-footnote">{t("syncWebdavRetention", locale)}</p>
     {service.conflicts.length > 0 && <section className="sync-conflict-list" aria-label={t("syncConflicts", locale)}>
       <h4>{t("syncConflicts", locale)}</h4><p>{t("syncConflictHelp", locale)}</p>
       {service.conflicts.map((conflict) => {

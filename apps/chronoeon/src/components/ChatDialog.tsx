@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { parseAICapture } from "../ai/captureAgent";
 import { refineCapture, type EditableCapture } from "../domain/captureRefinement";
 import { format, parseISO } from "date-fns";
 import {
@@ -111,6 +112,7 @@ const captureIssueMessages: Record<AIValidationIssue["code"], MessageKey> = {
 
 interface CaptureDraftItem extends EditableCapture {
   key: string;
+  ai?: boolean;
   draft: EntryDraft;
   warnings: AIValidationIssue[];
   parseIssues?: CaptureIssue[];
@@ -123,6 +125,7 @@ interface CaptureReview {
   /** The review belongs to the conversation that produced it. */
   conversationId: string;
   source: string;
+  ai?: boolean;
   drafts: CaptureDraftItem[];
   edited: boolean;
   saved: boolean;
@@ -169,10 +172,13 @@ function appendAdvisorResults(
   today: string,
   results: AdvisorToolResult[],
 ): void {
-  for (const rawCall of rawCalls) {
-    const result = executeAdvisorToolCall(rawCall, entries, today);
-    results.push(result);
-
+  const seen = new Set<string>();
+  for (const rawCall of rawCalls.slice(0, 6)) {
+    if (!advisorTools.some(tool => tool.function.name === rawCall.function.name)) continue;
+    const key = `${rawCall.function.name}:${rawCall.function.arguments}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push(executeAdvisorToolCall(rawCall, entries, today));
   }
 }
 
@@ -257,7 +263,7 @@ function offlineCapture(
  *  timed schedule always carries an end, so the card never shows `--:--`. */
 function normalizeCapturedDraft(draft: EntryDraft, timeScale: number): EntryDraft {
   if (draft.kind !== "task" && draft.kind !== "event") {
-    return { ...draft, allDay: false, end: undefined, endDate: undefined };
+    return { ...draft, allDay: !draft.start, end: undefined, endDate: undefined };
   }
   if (draft.allDay || draft.end) return draft;
   const end = endClockAfter(draft.start, timeScale);
@@ -360,9 +366,8 @@ export function ChatDialog({
   const suggestions = useMemo(() => (mode === "capture"
     ? [t("captureSuggestionMeeting", locale), t("captureSuggestionExpense", locale), t("captureSuggestionIdea", locale)]
     : []), [locale, mode]);
-  // 随心问 and 随心记 can point at different models; only the active composer's
-  // own readiness decides whether it talks to one.
-  const modelConfigured = mode === "ask" && askIsReady(aiPreferences);
+  // Images, refinement and Ask share the active provider.
+  const modelConfigured = askIsReady(aiPreferences);
   const contextToday = format(new Date(), "yyyy-MM-dd");
   const contextDateRange = useMemo(() => {
     if (contextRange === "all") return null;
@@ -490,6 +495,7 @@ export function ChatDialog({
         id: stored.messageId,
         conversationId: stored.conversationId,
         source: stored.source,
+        ai: (stored.drafts as CaptureDraftItem[]).some(item => item.ai),
         drafts: stored.drafts as CaptureDraftItem[],
         edited: stored.edited,
         saved: stored.saved,
@@ -600,7 +606,7 @@ export function ChatDialog({
 
   const send = useCallback(async (override?: string) => {
     const text = (override ?? draft).trim();
-    if (!text || !conversations || busy) return;
+    if ((!text && !photos.length) || !conversations || busy) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setBusy(true);
@@ -610,9 +616,10 @@ export function ChatDialog({
     try {
       const photoRefs = photos.map((photo) => photo.reference);
       const imageParts: AIChatContentPart[] = [];
-      for (const reference of mode === "ask" ? photoRefs : []) {
+      for (const reference of photoRefs) {
         const dataUrl = await attachmentModelImage(reference);
-        if (dataUrl) imageParts.push({ type: "image_url", image_url: { url: dataUrl } });
+        if (!dataUrl) throw new Error("Photo unavailable");
+        imageParts.push({ type: "image_url", image_url: { url: dataUrl } });
       }
       const withPhotos = (items: CaptureDraftItem[]) => items.map((item) => {
         const draft = normalizeCapturedDraft(item.draft, settings.timeScale);
@@ -630,17 +637,17 @@ export function ChatDialog({
       const userMessage = await conversations.appendMessage(conversationId, { role: "user", content: sentText });
       // The mode badge already names the composer, so a record is titled by
       // what the user actually wrote.
-      if (firstUser) await conversations.renameConversation(conversationId, text.slice(0, 40));
+      if (firstUser) await conversations.renameConversation(conversationId, (text || t("chatAddPhoto", locale)).slice(0, 40));
       const next = [...history, userMessage];
       await loadMessages(conversationId);
       if (mode === "capture") {
         const parts = splitCaptureItems(text);
-        if (parts.length > 1 && parts.some(isAssetCapture)) {
+        if (!photoRefs.length && parts.length > 1 && parts.some(isAssetCapture)) {
           setDraft(text);
           setError(locale === "zh" ? "物品需要单独在编辑器确认，请一次录入一个物品。原文已保留。" : "Confirm items individually in the editor. Enter one item at a time; your original text is preserved.");
           return;
         }
-        if (isAssetCapture(text)) {
+        if (!photoRefs.length && isAssetCapture(text)) {
           const parsed = parseAssetCapture(text, { now: new Date(), locale, settings, history: captureHistory(entries) });
           const linked = parsed.link ? entries.filter(entry => entry.kind === "bill" && billDirectionForCategory(entry.category, settings, entry.calendar) === "expense" && (entry.id === parsed.link || entry.title === parsed.link)
             && (!entry.calendar || entry.calendar === settings.defaultCalendarID)) : [];
@@ -654,18 +661,29 @@ export function ChatDialog({
           return;
         }
         captureDecisionIndex.current ??= new CaptureDecisionIndex();
-        const drafts = withPhotos(offlineCapture(text, settings, locale, entries, captureDecisionIndex.current));
+        let items: CaptureDraftItem[];
+        let usage: AICompletionResult | undefined;
+        if (photoRefs.length) {
+          const provider = activeAIProvider(aiPreferences);
+          if (!provider || !modelConfigured) throw new Error("AI not configured");
+          const result = await parseAICapture({ provider, text, images: imageParts, entries, settings, locale, signal: controller.signal });
+          usage = result.reply;
+          items = result.parsed.candidates.map((candidate, index) => ({ key: `ai-${index}`, ai: true, draft: candidate.draft, baseline: candidate.draft, touched: [], warnings: candidate.issues }));
+        } else items = offlineCapture(text, settings, locale, entries, captureDecisionIndex.current);
+        const drafts = withPhotos(items);
         const assistant = await conversations.appendMessage(conversationId, {
             role: "assistant",
-            content: `${t("captureOfflineReady", locale)}\n\n${captureReviewMarkdown(drafts.map((item) => item.draft), locale, settings)}`,
+            content: `${t(photoRefs.length ? "captureAIReady" : "captureOfflineReady", locale)}\n\n${captureReviewMarkdown(drafts.map((item) => item.draft), locale, settings)}`,
+            promptTokens: usage?.promptTokens, completionTokens: usage?.completionTokens,
         });
         await loadMessages(conversationId);
         const review: CaptureReview = {
           id: assistant.id,
           conversationId,
           source: text,
+          ai: photoRefs.length > 0,
           drafts,
-          edited: drafts.some(item => item.link || item.parseIssues?.length || Object.values(item.decisions ?? {}).some(value => value && typeof value === "object" && "options" in value && value.options.length > 0 && !value.selected)),
+          edited: photoRefs.length > 0 || drafts.some(item => item.link || item.parseIssues?.length || Object.values(item.decisions ?? {}).some(value => value && typeof value === "object" && "options" in value && value.options.length > 0 && !value.selected)),
           saved: false,
           countdown: CAPTURE_AUTO_SAVE_MS / 1000,
         };
@@ -693,8 +711,8 @@ export function ChatDialog({
         {
           role: "system" as const,
           content: selectedContextEntries.length
-            ? `You are ChronoEon's local calendar advisor. Answer in ${answerLanguage}. Match the language of the latest user question; translate internal field names and enum values, and do not mix languages. Use only the local entries supplied here unless the user gives new information. Be concise and practical. Prefer short paragraphs, bullets and bold key facts. If the answer is not present, say what is missing.${ANALYSIS_CONTRACT}\n\nChronoEon entries chosen by the user, most recent first (compact JSON; omitted fields are empty):\n${JSON.stringify(recent)}`
-            : `You are ChronoEon's local calendar advisor. Current local date: ${contextToday}. Answer in ${answerLanguage}. Match the language of the latest user question; translate internal field names and enum values, and do not mix languages.${presetPlan ? PLANNED_TOOL_GUIDANCE : ` When a question depends on user records, call a read-only tool first; use focused query terms and an explicit range or days; use overdue/upcoming/spending functions only when they are clearly applicable. If a broad search covers the request, do not also call redundant tools.${TOOL_GUIDANCE}`} Use only entries returned by tools unless the user supplies new information. Be concise and practical. Prefer short paragraphs, bullets and bold key facts. If no tool returns matching data, say what is missing.${ANALYSIS_CONTRACT}`,
+            ? `You are ChronoEon's local calendar advisor. Answer in ${answerLanguage}. Match the language of the latest user question; translate internal field names and enum values, and do not mix languages. Use only the local entries supplied here unless the user gives new information. Be concise and practical. Answer a simple question in one to three sentences; only use analysis structure when requested. Prefer short paragraphs, bullets and bold key facts. If the answer is not present, say what is missing.${ANALYSIS_CONTRACT}\n\nChronoEon entries chosen by the user, most recent first (compact JSON; omitted fields are empty):\n${JSON.stringify(recent)}`
+            : `You are ChronoEon's local calendar advisor. Current local date: ${contextToday}. Answer in ${answerLanguage}. Match the language of the latest user question; translate internal field names and enum values, and do not mix languages.${presetPlan ? PLANNED_TOOL_GUIDANCE : ` When a question depends on user records, call a read-only tool first; use focused query terms and an explicit range or days; use overdue/upcoming/spending functions only when they are clearly applicable. If a broad search covers the request, do not also call redundant tools.${TOOL_GUIDANCE}`} Use only entries returned by tools unless the user supplies new information. Be concise and practical. Answer a simple question in one to three sentences; only use analysis structure when requested. Prefer short paragraphs, bullets and bold key facts. If no tool returns matching data, say what is missing.${ANALYSIS_CONTRACT}`,
         },
         ...recentMessages.map((message, index) => ({
           role: message.role as "user" | "assistant",
@@ -758,6 +776,7 @@ export function ChatDialog({
       });
       await loadMessages(conversationId);
       await reloadList();
+      succeeded = true;
     } catch (sendError) {
       console.warn("Chat send failed", sendError);
       if (mode === "capture") setDraft(text);
@@ -776,6 +795,35 @@ export function ChatDialog({
     }
   }, [activeId, aiPreferences, busy, contextToday, conversationTitle, conversations, draft, entries, locale, messages,
     mode, modelConfigured, photos, reloadList, selectedContextEntries, settings, startConversation, onOpenAssetCapture]);
+
+  const optimizeCapture = async (review: CaptureReview) => {
+    const provider = activeAIProvider(aiPreferences);
+    if (!conversations || !provider || !modelConfigured || busy || captureSaving || review.saved) return;
+    setPendingCapture(current => current?.id === review.id ? { ...current, edited: true } : current);
+    const controller = new AbortController(); abortRef.current = controller;
+    setBusy(true); setError(null);
+    try {
+      const references = [...new Set(review.drafts.flatMap(item => item.draft.images ?? []))];
+      const images: AIChatContentPart[] = [];
+      for (const reference of references) {
+        const url = await attachmentModelImage(reference);
+        if (!url) throw new Error("Photo unavailable");
+        images.push({type: "image_url", image_url: {url}});
+      }
+      const result = await parseAICapture({ provider, text: review.source, images, entries, settings, locale,
+        signal: controller.signal, preliminary: review.drafts.map(item => item.draft) });
+      const drafts: CaptureDraftItem[] = result.parsed.candidates.map((candidate, index) => ({
+        key: `optimized-${index}`, ai: true, draft: { ...normalizeCapturedDraft(candidate.draft, settings.timeScale), images: references.length ? references : undefined }, baseline: candidate.draft, touched: [], warnings: candidate.issues,
+      }));
+      const assistant = await conversations.appendMessage(review.conversationId, {role: "assistant",
+        content: `${t("captureAIOptimize", locale)}\n\n${captureReviewMarkdown(drafts.map(item => item.draft), locale, settings)}`,
+        promptTokens: result.reply.promptTokens, completionTokens: result.reply.completionTokens});
+      await loadMessages(review.conversationId);
+      await reloadList();
+      setPendingCapture(current => current?.id === review.id ? { ...current, id: assistant.id, ai: true, edited: true, drafts } : current);
+    } catch (error) { if (!controller.signal.aborted) setError(t("aiRequestFailed", locale)); }
+    finally { setBusy(false); }
+  };
 
   const toggleContextEntry = (id: string) => {
     setSelectedContextIds((current) => current.includes(id)
@@ -950,7 +998,7 @@ export function ChatDialog({
     patchCaptureDraft(item.key, {
       kind,
       category: defaultCategoryForKind(kind, settings, item.draft.calendar),
-      allDay: kind === "task" || kind === "event" ? item.draft.allDay : false,
+      allDay: kind === "task" || kind === "event" ? item.draft.allDay : !item.draft.start,
       start: kind === "task" || kind === "event" ? item.draft.start ?? "09:00" : item.draft.start,
       end: kind === "task" || kind === "event" ? item.draft.end ?? "" : "",
       endDate: kind === "task" || kind === "event" ? item.draft.endDate : undefined,
@@ -1004,7 +1052,7 @@ export function ChatDialog({
   // waits for content. Disabling the field on empty text made the first
   // keystroke impossible.
   const composerDisabled = busy;
-  const sendDisabled = composerDisabled || !draft.trim() || (mode === "ask" && !modelConfigured);
+  const sendDisabled = composerDisabled || (!draft.trim() && !photos.length) || ((mode === "ask" || photos.length > 0) && !modelConfigured);
 
   return (
     <div
@@ -1209,6 +1257,7 @@ export function ChatDialog({
                       {/* Confirm and dismiss sit side by side as the two icons
                           the eye already reads: ✓ writes, ✕ drops. */}
                       <div className="capture-review-actions">
+
                         {!activeReview.saved && (
                           <button
                             type="button"
@@ -1340,20 +1389,19 @@ export function ChatDialog({
                           </div>
 
                           <div className={item.draft.kind === "bill" ? "capture-review-when is-bill" : "capture-review-when"}>
-                            <span className={item.draft.allDay ? "capture-review-cluster is-single" : "capture-review-cluster"}>
+                            <span className={item.draft.allDay && schedulable ? "capture-review-cluster is-single" : "capture-review-cluster"}>
                               <GlassDatePicker value={item.draft.date} ariaLabel={t("startDate", locale)} locale={locale} clearable={false} hideIcon onChange={(value) => patchCaptureDraft(item.key, { date: value ?? item.draft.date })} />
-                              {!item.draft.allDay && (
+                              {(!item.draft.allDay || !schedulable) && (
                                 <GlassTimePicker
                                   value={item.draft.start}
                                   ariaLabel={t("startTime", locale)}
                                   locale={locale}
-                                  clearable={false}
+                                  clearable={!schedulable}
                                   hideIcon
                                   onChange={(value) => patchCaptureDraft(item.key, {
                                     start: value,
-                                    // An end time is only asked for when the range
-                                    // could not be derived from the start.
-                                    end: item.draft.end || endClockAfter(value, settings.timeScale),
+                                    allDay: !value,
+                                    end: schedulable ? item.draft.end || endClockAfter(value, settings.timeScale) : undefined,
                                   })}
                                 />
                               )}
@@ -1500,6 +1548,11 @@ export function ChatDialog({
                         </div>
                       );
                     })}
+                    <footer className="capture-review-footer">
+                        {!activeReview.saved && !activeReview.ai && <button type="button" className="secondary-button capture-ai-optimize"
+                          disabled={busy || captureSaving || !modelConfigured} title={t(modelConfigured ? "captureAIOptimize" : "aiChatNotConfigured", locale)}
+                          onClick={() => void optimizeCapture(activeReview)}><Icon name="sparkle" size={14} />{t("captureAIOptimize", locale)}</button>}
+                    </footer>
                   </section>
                 )}
                 {!messages.length && !busy && (
@@ -1672,6 +1725,7 @@ export function ChatDialog({
                   ["/idea", "灵感", "Idea"], ["/asset", "物品", "Asset"], ["@...", "地点", "Place"],
                   ["#...", "标签", "Tag"], ["%...", "分类", "Category"], ["&...", "关联", "Link"],
                   ["!high", "重要", "Priority"], ["!!high", "紧急", "Urgency"], ["。 ; ；", "分隔多条", "Separator"],
+                  ["/event 明天 14:00 开会 @公司", "日程示例", "Schedule example"], ["/bill 午饭 -32", "账单示例", "Bill example"],
                 ].map(([syntax, zh, en]) => <div key={syntax}><dt><code>{syntax}</code></dt><dd>{locale === "zh" ? zh : en}</dd></div>)}</dl>
               </details>}
               <div className="chat-composer">

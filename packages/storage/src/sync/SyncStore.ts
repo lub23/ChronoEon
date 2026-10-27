@@ -461,15 +461,28 @@ export class SyncStore {
   /** Include unresolved versions as well as the visible version: conflicts must
    * never point at bytes that were discarded by transport/compaction. */
   attachmentHashes(): Promise<string[]> {
+    return this.run(() => this.attachmentHashesDirect());
+  }
+  /** Keep the SQLite write queue held until physical cleanup finishes. */
+  maintainAttachments<T>(collect: (hashes: string[]) => Promise<T>): Promise<T> {
     return this.run(async () => {
+      this.attachmentCache = null;
+      return collect(await this.attachmentHashesDirect(true));
+    });
+  }
+  private async attachmentHashesDirect(includePending = false): Promise<string[]> {
       // The poll runs every minute; rescanning every history JSON and entity
       // state for an unchanged set used to dominate an idle sync. State writes
       // bump the revision, and stale hashes are only ever conservative.
-      if (this.attachmentCache?.revision === this.attachmentRevision && Date.now() - this.attachmentCache.computedAt < ATTACHMENT_CACHE_MS) {
+      if (!includePending && this.attachmentCache?.revision === this.attachmentRevision && Date.now() - this.attachmentCache.computedAt < ATTACHMENT_CACHE_MS) {
         return [...this.attachmentCache.hashes];
       }
       await pruneRecovery(this.db);
       const hashes = new Set(await new OperationHistoryStore(this.db).attachmentHashesDirect());
+      // Items and pending chat reviews can exist without synchronization enabled.
+      const localImages = await this.db.select<{ payload: string }>("SELECT images_json AS payload FROM items"
+        + (includePending ? " UNION ALL SELECT drafts_json AS payload FROM ai_capture_reviews WHERE saved = 0" : ""));
+      for (const row of localImages) for (const match of row.payload.matchAll(/attachments\/([a-f0-9]{64})\.webp/g)) hashes.add(match[1]);
       // Local-only attachments have no sync state until the first flush; once
       // history ages out, their live rows are the only remaining reference.
       for (const row of await this.db.select<{ sha256: string }>("SELECT DISTINCT sha256 FROM attachments WHERE sha256 IS NOT NULL")) {
@@ -496,9 +509,8 @@ export class SyncStore {
         }
       }
       const result = [...hashes].sort();
-      this.attachmentCache = { revision: this.attachmentRevision, computedAt: Date.now(), hashes: result };
+      if (!includePending) this.attachmentCache = { revision: this.attachmentRevision, computedAt: Date.now(), hashes: result };
       return [...result];
-    });
   }
 }
 function sharedSyncFields<T>(fields: Record<string, T>): Record<string, T> {

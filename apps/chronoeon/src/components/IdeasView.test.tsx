@@ -63,7 +63,6 @@ describe("variable-height ideas", () => {
           search=""
           today="2026-08-10"
           onEdit={() => undefined}
-          onConvert={onConvert}
           onNew={() => undefined}
         />,
       );
@@ -72,7 +71,7 @@ describe("variable-height ideas", () => {
     expect(host.textContent).toContain("Learn Erlang");
     expect(host.querySelector(".idea-card")).not.toBeNull();
     expect(host.querySelector(".idea-vine-bud")).not.toBeNull();
-    expect(host.querySelectorAll(".idea-card-top .idea-card-action")).toHaveLength(4);
+    expect(host.querySelectorAll(".idea-card-top .idea-card-action")).toHaveLength(2);
     expect(host.querySelector(".idea-category")).toBeNull();
     expect(host.querySelector(".idea-card footer")).toBeNull();
   });
@@ -81,7 +80,7 @@ describe("variable-height ideas", () => {
 
 it("packs independent cards without flattening multiline diary text", async () => {
   const entries=Array.from({length:50},(_,index)=>idea(`idea-${index}`,`Diary ${index}`,index===0?"First line\nSecond line\n\nThird line":"Short note"));
-  act(()=>root.render(<IdeasView entries={entries} locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} search="" today="2026-08-10" onEdit={()=>{}} onConvert={()=>{}} onNew={()=>{}}/>));
+  act(()=>root.render(<IdeasView entries={entries} locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} search="" today="2026-08-10" onEdit={()=>{}} onNew={()=>{}}/>));
   expect(host.querySelector(".ideas-masonry")).not.toBeNull();
   expect([...host.querySelectorAll(".idea-body p")].slice(0, 3).map((node) => node.textContent)).toEqual(["First line", "Second line", "Third line"]);
   expect(host.querySelector(".ideas-vine")?.querySelectorAll(".idea-card")).toHaveLength(50);
@@ -89,7 +88,7 @@ it("packs independent cards without flattening multiline diary text", async () =
 
 describe("idea card presentation", () => {
   const render = (entries: Entry[], locale: "zh" | "en" = "zh") => act(() => root.render(
-    <IdeasView entries={entries} locale={locale} settings={DEFAULT_CHRONOEON_SETTINGS} search="" today="2026-08-10" onEdit={() => {}} onConvert={() => {}} onNew={() => {}} />,
+    <IdeasView entries={entries} locale={locale} settings={DEFAULT_CHRONOEON_SETTINGS} search="" today="2026-08-10" onEdit={() => {}} onNew={() => {}} />,
   ));
 
   it("puts the editable title in the colored heading, not the note body", () => {
@@ -135,7 +134,7 @@ it("measures each card independently for masonry track spans", () => {
   return { x: 0, y: 0, width: 300, height, top: 0, left: 0, right: 300, bottom: height, toJSON: () => ({}) };
  });
  try {
-  act(() => root.render(<IdeasView entries={[idea("tall", "Tall"), idea("short", "Short")]} locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} search="" today="2026-10-05" onEdit={()=>{}} onConvert={()=>{}} onNew={()=>{}} />));
+  act(() => root.render(<IdeasView entries={[idea("tall", "Tall"), idea("short", "Short")]} locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} search="" today="2026-10-05" onEdit={()=>{}} onNew={()=>{}} />));
   expect([...host.querySelectorAll<HTMLElement>(".idea-vine-node")].map(node => node.style.gridRowEnd)).toEqual(["span 424", "span 190"]);
  } finally { measure.mockRestore(); }
 });

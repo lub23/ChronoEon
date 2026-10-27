@@ -13,7 +13,6 @@ interface TimerWidgetProps {
   settings: ChronoEonSettings;
   timer: LiveTimer;
   open: boolean;
-  compact?: boolean;
   onConfirm?: (request: ConfirmRequest) => Promise<boolean>;
   onPin?: () => void;
   onNotice?: (message: string, tone?: "normal" | "warning") => void;
@@ -27,7 +26,7 @@ interface TimerWidgetProps {
  * field is focused on open and Enter starts the recording, so a thought about
  * "I should time this" never costs more than the thing being timed.
  */
-export function TimerWidget({ locale, settings, timer, open, compact = false, onConfirm, onPin, onNotice, onClose, history = [] }: TimerWidgetProps) {
+export function TimerWidget({ locale, settings, timer, open, onConfirm, onPin, onNotice, onClose, history = [] }: TimerWidgetProps) {
   const [category, setCategory] = useState(() => defaultTimerCategory(settings));
   const sheetRef = useRef<HTMLElement>(null);
   useFocusTrap(sheetRef, open);
@@ -66,7 +65,7 @@ export function TimerWidget({ locale, settings, timer, open, compact = false, on
 
   return (
     <div className="timer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section ref={sheetRef} className={`timer-sheet${compact ? " timer-sheet--compact" : ""}`} role="dialog" aria-modal="true" aria-labelledby="timer-heading">
+      <section ref={sheetRef} className="timer-sheet" role="dialog" aria-modal="true" aria-labelledby="timer-heading">
         <header className="timer-header">
           <div className="timer-header-main">
             <span className="eyebrow"><Icon name="timer" size={14} /> {t("timer", locale)}</span>

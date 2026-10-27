@@ -1,6 +1,5 @@
 //! Backend-neutral transport for immutable Zstandard JSONL logs and logical
 //! snapshots. This module has NO SQLite paths, database copies, or data merges.
-mod git;
 mod webdav;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,7 +14,6 @@ const MAX_INDEX_BYTES: usize = 8 * 1024 * 1024;
 #[derive(Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TransportConfig {
-    mode: String, git_remote: Option<String>, git_token: Option<String>,
     webdav_url: Option<String>, webdav_username: Option<String>, webdav_password: Option<String>,
 }
 struct BackendHead { head: Option<String>, bytes: Option<Vec<u8>> }
@@ -88,20 +86,16 @@ fn validate_object(path: &str, bytes: &[u8], hash: &str) -> Result<(), String> {
     else { return Err("SYNC_INVALID_OBJECT".into()); }
     Ok(())
 }
-fn backend(config: &TransportConfig, root: &Path) -> Result<Box<dyn SyncBackend>, String> {
-    match config.mode.as_str() {
-        "git" => Ok(Box::new(git::GitBackend::new(&root.join("git"), config)?)),
-        "webdav" => Ok(Box::new(webdav::WebDAVBackend::new(config)?)),
-        _ => Err("SYNC_UNSUPPORTED_BACKEND".into()),
-    }
+fn backend(config: &TransportConfig, _root: &Path) -> Result<Box<dyn SyncBackend>, String> {
+    Ok(Box::new(webdav::WebDAVBackend::new(config)?))
 }
 fn cache_root(app: &tauri::AppHandle, config: &TransportConfig) -> Result<PathBuf, String> {
-    let name = format!("{}:{}", config.mode, if config.mode == "git" { config.git_remote.as_deref() } else { config.webdav_url.as_deref() }.unwrap_or(""));
+    let name = format!("webdav:{}:{}", config.webdav_url.as_deref().unwrap_or(""), config.webdav_username.as_deref().unwrap_or(""));
     let root = app.path().app_local_data_dir().map_err(|error| error.to_string())?.join("sync-engine").join(attachments::hash(name.as_bytes()));
     fs::create_dir_all(&root).map_err(|error| error.to_string())?; Ok(root)
 }
 fn redact(mut error: String, config: &TransportConfig) -> String {
-    for secret in [&config.git_token, &config.webdav_password].into_iter().flatten() {
+    for secret in [&config.webdav_password].into_iter().flatten() {
         if !secret.is_empty() { error = error.replace(secret, "[redacted]"); }
     }
     error
@@ -172,8 +166,7 @@ pub fn publish_files(config: &TransportConfig, root: &Path, images: &Path, publi
 }
 
 /// Disk footprint of everything synchronization keeps on this device. The
-/// sync cache is the bare Git mirror for the configured remote (WebDAV keeps
-/// no local mirror); photos and the database are shared by every backend.
+/// WebDAV has no local mirror; photos and the database are stored locally.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageUsage { sync_cache_bytes: u64, attachment_bytes: u64, database_bytes: u64 }

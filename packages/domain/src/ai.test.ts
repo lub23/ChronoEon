@@ -6,6 +6,15 @@ import { useExampleCatalogs } from "./testFixtures";
 const settings = useExampleCatalogs(createDefaultSettings());
 
 describe("provider-independent AI capture schema", () => {
+  it("preserves task status and weekly recurrence fields without inventing receipt times", () => {
+    const result = normalizeAIStructuredResult({ entries: [
+      {kind:"task",title:"Review",date:"2026-10-27",allDay:true,status:"done",recurrence:"weekly",recurringDays:[1,3,5],recurringEnd:"2026-12-31"},
+      {kind:"bill",title:"Receipt",date:"2026-10-26",allDay:false,amount:-40},
+    ] }, "2026-10-27", settings);
+    expect(result.candidates[0].draft).toMatchObject({status:"done",recurrence:"weekly",recurringDays:[1,3,5],recurringEnd:"2026-12-31"});
+    expect(result.candidates[1].draft).toMatchObject({allDay:true,start:undefined});
+    expect(result.candidates[1].issues).toEqual([]);
+  });
   it("extracts fenced JSON after private reasoning", () => {
     expect(extractAIJson('<think>ignore me</think>\n```json\n{"entries":[]}\n```')).toEqual({ entries: [] });
   });

@@ -25,8 +25,6 @@ interface TopBarProps {
   saving?: boolean;
   /** Desktop has undecorated-window chrome; phones use system controls. */
   showWindowControls?: boolean;
-  /** Mini window: no sidebar toggle, no maximize, everything else stays. */
-  mini?: boolean;
 }
 
 export function headingFor(view: AppView, selectedDate: Date, locale: Locale, weekStartsOn: ChronoEonSettings["firstDay"], dayCount = 1): string {
@@ -114,13 +112,12 @@ export function TopBar(props: TopBarProps) {
   };
 
   return (
-    <header ref={barRef} className={props.mini ? "topbar is-mini" : "topbar"} onPointerDown={beginWindowDrag} onDoubleClick={(event) => {
+    <header ref={barRef} className="topbar" onPointerDown={beginWindowDrag} onDoubleClick={(event) => {
       if ((event.target as HTMLElement).closest("button, input, label")) return;
-      if (props.mini) return;
       if (typeof window.matchMedia === "function" && window.matchMedia("(hover: none) and (pointer: coarse)").matches) return;
       void performDesktopWindowAction("toggle-maximize");
     }}>
-      {!props.mini && (
+      {(
         <div className="topbar-mobile-brand">
           <button className="icon-button" type="button" onClick={props.onMobileMenu} aria-label={t("views", locale)}><Icon name="menu" /></button>
         </div>
@@ -187,8 +184,8 @@ export function TopBar(props: TopBarProps) {
             <i aria-hidden="true" />{t("importExportBusy", locale)}
           </span>
         )}
-        {!props.mini && props.filterControl}
-        {props.showWindowControls !== false && <WindowControls locale={locale} mini={props.mini} />}
+        {props.filterControl}
+        {props.showWindowControls !== false && <WindowControls locale={locale} />}
       </div>
     </header>
   );

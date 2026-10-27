@@ -7,7 +7,7 @@ import { useSyncService } from "./useSyncService";
 import { DEFAULT_SYNC_CONFIG } from "./types";
 
 vi.mock("./client", () => ({
-  NativeSyncBackend: class { readonly id: string; constructor(config: { gitRemote: string }) { this.id = config.gitRemote; } },
+  NativeSyncBackend: class { readonly id: string; constructor(config: { webdavUrl: string }) { this.id = config.webdavUrl; } },
   prepareAttachmentImports: vi.fn(async () => {}),
   fetchStorageUsage: vi.fn(async () => ({ syncCacheBytes: 0, attachmentBytes: 0, databaseBytes: 0 })),
 }));
@@ -21,7 +21,7 @@ const journal = {
 };
 const settings = {}, callbacks = { importSettings: vi.fn(), onApplied: vi.fn(async () => {}), onConflicts: vi.fn() };
 function Harness({ remote }: { remote: string }) {
-  current = useSyncService(journal as unknown as SyncStore, { ...DEFAULT_SYNC_CONFIG, gitRemote: remote }, settings, callbacks);
+  current = useSyncService(journal as unknown as SyncStore, { ...DEFAULT_SYNC_CONFIG, webdavUrl: remote }, settings, callbacks);
   return null;
 }
 beforeEach(() => {

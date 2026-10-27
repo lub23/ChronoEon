@@ -61,7 +61,7 @@ const store = {
   list: vi.fn(async () => structuredClone(bills)),
 };
 const callbacks = { importSettings: vi.fn(), onApplied: vi.fn(async () => {}), onConflicts: vi.fn() };
-const config = { ...DEFAULT_SYNC_CONFIG, gitRemote: "test-remote" };
+const config = { ...DEFAULT_SYNC_CONFIG, webdavUrl: "test-remote" };
 function Harness({ settings = initial, configured = true }: { settings?: Record<string, unknown>; configured?: boolean }) {
   current = useSyncService(journal as unknown as SyncStore, configured ? config : DEFAULT_SYNC_CONFIG, settings, callbacks);
   return null;

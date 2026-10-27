@@ -341,7 +341,7 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
     <section className="stats-page">
       <header className="page-title-row view-title-row">
         <div>
-          <h2 className="view-heading"><span className="headline-leaf">{t("insightsTitle", locale)}</span></h2>
+          <h2 className="view-heading"><span className="headline-leaf">{t(tab === "bills" ? "billsPoeticTitle" : "tasksPoeticTitle", locale)}</span></h2>
         </div>
         <div className="stats-custom-range">
           <label>

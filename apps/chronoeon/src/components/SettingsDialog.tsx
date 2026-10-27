@@ -9,7 +9,7 @@ import type { AIProviderConfig } from "@chronoeon/domain";
 import type { AIProviderPreferences } from "../ai/provider";
 import type { Locale, ThemeMode } from "../domain/entry";
 import type { LunarPreference } from "../domain/lunar";
-import { DEFAULT_CAPTURE_SHORTCUT, DEFAULT_MINI_SHORTCUT, formatAccelerator, isValidAccelerator } from "../platform/globalShortcut";
+import { DEFAULT_CAPTURE_SHORTCUT, formatAccelerator, isValidAccelerator } from "../platform/globalShortcut";
 import type { NotificationPermissionState } from "../platform/notifications";
 import { calendarDisplayName, categoryLabel, compositeCategoryLabel, t, type MessageKey } from "../i18n";
 import { AISettingsPanel } from "./AISettingsPanel";
@@ -34,8 +34,6 @@ export interface AppPreferences {
   remindersEnabled: boolean;
   captureShortcut: string;
   captureShortcutEnabled: boolean;
-  miniShortcut: string;
-  miniShortcutEnabled: boolean;
   lowEndMode: boolean;
   resizeStep?: 5 | 10;
 }
@@ -50,7 +48,6 @@ interface SettingsDialogProps {
   transferBusy: boolean;
   notificationPermission: NotificationPermissionState;
   shortcutStatus: "registered" | "conflict" | "unsupported" | "off";
-  miniShortcutStatus: "registered" | "conflict" | "unsupported" | "off";
   initialSection?: SettingsSection;
   aiPreferences: AIProviderPreferences;
   onAIPreferencesChange: (preferences: AIProviderPreferences) => void;
@@ -100,7 +97,6 @@ const shortcutReference: Array<{ key: MessageKey; combo: string }> = [
   { key: "shortcutSearch", combo: "Control+F" },
   { key: "shortcutSettings", combo: "CommandOrControl+," },
   { key: "shortcutClose", combo: "Esc" },
-  { key: "shortcutMiniPresets", combo: "CommandOrControl+1–4" },
 ];
 
 
@@ -119,7 +115,6 @@ export function SettingsDialog({
   transferBusy,
   notificationPermission,
   shortcutStatus,
-  miniShortcutStatus,
   initialSection = "general",
   aiPreferences,
   onAIPreferencesChange,
@@ -145,7 +140,6 @@ export function SettingsDialog({
   const [section, setSection] = useState<SettingsSection>(initialSection);
   const isTouchDevice = useTouchDevice();
   const [shortcutDraft, setShortcutDraft] = useState(preferences.captureShortcut);
-  const [miniShortcutDraft, setMiniShortcutDraft] = useState(preferences.miniShortcut);
   const [catalogCalendarID, setCatalogCalendarID] = useState(settings.defaultCalendarID);
   const patch = (change: (current: ChronoEonSettings) => ChronoEonSettings) => onSettingsChange(change(settings));
   const activeCalendar = settings.calendars.find((calendar) => calendar.id === catalogCalendarID)
@@ -341,7 +335,6 @@ export function SettingsDialog({
       ? "notificationsUnsupported"
       : "notificationsDenied";
   const shortcutValid = isValidAccelerator(shortcutDraft);
-  const miniShortcutValid = isValidAccelerator(miniShortcutDraft);
   return (
     <div className="settings-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section ref={dialogRef} className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -423,35 +416,7 @@ export function SettingsDialog({
                           </div>
                         </div>
                       </li>
-                      <li className="settings-shortcut-configurable">
-                        <span>{t("globalMini", locale)}</span>
-                        <div className="settings-shortcut-control">
-                          <label className="settings-shortcut-switch">
-                            <span className={preferences.miniShortcutEnabled ? "settings-switch is-on" : "settings-switch"} aria-hidden="true"><i /></span>
-                            <input
-                              type="checkbox"
-                              checked={preferences.miniShortcutEnabled}
-                              onChange={(event) => onPreferencesChange({ miniShortcutEnabled: event.target.checked })}
-                              aria-label={`${t("globalMini", locale)} · ${t("shortcutEnable", locale)}`}
-                            />
-                          </label>
-                          <div className="settings-shortcut-edit">
-                            <input
-                              className="settings-shortcut-input"
-                              value={miniShortcutDraft}
-                              aria-label={t("globalMiniEdit", locale)}
-                              aria-invalid={!miniShortcutValid}
-                              title={miniShortcutStatus === "unsupported" ? t("globalCaptureUnavailable", locale) : miniShortcutStatus === "conflict" ? t("globalCaptureConflict", locale) : t("globalCaptureRegistered", locale)}
-                              onChange={(event) => setMiniShortcutDraft(event.target.value)}
-                              onBlur={() => { if (miniShortcutValid) onPreferencesChange({ miniShortcut: miniShortcutDraft }); else setMiniShortcutDraft(preferences.miniShortcut); }}
-                              disabled={!preferences.miniShortcutEnabled || miniShortcutStatus === "unsupported"}
-                            />
-                            <button type="button" className="icon-button subtle" title={t("filterReset", locale)} aria-label={t("filterReset", locale)} onClick={() => { setMiniShortcutDraft(DEFAULT_MINI_SHORTCUT); onPreferencesChange({ miniShortcut: DEFAULT_MINI_SHORTCUT }); }}>
-                              <Icon name="refresh" size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      </li>
+
                     </ul>
                   </div>
                 </>

@@ -8,6 +8,7 @@ import {
 import type {
   EntryDraft,
   EntryKind,
+  EntryStatus,
   Locale,
   Recurrence,
   Reminder,
@@ -260,7 +261,7 @@ function normalizeCandidate(
     endDate = "";
   }
 
-  const allDay = bool(value.allDay ?? value.all_day) ?? !start;
+  const allDay = safeKind === "bill" || safeKind === "idea" ? !start : bool(value.allDay ?? value.all_day) ?? !start;
   if (allDay) { start = ""; end = ""; }
   if (!allDay && !start) issues.push({ field: "start", severity: "error", code: "missing-start" });
   if (!allDay && start && end && !endDate && parseClockMinutes(end)! < parseClockMinutes(start)!) {
@@ -300,6 +301,7 @@ function normalizeCandidate(
       kind: safeKind,
       title,
       date,
+      status: safeKind === "task" && ["open", "in-progress", "done", "cancelled"].includes(text(value.status)) ? text(value.status) as EntryStatus : undefined,
       start: allDay ? undefined : start || undefined,
       end: allDay ? undefined : end || undefined,
       endDate: endDate && endDate !== date ? endDate : undefined,
@@ -385,6 +387,8 @@ const ENTRY_RESPONSE_SCHEMA = {
           endDate: { type: ["string", "null"] },
           allDay: { type: "boolean" },
           category: { type: "string" },
+          calendar: { type: ["string", "null"] },
+          status: { type: ["string", "null"], enum: ["open", "in-progress", "done", "cancelled", null] },
           amount: { type: ["number", "null"] },
           currency: { type: ["string", "null"] },
           payment: { type: ["string", "null"] },
@@ -394,6 +398,8 @@ const ENTRY_RESPONSE_SCHEMA = {
           priority: { type: ["string", "null"], enum: ["low", "normal", "high", null] },
           urgency: { type: ["string", "null"], enum: ["low", "normal", "high", null] },
           recurrence: { type: ["string", "null"] },
+          recurringDays: { type: "array", items: { type: "integer", minimum: 0, maximum: 6 } },
+          recurringEnd: { type: ["string", "null"] },
           reminder: { type: ["string", "null"] },
         },
       },
@@ -426,7 +432,7 @@ export function buildSmartCapturePrompt(
   settings: ChronoEonSettings,
 ): SmartCapturePrompt {
   const categorySummary = (["task", "event", "idea", "bill"] as EntryKind[])
-    .map((kind) => `${kind}: ${categoryOptionsForKind(kind, settings).map((item) => item.value).join(", ")}`)
+    .map((kind) => `${kind}: ${categoryOptionsForKind(kind, settings).map((item) => `${item.value} (${item.label})`).join(", ")}`)
     .join("\n");
   const language = locale === "zh" ? "Simplified Chinese" : "English";
   const exampleDate = currentDateTime.slice(0, 10);
@@ -436,7 +442,7 @@ export function buildSmartCapturePrompt(
     messages: [
       {
         role: "system",
-        content: `You convert natural language into ChronoEon calendar drafts. Current local date/time: ${currentDateTime}. Interpret relative dates from it. Preserve multiple requested items as separate entries. Output JSON only, matching the supplied schema. UI language: ${language}. Use 24-hour HH:mm and civil YYYY-MM-DD values. Ideas use an exact HH:MM time when one is known. Never invent an ID, file path, API key, or prose outside JSON.\nUse exactly these fields: kind, title, date, allDay, start, end, endDate, category, amount. Never use type, modality, time, duration, begin, or end_date. Timed entries set allDay to false, start to HH:mm, end to HH:mm, and endDate to null unless the range crosses midnight; all-day entries set start, end, and endDate to null. Never put a clock time in endDate. Bills include amount as a signed number: negative for expenses and positive for income.\n${dateHints} Copy the exact hint date for the matching relative expression; never substitute another weekday.\nExample: {"entries":[{"kind":"bill","title":"Lunch","date":"${exampleDate}","allDay":false,"start":"12:00","end":"12:30","endDate":null,"category":"生活","amount":-36}]}\nAllowed categories:\n${categorySummary}`,
+        content: `You convert natural language into ChronoEon calendar drafts. Current local date/time: ${currentDateTime}. Interpret relative dates from it. Preserve multiple requested items as separate entries. Output JSON only, matching the supplied schema. UI language: ${language}. Use 24-hour HH:mm and civil YYYY-MM-DD values. Ideas use an exact HH:MM time when one is known. Never invent an ID, file path, API key, or prose outside JSON.\nUse the schema fields: kind, title, date, allDay, start, end, endDate, category, amount, currency, payment, location, note, tags, priority, urgency, recurrence, recurringDays, recurringEnd, status, calendar, reminder. Only tasks have status; weekly recurringDays use Sunday=0 through Saturday=6. Calendar is ${settings.defaultCalendarID}. Never use type, modality, time, duration, begin, or end_date. Timed entries set allDay to false, start to HH:mm, end to HH:mm, and endDate to null unless the range crosses midnight; all-day entries set start, end, and endDate to null. When no clock time is given, set allDay=true; never invent a clock time. Never put a clock time in endDate. Bills include amount as a signed number: negative for expenses and positive for income.\n${dateHints} Copy the exact hint date for the matching relative expression; never substitute another weekday.\nExample: {"entries":[{"kind":"bill","title":"Lunch","date":"${exampleDate}","allDay":false,"start":"12:00","end":"12:30","endDate":null,"category":"生活","amount":-36}]}\nAllowed categories (use the exact value before parentheses; choose the default if no option matches):\n${categorySummary}`,
       },
       { role: "user", content: input },
     ],

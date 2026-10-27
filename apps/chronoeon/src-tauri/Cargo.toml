@@ -1,6 +1,6 @@
 [package]
 name = "chronoeon-app"
-version = "3.0.2"
+version = "3.0.3"
 description = "ChronoEon (时元) standalone application"
 authors = ["ChronoEon contributors"]
 edition = "2021"
@@ -30,9 +30,6 @@ tauri-plugin-notification = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 base64 = "0.22"
-libgit2-sys = "0.18"
-# Vendored TLS/libgit2 keeps desktop and Android on the same sync path.
-git2 = { version = "0.20", default-features = false, features = ["https", "vendored-libgit2", "vendored-openssl"] }
 reqwest = { version = "0.13", features = ["json", "blocking", "stream"] }
 # Mature native codecs work on desktop and Tauri mobile; never upload raw photos.
 image = { version = "0.25", features = ["webp"] }

@@ -1,6 +1,10 @@
 use super::{BackendHead, EncodedObject, PublishResult, SyncBackend, TransportConfig, INDEX_NAME, MAX_OBJECT_BYTES};
 use reqwest::{blocking::{Client, RequestBuilder, Response}, header::{ETAG, IF_MATCH, IF_NONE_MATCH}, Method, Url};
-use std::{collections::HashSet, io::Read, sync::{Mutex, OnceLock}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{collections::{HashMap, HashSet}, io::Read, sync::{Mutex, OnceLock}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+
+// Disposable manifest cache: authorization is still checked on every GET.
+type CachedIndexes = HashMap<String, (String, Vec<u8>)>;
+static INDEX_CACHE: OnceLock<Mutex<CachedIndexes>> = OnceLock::new();
 
 pub struct WebDAVBackend { client: Client, base: Url, username: String, password: String, collections: HashSet<String>, lock_token: Option<String>, locked_at: Instant }
 impl WebDAVBackend {
@@ -30,9 +34,14 @@ impl WebDAVBackend {
     fn acquire_lock(&mut self) -> Result<bool, String> {
         self.collection("")?;
         let method = Method::from_bytes(b"LOCK").map_err(|error| error.to_string())?;
-        let response = Self::send(self.plain_request(method, "")?.header("Depth", "infinity").header("Timeout", "Second-600")
+        let response = match Self::send(self.plain_request(method, "")?.header("Depth", "infinity").header("Timeout", "Second-600")
             .header("Content-Type", "application/xml; charset=utf-8")
-            .body("<d:lockinfo xmlns:d=\"DAV:\"><d:lockscope><d:exclusive/></d:lockscope><d:locktype><d:write/></d:locktype><d:owner>ChronoEon sync</d:owner></d:lockinfo>"))?;
+            .body("<d:lockinfo xmlns:d=\"DAV:\"><d:lockscope><d:exclusive/></d:lockscope><d:locktype><d:write/></d:locktype><d:owner>ChronoEon sync</d:owner></d:lockinfo>")) {
+            // Conditional writes were verified first. A server may allow those
+            // while declining collection locks (including Nutstore).
+            Err(error) if error == "SYNC_FORBIDDEN" => return Ok(false),
+            result => result?,
+        };
         if matches!(response.status().as_u16(),405|501) { return Ok(false); }
         if matches!(response.status().as_u16(),423|409|412) { return Err("SYNC_REMOTE_BUSY".into()); }
         if !response.status().is_success() { return Err(format!("SYNC_WEBDAV_LOCK: HTTP {}",response.status().as_u16())); }
@@ -82,11 +91,26 @@ impl WebDAVBackend {
             else if !response.status().is_success() { return Err(format!("SYNC_WEBDAV_PUT: HTTP {}", response.status().as_u16())); }
         }
         self.refresh_lock()?;
-        let request = self.request(Method::PUT, INDEX_NAME)?.header("Content-Type","application/json").body(manifest.to_vec());
-        let request = match expected { Some(tag) => request.header(IF_MATCH,tag), None => request.header(IF_NONE_MATCH,"*") };
-        let response = Self::send(request)?;
-        if matches!(response.status().as_u16(),409 | 412) { return Ok(PublishResult { conflict: true }); }
-        if !response.status().is_success() { return Err(format!("SYNC_WEBDAV_PUT: HTTP {}", response.status().as_u16())); }
+        if let Some(tag) = expected {
+            let response = Self::send(self.request(Method::PUT, INDEX_NAME)?.header("Content-Type","application/json").header(IF_MATCH,tag).body(manifest.to_vec()))?;
+            if matches!(response.status().as_u16(),409 | 412) { return Ok(PublishResult { conflict: true }); }
+            if !response.status().is_success() { return Err(format!("SYNC_WEBDAV_PUT: HTTP {}", response.status().as_u16())); }
+        } else {
+            // MOVE Overwrite:F creates the first head atomically. Nutstore
+            // ignores If-None-Match:* on PUT, so it cannot elect a first writer.
+            let stage = self.probe_name("manifest");
+            let result = (|| {
+                let upload = Self::send(self.request(Method::PUT, &stage)?.header("Content-Type","application/json").body(manifest.to_vec()))?;
+                if !upload.status().is_success() { return Err(format!("SYNC_WEBDAV_PUT: HTTP {}", upload.status().as_u16())); }
+                let moved = Self::send(self.move_without_overwrite(&stage, INDEX_NAME)?)?;
+                if matches!(moved.status().as_u16(),409 | 412) { return Ok(PublishResult { conflict: true }); }
+                if !moved.status().is_success() { return Err(format!("SYNC_WEBDAV_MOVE: HTTP {}", moved.status().as_u16())); }
+                Ok(PublishResult { conflict: false })
+            })();
+            // Only our unique staging object is eligible for cleanup.
+            let _ = Self::send(self.request(Method::DELETE, &stage)?);
+            if result?.conflict { return Ok(PublishResult { conflict: true }); }
+        }
         for path in deletes {
             // Unique log/snapshot paths are never reintroduced after their
             // frontier is acknowledged. Shared SHA paths CAN be restored, so
@@ -99,7 +123,16 @@ impl WebDAVBackend {
         }
         Ok(PublishResult { conflict: false })
     }
-    fn send(request: RequestBuilder) -> Result<Response, String> { request.send().map_err(|error| format!("SYNC_NETWORK: {}", error.without_url())) }
+    fn send(request: RequestBuilder) -> Result<Response, String> {
+        let response = request.send().map_err(|error| format!("SYNC_NETWORK: {}", error.without_url()))?;
+        match response.status().as_u16() {
+            401 => Err("SYNC_UNAUTHORIZED".into()),
+            403 => Err("SYNC_FORBIDDEN".into()),
+            429 | 503 => Err("SYNC_REMOTE_BUSY".into()),
+            507 => Err("SYNC_QUOTA_EXCEEDED".into()),
+            _ => Ok(response),
+        }
+    }
     fn read(response: Response) -> Result<Vec<u8>, String> {
         if response.content_length().is_some_and(|bytes| bytes > MAX_OBJECT_BYTES as u64) { return Err("SYNC_OBJECT_TOO_LARGE".into()); }
         let mut bytes = Vec::new(); response.take(MAX_OBJECT_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
@@ -124,8 +157,17 @@ impl WebDAVBackend {
     }
     fn strong_etag(response: &Response) -> Result<String, String> {
         let tag = response.headers().get(ETAG).and_then(|value| value.to_str().ok()).ok_or("SYNC_WEBDAV_CAS_REQUIRED")?;
-        if tag.starts_with("W/") || !tag.starts_with('"') || !tag.ends_with('"') { return Err("SYNC_WEBDAV_CAS_REQUIRED".into()); }
+        // Nutstore returns a bare opaque tag and expects that exact value in
+        // If-Match. Strength is established by the conditional-write probe.
+        if tag.starts_with("W/") || tag.is_empty() || tag.len() > 256 || tag.bytes().any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace()) { return Err("SYNC_WEBDAV_CAS_REQUIRED".into()); }
         Ok(tag.into())
+    }
+    fn probe_name(&self, kind: &str) -> String {
+        format!(".chronoeon-{kind}-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos())
+    }
+    fn move_without_overwrite(&self, source: &str, destination: &str) -> Result<RequestBuilder, String> {
+        let method = Method::from_bytes(b"MOVE").map_err(|error| error.to_string())?;
+        Ok(self.request(method, source)?.header("Destination", self.base.join(destination).map_err(|_| "SYNC_INVALID_REMOTE")?.as_str()).header("Overwrite", "F"))
     }
     /// Fail closed on servers that merely advertise ETags but ignore conditional
     /// writes. The probe is unique, empty of user data, and immediately removed.
@@ -134,17 +176,22 @@ impl WebDAVBackend {
         let verified = VERIFIED.get_or_init(|| Mutex::new(HashSet::new()));
         if verified.lock().map_err(|_| "SYNC_LOCK")?.contains(self.base.as_str()) { return Ok(()); }
         self.collection("")?;
-        let path = format!(".chronoeon-cas-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_nanos());
+        let path = self.probe_name("cas");
+        let source = self.probe_name("move");
         let response = Self::send(self.request(Method::PUT, &path)?.header(IF_NONE_MATCH, "*").body("probe"))?;
         if !response.status().is_success() { return Err(format!("SYNC_WEBDAV_PROBE: HTTP {}", response.status().as_u16())); }
         let check: Result<(), String> = (|| {
             let read = Self::send(self.request(Method::GET, &path)?)?; Self::strong_etag(&read)?;
-            let duplicate = Self::send(self.request(Method::PUT, &path)?.header(IF_NONE_MATCH,"*").body("probe"))?;
             let stale = Self::send(self.request(Method::PUT, &path)?.header(IF_MATCH,"\"chronoeon-never-matches\"").body("probe"))?;
-            if duplicate.status().as_u16() != 412 || stale.status().as_u16() != 412 { return Err("SYNC_WEBDAV_CAS_REQUIRED".into()); }
+            if stale.status().as_u16() != 412 { return Err("SYNC_WEBDAV_CAS_REQUIRED".into()); }
+            let upload = Self::send(self.request(Method::PUT, &source)?.body("probe"))?;
+            if !upload.status().is_success() { return Err("SYNC_WEBDAV_CAS_REQUIRED".into()); }
+            let duplicate = Self::send(self.move_without_overwrite(&source, &path)?)?;
+            if !matches!(duplicate.status().as_u16(),409 | 412) { return Err("SYNC_WEBDAV_CAS_REQUIRED".into()); }
             Ok(())
         })();
         let cleanup = Self::send(self.request(Method::DELETE, &path)?)?;
+        let _ = Self::send(self.request(Method::DELETE, &source)?);
         if !cleanup.status().is_success() && cleanup.status().as_u16() != 404 { return Err("SYNC_WEBDAV_PROBE_CLEANUP".into()); }
         check?;
         verified.lock().map_err(|_| "SYNC_LOCK")?.insert(self.base.to_string()); Ok(())
@@ -152,12 +199,36 @@ impl WebDAVBackend {
 }
 impl SyncBackend for WebDAVBackend {
     fn fetch_index(&mut self) -> Result<BackendHead, String> {
-        let response = Self::send(self.request(Method::GET, INDEX_NAME)?)?;
-        if response.status().as_u16() == 404 { return Ok(BackendHead { head: None, bytes: None }); }
+        let key = format!("{}:{}", self.base, self.username);
+        let cache = INDEX_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let cached = cache.lock().map_err(|_| "SYNC_LOCK")?.get(&key).cloned();
+        let request = self.request(Method::GET, INDEX_NAME)?;
+        let request = match &cached { Some((etag, _)) => request.header(IF_NONE_MATCH, etag), None => request };
+        let mut response = Self::send(request)?;
+        // Nutstore reports a missing parent collection as 409 rather than 404.
+        // Create only the configured collection, then read the index again.
+        if response.status().as_u16() == 409 {
+            self.collection("")?;
+            response = Self::send(self.request(Method::GET, INDEX_NAME)?)?;
+        }
+        if response.status().as_u16() == 304 {
+            let (head, bytes) = cached.ok_or("SYNC_INVALID_INDEX")?;
+            self.collections.insert(String::new());
+            return Ok(BackendHead { head: Some(head), bytes: Some(bytes) });
+        }
+        if response.status().as_u16() == 404 {
+            cache.lock().map_err(|_| "SYNC_LOCK")?.remove(&key);
+            return Ok(BackendHead { head: None, bytes: None });
+        }
         if !response.status().is_success() { return Err(format!("SYNC_WEBDAV_GET: HTTP {}", response.status().as_u16())); }
         let etag = Self::strong_etag(&response)?;
         self.collections.insert(String::new());
-        Ok(BackendHead { head: Some(etag), bytes: Some(Self::read(response)?) })
+        let bytes = Self::read(response)?;
+        if bytes.len() > super::MAX_INDEX_BYTES { return Err("SYNC_INDEX_TOO_LARGE".into()); }
+        let mut indexes = cache.lock().map_err(|_| "SYNC_LOCK")?;
+        if indexes.len() >= 4 { indexes.clear(); }
+        indexes.insert(key, (etag.clone(), bytes.clone()));
+        Ok(BackendHead { head: Some(etag), bytes: Some(bytes) })
     }
     fn read_object(&mut self, path: &str) -> Result<Vec<u8>, String> {
         let response = Self::send(self.request(Method::GET, path)?)?;
@@ -183,11 +254,13 @@ mod tests {
     use std::{collections::BTreeMap, io::{BufRead,BufReader,Write}, net::TcpListener, sync::{Arc,atomic::{AtomicBool,Ordering}}, thread};
     struct Server { url: String, stop: Arc<AtomicBool>, thread: Option<thread::JoinHandle<()>> }
     impl Server {
-        fn new(ignore_conditions: bool) -> Self {
+        fn new(ignore_conditions: bool) -> Self { Self::dialect(ignore_conditions, false) }
+        fn dialect(ignore_conditions: bool, nutstore: bool) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap(); let address = listener.local_addr().unwrap(); listener.set_nonblocking(true).unwrap();
             let stop = Arc::new(AtomicBool::new(false)); let shutdown = stop.clone();
             let thread = thread::spawn(move || {
                 let mut objects: BTreeMap<String,Vec<u8>> = BTreeMap::new();
+                let mut collection_created = false;
                 while !shutdown.load(Ordering::Relaxed) {
                     let Ok((mut stream,_)) = listener.accept() else { thread::sleep(Duration::from_millis(2)); continue; };
                     stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
@@ -199,18 +272,27 @@ mod tests {
                     }
                     let length=headers.get("content-length").and_then(|value|value.parse::<usize>().ok()).unwrap_or(0);
                     let mut body=vec![0;length]; reader.read_exact(&mut body).unwrap();
-                    let current=objects.get(path); let etag=current.map(|bytes|format!("\"{}\"",crate::attachments::hash(bytes)));
-                    let stale=!ignore_conditions && ((headers.get("if-none-match").is_some() && current.is_some())
+                    let current=objects.get(path); let etag=current.map(|bytes| if nutstore { crate::attachments::hash(bytes) } else { format!("\"{}\"",crate::attachments::hash(bytes)) });
+                    let stale=!ignore_conditions && ((!nutstore && headers.get("if-none-match").is_some() && current.is_some())
                         || headers.get("if-match").is_some_and(|value|Some(value)!=etag.as_ref()));
                     let (status,body)=match method.as_str() {
-                        "MKCOL" => (201,vec![]),
+                        "MKCOL" => { collection_created = true; (201,vec![]) },
+                        "GET" if nutstore && !collection_created => (409,vec![]),
+                        "LOCK" if nutstore => (403,vec![]),
+                        "GET" if headers.get("if-none-match").is_some_and(|value| Some(value) == etag.as_ref()) => (304,vec![]),
                         "GET" => current.map(|bytes|(200,bytes.clone())).unwrap_or((404,vec![])),
                         "PUT" if stale => (412,vec![]),
                         "PUT" => { objects.insert(path.clone(),body); (201,vec![]) },
+                        "MOVE" => {
+                            let target = headers.get("destination").and_then(|value| Url::parse(value).ok()).map(|url| url.path().to_string()).unwrap_or_default();
+                            if objects.contains_key(&target) { (if nutstore {409} else {412},vec![]) }
+                            else if let Some(bytes) = objects.remove(path) { objects.insert(target, bytes); (201,vec![]) }
+                            else { (404,vec![]) }
+                        },
                         "DELETE" => { objects.remove(path); (204,vec![]) },
                         _ => (405,vec![]),
                     };
-                    let etag=objects.get(path).map(|bytes|format!("ETag: \"{}\"\r\n",crate::attachments::hash(bytes))).unwrap_or_default();
+                    let etag=objects.get(path).map(|bytes| if nutstore { format!("ETag: {}\r\n", crate::attachments::hash(bytes)) } else {format!("ETag: \"{}\"\r\n",crate::attachments::hash(bytes))}).unwrap_or_default();
                     let response=format!("HTTP/1.1 {status} Status\r\n{etag}Content-Length: {}\r\nConnection: close\r\n\r\n",body.len());
                     stream.write_all(response.as_bytes()).unwrap(); stream.write_all(&body).unwrap();
                 }
@@ -221,7 +303,7 @@ mod tests {
     impl Drop for Server { fn drop(&mut self) { self.stop.store(true,Ordering::Relaxed); self.thread.take().unwrap().join().unwrap(); } }
     #[test]
     fn webdav_uses_etag_cas_and_refuses_stale_publications() {
-        let server=Server::new(false); let config=TransportConfig { mode:"webdav".into(),webdav_url:Some(server.url.clone()),..Default::default() };
+        let server=Server::new(false); let config=TransportConfig { webdav_url:Some(server.url.clone()),..Default::default() };
         let mut a=WebDAVBackend::new(&config).unwrap(); let mut b=WebDAVBackend::new(&config).unwrap();
         assert!(!a.publish(None,b"one",&[],&[]).unwrap().conflict);
         let old=b.fetch_index().unwrap().head;
@@ -230,8 +312,22 @@ mod tests {
         assert_eq!(b.fetch_index().unwrap().bytes.unwrap(),b"two");
     }
     #[test]
+    fn nutstore_bare_etags_missing_collection_and_first_writer_races_are_safe() {
+        let server=Server::dialect(false, true);
+        let config=TransportConfig { webdav_url:Some(server.url.clone()),..Default::default() };
+        let mut a=WebDAVBackend::new(&config).unwrap(); let mut b=WebDAVBackend::new(&config).unwrap();
+        assert!(a.fetch_index().unwrap().bytes.is_none());
+        assert!(!a.publish(None,b"first",&[],&[]).unwrap().conflict);
+        assert!(b.publish(None,b"other first writer",&[],&[]).unwrap().conflict);
+        let old=b.fetch_index().unwrap().head;
+        assert!(!a.publish(old.as_deref(),b"changed",&[],&[]).unwrap().conflict);
+        assert!(b.publish(old.as_deref(),b"stale",&[],&[]).unwrap().conflict);
+        assert_eq!(b.fetch_index().unwrap().bytes.unwrap(),b"changed");
+        assert_eq!(b.fetch_index().unwrap().bytes.unwrap(),b"changed"); // conditional GET / 304
+    }
+    #[test]
     fn refuses_servers_that_ignore_conditional_writes() {
-        let server=Server::new(true); let config=TransportConfig { mode:"webdav".into(),webdav_url:Some(server.url.clone()),..Default::default() };
+        let server=Server::new(true); let config=TransportConfig { webdav_url:Some(server.url.clone()),..Default::default() };
         let mut backend=WebDAVBackend::new(&config).unwrap();
         assert_eq!(backend.publish(None,b"user data",&[],&[]).err().unwrap(),"SYNC_WEBDAV_CAS_REQUIRED");
         assert!(backend.fetch_index().unwrap().bytes.is_none());
@@ -239,7 +335,7 @@ mod tests {
     #[test]
     fn class_one_servers_keep_shared_photo_bytes_during_cleanup() {
         let server=Server::new(false);
-        let config=TransportConfig { mode:"webdav".into(),webdav_url:Some(server.url.clone()),..Default::default() };
+        let config=TransportConfig { webdav_url:Some(server.url.clone()),..Default::default() };
         let mut backend=WebDAVBackend::new(&config).unwrap();
         let mut png=std::io::Cursor::new(Vec::new());
         image::DynamicImage::new_rgb8(12,12).write_to(&mut png,image::ImageFormat::Png).unwrap();

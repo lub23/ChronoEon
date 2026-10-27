@@ -1,8 +1,8 @@
 import type { EngineResult, SyncEngine, SyncStore, SyncRunOptions } from "@chronoeon/storage";
 
-/** Git/WebDAV have no client push channel; online peers discover a peer's
- * publication by checking the remote index on the same one-minute cadence. */
-export const REMOTE_POLL_MS = 60_000;
+/** WebDAV have no client push channel; online peers discover a peer's
+ * publication by checking the remote index on the same five-minute cadence. */
+export const REMOTE_POLL_MS = 5 * 60_000;
 
 /** SQLite owns durability; timers are only wake-up hints. Debounce and retries
  * are independent so continuous typing cannot cancel an older failed upload. */
