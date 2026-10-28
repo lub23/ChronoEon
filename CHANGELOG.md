@@ -1,8 +1,37 @@
 # Changelog / 更新记录
 
+## 0.1.0 — 2026-10-28 · First stable release / 首个正式版本
+
+### English
+
+- Native dev and packaged applications now share device settings in SQLite, alongside records, attachments and synchronization state. Browser demo data remains separate.
+- Group ideas with leaf labels on the vine and reuse the item add-button design.
+- Paste API keys from the clipboard. Ask shows tool results, steps, elapsed time and live streamed answers; capture shows streamed recognition progress and validates drafts before review. Interrupted responses are not saved.
+- Preview and select literal text replacements across entry fields and item names, locations, notes and payment methods. Save mixed changes as one revision-checked transaction, with one recoverable history operation and sync notification.
+- Apply filter selections only on confirmation; cancel discards drafts. Move bill color markers to the parent category and keep actions accessible on narrow screens.
+- Match heatmap legend colors to the selected category or income series. Protect newly created entries with empty initial revisions from stale writes.
+- Retain the Android package ID and signing identity; versionCode 3000004 supports in-place upgrades from the test builds despite the stable version reset.
+
+### 简体中文
+
+- 原生 dev 与正式 exe 的本机设置统一保存于 SQLite，与记录、附件及同步状态使用同一数据目录；浏览器演示独立。
+- 灵感分组使用藤蔓上的叶签，新增按钮统一采用物品页样式。
+- 密钥支持剪贴板粘贴；随心问展示工具结果、运行步骤、耗时和流式正文，随心记显示识别进度并核验结构化草稿；中断回答不会保存。
+- 新增逐字段预览、勾选的文字批量替换，支持条目字段和物品名称、地点、备注及支付方式；混合修改原子提交、校验版本、一次恢复并触发同步。
+- 筛选确认后统一生效，取消放弃草稿；账目颜色移到一级分类，窄屏下始终可见确认按钮。
+- 热力图图例跟随分类/收入配色，修复新建条目初始更新时间为空时的版本检查。
+- Android 保持原包名、证书和递增版本码 3000004，可覆盖测试版保留数据。刷新说明与界面截图。
+
+## Earlier test releases / 此前测试版本
+
 ## 3.0.3 — 2026-10-27
 
 ### English
+
+- Refine the blue/yellow orbit icon with a symmetric π base and safer launcher padding; refresh every platform icon.
+- Sync after 15 quiet seconds; simplify settings to local and remote database sizes. Resume Android native timers across service restarts and enlarge task status touch targets without resize-handle overlap.
+- Add date-scoped twelve-month heatmaps to schedules and bills, category selectors, and schedule duration drilldowns.
+- Add category grouping and sorting to items/ideas, category navigation and tag bubbles to ideas, and a taller desktop capture/ask panel.
 
 - Capture sends images and optional text to the active AI model, using representative local naming and category habits. Text stays on-device by default, with an explicit Refine with AI action and editable review.
 - Ask bounds and deduplicates read-only tool requests and keeps simple answers concise. Photo-only messages are supported.
@@ -12,6 +41,11 @@
 - Remove the mini window, its shortcuts and the idea-to-task action. Settings explain image parsing and first-device/multi-device synchronization.
 
 ### 简体中文
+
+- 蓝黄时间环图标微调为对称 π 下半部，增加启动器安全留白，统一各平台资源。
+- 停止编辑 15 秒后同步，设置仅显示本地与同步数据库大小；Android 原生服务重启后继续计时，状态点击区域扩大且不被拉伸手柄覆盖。
+- 日程与账单统一显示按所选日期着色的 12 个月热力图及分类下拉框，日程分类时长支持展开条目明细。
+- 物品与灵感新增分类分组和排序；灵感增加分类导航、标签气泡和右上角新增按钮，电脑端随心记/问面板增高。
 
 - 随心记图片和可选文字共用当前 AI 模型，参考少量代表性历史记录的命名与分类习惯；文字默认本地解析，可点击“AI 优化”并核对字段。
 - 随心问限制并去重只读工具调用，简单问题简洁回答；支持只发图片。

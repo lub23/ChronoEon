@@ -3,11 +3,11 @@
 .items-toolbar-controls { display: flex; min-width: 0; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 4px; margin-left: auto; }
 .items-toolbar-controls > .glass-select { width: var(--glass-select-fit, max-content); min-width: 0; max-width: 34vw; }
 .items-toolbar .glass-select-trigger { height: 32px; padding-inline: 7px; font-size: 10.5px; }
-.items-toolbar .items-add-button {
+.items-toolbar-controls .items-add-button {
   width: 32px; min-height: 32px; flex: 0 0 32px; padding: 0; border: 1px solid color-mix(in srgb, var(--accent) 44%, var(--line));
   border-radius: 50%; background: color-mix(in srgb, var(--accent-wash) 58%, transparent); color: var(--accent-dark); box-shadow: none;
 }
-.items-toolbar .items-add-button:hover { background: color-mix(in srgb, var(--accent) 18%, var(--surface-solid)); }
+.items-toolbar-controls .items-add-button:hover { background: color-mix(in srgb, var(--accent) 18%, var(--surface-solid)); }
 .items-view .stats-tabs.items-history-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
 .items-view .items-history-tabs button { flex: 1; justify-content: center; }
 .item-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 10px; list-style: none; padding: 0; margin: 0; }
@@ -95,4 +95,4 @@
 .item-photo-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .item-photo-cover { pointer-events: none; }
 
-.items-toolbar .items-add-button { display: grid; place-items: center; padding: 0; line-height: 1; }
+.items-toolbar-controls .items-add-button { display: grid; place-items: center; padding: 0; line-height: 1; }

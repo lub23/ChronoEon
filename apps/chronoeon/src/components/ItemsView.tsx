@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { itemMatchesSearch } from "../domain/search";
+import { Fragment, useMemo } from "react";
 import "./items.css";
 import { itemCategoriesForCalendar, itemDailyCost, itemDaysOwned, currencySymbol, selectedCalendar, type Item, type ChronoEonSettings, type Entry, type Locale } from "@chronoeon/domain";
 import { t, type MessageKey } from "../i18n";
@@ -79,15 +80,23 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
   const [history, setHistory] = usePersistentPreference("items-history", false);
   const [sortField, setSortField] = usePersistentPreference<ItemSortField>("items-sort-field", "date");
   const [sortDirection, setSortDirection] = usePersistentPreference<ItemSortDirection>("items-sort-direction", "desc");
+  const [grouped, setGrouped] = usePersistentPreference("items-grouped", false);
   const bills = useMemo(() => new Map(entries.filter(entry => entry.kind === "bill").map(entry => [entry.id, entry])), [entries]);
-  const visible = useMemo(() => items.filter(item => Boolean(item.disposal) === history && `${item.name} ${item.notes ?? ""}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).sort((a, b) => {
-    const byDate = a.acquiredOn.localeCompare(b.acquiredOn);
+  const visible = useMemo(() => items.filter(item => Boolean(item.disposal) === history && itemMatchesSearch(item, search, locale)).sort((a, b) => {
+    const byDate = `${a.acquiredOn} ${a.acquiredAt}`.localeCompare(`${b.acquiredOn} ${b.acquiredAt}`);
     const byMoney = (amount: (item: Item) => number) => a.currency.localeCompare(b.currency) || amount(a) - amount(b);
     const natural = sortField === "date" ? byDate : sortField === "name" ? a.name.localeCompare(b.name, locale) : sortField === "cost" ? byMoney(item => item.cost) : byMoney(item => itemDailyCost(item, today));
     const result = sortDirection === "desc" ? -natural : natural;
     return result || a.id.localeCompare(b.id);
   }), [items, history, locale, search, sortDirection, sortField, today]);
 
+  const groups = new Map<string, Item[]>();
+  for (const item of visible) {
+    const label = grouped ? itemCategoryLabel(item.category, locale, settings, item.calendarId) : "";
+    const group = groups.get(label);
+    if (group) group.push(item);
+    else groups.set(label, [item]);
+  }
   const clockTime = (value: string) => value.match(/(?:T|\s)(\d{2}:\d{2})$/)?.[1] ?? value;
 
   const calendarNameFor = (item: Item) => {
@@ -113,6 +122,7 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
           onClick={() => setSortDirection(current => current === "asc" ? "desc" : "asc")}>
           <i aria-hidden="true"><b className="is-up" /><b className="is-down" /></i>
         </button>
+        <button type="button" className="icon-button" aria-label={t(grouped ? "viewList" : "viewGrouped", locale)} title={t(grouped ? "viewList" : "viewGrouped", locale)} onClick={() => setGrouped(value => !value)}><Icon name={grouped ? "agenda" : "folder"} size={17} /></button>
         <button type="button" className="primary-button items-add-button" onClick={onAdd} disabled={!onAdd} aria-label={t("itemAdd", locale)}><Icon name="plus" size={16} /></button>
       </div>
     </div>
@@ -123,7 +133,7 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
     {visible.length === 0 ? <p className="stats-card panel stats-empty" role="status">{search.trim()
       ? <>{t("itemsSearchEmpty", locale)} {t("itemsSearchHint", locale)}</>
       : t(history ? "itemsHistoryEmpty" : "itemsEmpty", locale)}</p> : <ul className="item-list">
-      {visible.map(item => {
+      {[...groups].sort(([a], [b]) => a.localeCompare(b, locale)).map(([label, group]) => <Fragment key={label}>{grouped && <li className="view-group-title">{label}</li>}{group.map(item => {
         const category = itemCategoryConfig(item.category, settings, item.calendarId);
         const calendarName = calendarNameFor(item);
         return <li key={item.id} className="item-card panel" style={{ "--item-category": category?.color ?? "var(--accent)", "--item-calendar": selectedCalendar(settings, item.calendarId).color } as React.CSSProperties}>
@@ -151,7 +161,7 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
           <span className="item-calendar-seal" title={calendarName} aria-label={calendarName}>{signatureInitial(item)}</span>
         </footer>
       </li>;
-      })}
+      })}</Fragment>)}
     </ul>}
   </section>;
 }

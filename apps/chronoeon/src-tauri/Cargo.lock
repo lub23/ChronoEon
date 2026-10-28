@@ -769,7 +769,7 @@ dependencies = [
 
 [[package]]
 name = "chronoeon-app"
-version = "3.0.3"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "eventsource-stream",

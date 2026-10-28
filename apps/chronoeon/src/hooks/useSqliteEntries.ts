@@ -52,7 +52,7 @@ export function useSqliteEntries(store: SqliteEntryStore | null): SqliteEntries 
       : [...current, entry]);
     setRevisions((current) => {
       const next = new Map(current);
-      if (rawRevision) next.set(entry.id, rawRevision);
+      next.set(entry.id, rawRevision);
       return next;
     });
   }, []);

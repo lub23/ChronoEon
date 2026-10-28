@@ -4,10 +4,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEntryId, createDefaultSettings } from "@chronoeon/domain";
-import { AiConversationStore, SqliteEntryStore, SyncEngine, SyncStore, TimerStore, type Publication, type RemoteIndex, type SyncBackend } from "@chronoeon/storage";
+import { LocalPreferences, AiConversationStore, SqliteEntryStore, SyncEngine, SyncStore, TimerStore, type Publication, type RemoteIndex, type SyncBackend } from "@chronoeon/storage";
 import { MemorySqliteBackend } from "@chronoeon/storage/test";
 import { settingsSyncPayload } from "./domain/dataTransfer";
 import App from "./App";
+import { hydrateNativePreferences } from "./platform/preferences";
 
 const mobile = vi.hoisted(() => ({ enabled:false, session:null as any, remote:null as any, boots:0, fetches:0 }));
 vi.mock("./platform/desktop",async(importOriginal)=>({ ...await importOriginal<typeof import("./platform/desktop")>(), isTauri:()=>mobile.enabled }));
@@ -35,8 +36,10 @@ beforeEach(async()=>{
   Object.defineProperty(navigator,"userAgent",{configurable:true,value:"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Mobile"});
   localStorage.clear();localStorage.setItem("chronoeon.preference.locale", JSON.stringify("zh"));localStorage.setItem("chronoeon.preference.syncConfig",JSON.stringify({webdavUrl:"https://example.com/dav/ChronoEon/",webdavUsername:"",webdavPassword:""}));
   const backend=await MemorySqliteBackend.open([]); const store=await SqliteEntryStore.create(backend);
-  mobile.session={store,sync:new SyncStore(backend),conversations:new AiConversationStore(backend),timers:new TimerStore(backend),dispose:vi.fn(()=>backend.close())};
+  mobile.session={store,preferences:new LocalPreferences(backend),sync:new SyncStore(backend),conversations:new AiConversationStore(backend),timers:new TimerStore(backend),dispose:vi.fn(()=>backend.close())};
   mobile.remote=new Remote();mobile.boots=0;mobile.fetches=0;mobile.enabled=true;
+  for (const key of Object.keys(localStorage)) await mobile.session.preferences.set(key, localStorage.getItem(key)!);
+  await hydrateNativePreferences(); mobile.boots=0;
   otherBackend=await MemorySqliteBackend.open([]);const other=await SqliteEntryStore.create(otherBackend);const otherSync=new SyncStore(otherBackend);
   const now=new Date();const date=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
   await other.create({id:createEntryId(),kind:"task",title:"Synced entry stays visible",date,allDay:true,category:"work",color:"#77787b",createdAt:now.toISOString()});

@@ -156,3 +156,17 @@ describe("item editor", () => {
     expect(document.querySelector<HTMLButtonElement>('.composer-sheet button[type="submit"]')!.disabled).toBe(false);
   });
 });
+it("groups items by category while retaining every card", () => {
+ act(() => root.render(<ItemsView items={[item({id:"a",category:"home"}),item({id:"b",category:"electronics"})]} entries={[]} locale="en" settings={settings} today={today}/>));
+ act(() => host.querySelector<HTMLButtonElement>('button[aria-label="Group by category"]')!.click());
+ expect(host.querySelectorAll(".view-group-title")).toHaveLength(2);
+ expect(host.querySelectorAll(".item-card")).toHaveLength(2);
+ act(() => host.querySelector<HTMLButtonElement>('button[aria-label="List"]')!.click());
+ expect(host.querySelectorAll(".view-group-title")).toHaveLength(0);
+});
+
+it.each(["北京", "微信"])("finds assets by their location or payment method: %s", search => {
+ const camera=item({location:"北京",payment:"微信"});
+ act(()=>root.render(<ItemsView items={[camera]} entries={[]} locale="zh" settings={settings} today={today} search={search} onEdit={vi.fn()} />));
+ expect(host.textContent).toContain("Camera");expect(host.querySelectorAll(".item-card")).toHaveLength(1);
+});

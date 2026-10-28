@@ -2,6 +2,7 @@ import { prepareAttachmentImports } from "../sync/client";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import type { Locale } from "@chronoeon/domain";
 import {
+  LocalPreferences,
   AiConversationStore,
   RUNTIME_PRAGMAS,
   SqliteEntryStore,
@@ -21,6 +22,7 @@ export interface SqliteStoreSession {
   timers: TimerStore;
   conversations: AiConversationStore;
   sync: SyncStore;
+  preferences: LocalPreferences;
   dispose(): Promise<void>;
 }
 
@@ -79,6 +81,7 @@ async function createSession(backend: PersistencePort): Promise<SqliteStoreSessi
   if (isTauri()) void prepareAttachmentImports(sync).then(() => store.notifyRebuilt()).catch(() => store.notifyRebuilt());
   return {
     store,
+    preferences: new LocalPreferences(backend),
     items: new SqliteItemStore(backend),
     timers: new TimerStore(backend),
     conversations: new AiConversationStore(backend),

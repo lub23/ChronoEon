@@ -1,7 +1,8 @@
 import { createParser } from "eventsource-parser";
 
-/** Consume SSE completely before publishing an answer; never save a partial stream. */
-export async function readAIStream(response: Response, progress: () => void): Promise<any> {
+export interface AIStreamProgress { content: string; reasoning: string }
+/** Publish transient previews; only return a completed answer for persistence. */
+export async function readAIStream(response: Response, progress: () => void, onProgress?: (value: AIStreamProgress) => void): Promise<any> {
   if (!response.body) throw new Error("AI stream has no response body");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -20,6 +21,7 @@ export async function readAIStream(response: Response, progress: () => void): Pr
       if (typeof delta?.content === "string") { content += delta.content; textBytes += encoder.encode(delta.content).byteLength; }
       if (typeof delta?.reasoning_content === "string") { reasoning += delta.reasoning_content; textBytes += encoder.encode(delta.reasoning_content).byteLength; }
       if (textBytes > 2 * 1024 * 1024) throw new Error("AI response exceeded the 2 MB safety limit");
+      onProgress?.({ content, reasoning });
       if (choice?.finish_reason === "length") throw new Error(!content && reasoning ? "AI endpoint returned an empty message (reasoning only)" : "AI response exceeded output token budget");
       if (choice?.finish_reason) complete = true;
     },

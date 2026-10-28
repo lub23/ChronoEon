@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { resolveEntryColors, type ChronoEonSettings, type Item } from "@chronoeon/domain";
 import { titleFor, type Entry, type Locale } from "../domain/entry";
-import { entrySearchMatches, searchExcerpt } from "../domain/search";
+import { entrySearchMatches, searchExcerpt, itemMatchesSearch } from "../domain/search";
 import { categoryLabel, localeTag, t } from "../i18n";
 import { EntryGlyph } from "./ItemGlyph";
 import { Icon } from "./Icon";
@@ -29,7 +29,7 @@ export function SearchResults({ entries, items = [], onOpenItem, search, locale,
     const hits = entrySearchMatches(entry, search, locale, settings);
     return hits.length ? [{ entry, hits }] : [];
   }).sort((a, b) => (b.entry.date + (b.entry.start ?? "")).localeCompare(a.entry.date + (a.entry.start ?? ""))), [entries, search, locale, settings]);
-  const itemMatches = useMemo(() => items.filter(item => [item.name, item.notes, item.location].some(value => value?.toLocaleLowerCase(localeTag[locale]).includes(search.trim().toLocaleLowerCase(localeTag[locale])))), [items, search, locale]);
+  const itemMatches = useMemo(() => items.filter(item => itemMatchesSearch(item, search, locale)), [items, search, locale]);
   const results = [
     ...itemMatches.map(item => ({ kind: "item" as const, item })),
     ...matches.map(match => ({ kind: "entry" as const, ...match })),

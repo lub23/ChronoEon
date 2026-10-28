@@ -391,7 +391,7 @@ export class SqliteEntryStore implements EntryStore {
         if (!existing) throw new StorageError("EntryNotFound", `Entry ${id} does not exist`);
         // Accept both the raw ISO value and the "v1:<iso>" revision emitted by events.
         const expected = options?.expectedUpdatedAt?.startsWith("v1:") ? options.expectedUpdatedAt.slice(3) : options?.expectedUpdatedAt;
-        if (expected !== undefined && existing.updated_at !== expected) {
+        if (expected !== undefined && (existing.updated_at ?? "") !== expected) {
           throw new StorageError(
             "RevisionMismatch",
             `Entry ${id} changed since it was read (expected ${expected}, found ${String(existing.updated_at)})`
@@ -410,6 +410,30 @@ export class SqliteEntryStore implements EntryStore {
       if (!updated) throw new StorageError("PersistenceFailed", `Entry ${id} could not be read back after update`);
       this.emit({ type: "updated", snapshot: { entry: updated, revision: await this.revisionOf(id) } });
       return updated;
+    });
+  }
+
+  /** A reviewed replacement is one atomic, revision-checked history operation. */
+  async updateMany(changes: { entry: Entry; expectedUpdatedAt: string }[], items?: { changes: Item[]; settings: ChronoEonSettings }): Promise<void> {
+    if (!changes.length && !items?.changes.length) return;
+    if (new Set(changes.map(change => change.entry.id)).size !== changes.length) throw new Error("Duplicate batch entry");
+    await this.runOp(async () => {
+      await historyTransaction(this.backend, async () => {
+        for (const { entry, expectedUpdatedAt } of changes) {
+          const rows = await this.backend.select<{ updated_at: string | null }>("SELECT updated_at FROM entries WHERE id = ?", [entry.id]);
+          if (!rows.length) throw new StorageError("EntryNotFound", `Entry ${entry.id} does not exist`);
+          const expected = expectedUpdatedAt.startsWith("v1:") ? expectedUpdatedAt.slice(3) : expectedUpdatedAt;
+          if ((rows[0].updated_at ?? "") !== expected) throw new StorageError("RevisionMismatch", `Entry ${entry.id} changed during review`);
+          const row = entryToRow(entry, nextTimestamp(rows[0].updated_at));
+          const columns = Object.keys(row).filter(column => column !== "id");
+          await this.backend.execute(`UPDATE entries SET ${columns.map(column => `${column} = ?`).join(", ")} WHERE id = ?`, [...columns.map(column => row[column]), entry.id]);
+          await this.replaceTags(entry.id, entry.tags ?? []);
+          await this.replaceAttachmentRows(entry.id, entry.images ?? []);
+        }
+        for (const item of items?.changes ?? []) await new SqliteItemStore(this.backend).saveInTransaction(item, items!.settings);
+      });
+      notifyLocalChange(this.backend);
+      this.notifyRebuilt();
     });
   }
 
@@ -696,7 +720,7 @@ export class SqliteEntryStore implements EntryStore {
           `SELECT id, updated_at FROM entries WHERE id IN (${placeholders})`, chunk,
         );
         for (const row of rows) {
-          if (row.updated_at) revisions.set(row.id, row.updated_at);
+          revisions.set(row.id, row.updated_at ?? "");
         }
       }
       return revisions;

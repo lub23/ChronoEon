@@ -25,7 +25,10 @@ impl Completion {
     }
 }
 
-pub async fn read(response: reqwest::Response) -> Result<Value, String> {
+#[cfg(test)]
+pub async fn read(response: reqwest::Response) -> Result<Value, String> { read_with_progress(response, None).await }
+
+pub async fn read_with_progress(response: reqwest::Response, progress: Option<tauri::ipc::Channel<Value>>) -> Result<Value, String> {
     let mut size = 0usize;
     let bytes = response.bytes_stream().map(move |chunk| {
         let bytes = chunk.map_err(std::io::Error::other)?;
@@ -38,6 +41,10 @@ pub async fn read(response: reqwest::Response) -> Result<Value, String> {
     while let Some(event) = events.next().await {
         let event = event.map_err(|error| format!("AI request failed: stream read: {error}"))?;
         completion.push(&event.data)?;
+        if let Some(channel) = &progress {
+            channel.send(json!({"content": completion.content, "reasoning": completion.reasoning}))
+                .map_err(|_| "AI stream consumer disconnected".to_string())?;
+        }
     }
     completion.finish()
 }

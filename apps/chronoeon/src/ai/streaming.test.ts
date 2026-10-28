@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readAIStream } from "./streaming";
 function response(text: string) {
   const bytes = new TextEncoder().encode(text);
@@ -22,4 +22,15 @@ describe("AI streaming completion", () => {
   it("rejects a token-budget cutoff", async () => {
     await expect(readAIStream(response('data: {"choices":[{"delta":{"content":"partial"},"finish_reason":"length"}]}\n\n'), () => {})).rejects.toThrow("token budget");
   });
+});
+
+it("publishes readable progress before the response completes", async () => {
+ let feed!: ReadableStreamDefaultController<Uint8Array>;
+ const stream = new ReadableStream<Uint8Array>({start(controller){feed=controller;}});
+ const onProgress = vi.fn();
+ const result = readAIStream(new Response(stream),()=>{},onProgress);
+ feed.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"第一段"}}]}\n\n'));
+ await vi.waitFor(()=>expect(onProgress).toHaveBeenCalledWith({content:"第一段",reasoning:""}));
+ feed.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"第二段"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'));feed.close();
+ expect((await result).choices[0].message.content).toBe("第一段第二段");
 });

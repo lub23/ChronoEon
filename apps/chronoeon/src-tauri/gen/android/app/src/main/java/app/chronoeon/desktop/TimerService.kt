@@ -54,10 +54,8 @@ class TimerService : Service() {
                     else {
                         val id = current!!.getString("id")
                         val now = System.currentTimeMillis()
-                        // A live service is evidence of continuity across deep sleep.
-                        // A restarted service cannot invent time after a long kill.
-                        if (runningId != id && now - current.optLong("lastTick", current.optLong("createdAt")) > 90_000) null
-                        else store.heartbeat(id, now)
+                        // The durable running session owns elapsed time across process restarts.
+                        store.heartbeat(id, now)
                     }
                 }
                 main.post {
@@ -67,7 +65,7 @@ class TimerService : Service() {
                     (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(ID, notification(session))
                 }
             } catch (_: Exception) {
-                main.post { if (!destroyed) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() } }
+                // Transient SQLite contention must not stop a running timer. The existing minute heartbeat retries.
             }
         }
     }

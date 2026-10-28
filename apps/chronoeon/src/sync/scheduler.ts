@@ -34,7 +34,7 @@ export class SyncScheduler {
     clearTimeout(this.debounceTimer);
     if (!this.disposed && !this.paused) this.debounceTimer = setTimeout(() => {
       this.debounceTimer = undefined; void this.trigger();
-    }, Math.max(0, this.lastEdit + 60_000 - Date.now()));
+    }, Math.max(0, this.lastEdit + 15_000 - Date.now()));
   }
   private retry(timestamp: number): void {
     clearTimeout(this.retryTimer);

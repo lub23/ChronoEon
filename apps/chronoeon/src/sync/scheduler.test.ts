@@ -44,11 +44,11 @@ describe("exclusive maintenance", () => {
 });
 
 describe("automatic sync scheduling",()=>{
-  it("syncs on startup, then waits 60 quiet seconds after the last edit",async()=>{
+  it("syncs on startup, then waits 15 quiet seconds after the last edit",async()=>{
     vi.useFakeTimers(); const f=fixture(); f.scheduler.start(); await vi.advanceTimersByTimeAsync(0);
     expect(f.engine.run).toHaveBeenCalledTimes(1);
-    f.change(); await vi.advanceTimersByTimeAsync(30000); f.change();
-    await vi.advanceTimersByTimeAsync(59999); expect(f.engine.run).toHaveBeenCalledTimes(1);
+    f.change(); await vi.advanceTimersByTimeAsync(10000); f.change();
+    await vi.advanceTimersByTimeAsync(14999); expect(f.engine.run).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1); expect(f.engine.run).toHaveBeenCalledTimes(2); f.scheduler.dispose();
   });
   it("flushes local operations offline, then syncs on an online/background/manual trigger",async()=>{

@@ -113,7 +113,7 @@ export function useLiveTimer(
       const stored = nativeTiming ? (await backgroundTimerSnapshot()).session : timerStore ? await timerStore.load() : readLocalSession();
       if (disposed) return;
       if (!(hydrated.current && sessionRef.current) && stored) {
-        const recovery = recoverTimerSession(stored, Date.now());
+        const recovery = nativeTiming ? { session: stored, recovered: false } : recoverTimerSession(stored, Date.now());
         replace(recovery.session);
         setRecovered(recovery.recovered);
         setNow(Date.now());
@@ -156,7 +156,7 @@ export function useLiveTimer(
         void backgroundTimerSnapshot().then(({ session: stored }) => {
           if (disposed || sessionRef.current !== before || finishingRef.current) return;
           if (!stored) { replace(null); return; }
-          const recovery = recoverTimerSession(stored, Date.now());
+          const recovery = nativeTiming ? { session: stored, recovered: false } : recoverTimerSession(stored, Date.now());
           replace(recovery.session); setRecovered(recovery.recovered); setNow(Date.now());
           if (recovery.recovered) persistInBackground(recovery.session);
         }).catch(error => errorRef.current?.(error));

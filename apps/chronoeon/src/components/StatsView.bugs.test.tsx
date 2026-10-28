@@ -354,3 +354,13 @@ describe("weekly and selected category review curves", () => {
     expect(host.querySelector('.review-chart-line[data-series="category:food"]')).toBeNull();
   });
 });
+it("opens schedule category duration details with entries and minute totals", () => {
+ const entry = { ...task("duration", "done"), end: "10:30" };
+ act(() => root.render(<StatsView entries={[entry]} tab="tasks" locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} today="2026-09-01" />));
+ const category = [...host.querySelectorAll<HTMLButtonElement>("button.stats-category-row")].find(button => button.textContent?.includes("1h"))!;
+ expect(category).toBeTruthy(); act(() => category.click());
+ const dialog = document.querySelector('[role="dialog"]')!;
+ expect(dialog.textContent).toContain("Task duration");
+ expect(dialog.querySelectorAll(".stats-detail-row")).toHaveLength(1);
+ expect(dialog.querySelector(".stats-detail-total")?.textContent).toContain("1h");
+});

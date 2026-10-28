@@ -1,3 +1,5 @@
+import { BulkReplacePanel } from "./BulkReplacePanel";
+import type { ReplaceRecords } from "../domain/bulkReplace";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { createMotionPortal as createPortal } from "./MotionPresence";
 import { EMPTY_ENTRY_FILTER, filterActive, toggleValue, type EntryFilter } from "../domain/entryFilter";
@@ -27,6 +29,7 @@ interface FilterPanelProps {
   onOpenEntry: (entry: Entry) => void;
   onKindChange: (filter: AgendaFilter) => void;
   onChange: (filter: EntryFilter) => void;
+  onReplace?: ReplaceRecords;
   onClose: () => void;
 }
 const KIND_OPTIONS: Array<{ id: FilterKind; label: "tasks" | "events" | "bills" | "ideas" | "items" }> = [
@@ -36,9 +39,15 @@ const KIND_OPTIONS: Array<{ id: FilterKind; label: "tasks" | "events" | "bills" 
 ];
 
 /** One surface for text, calendars, kinds, photos and category filters. */
-export function FilterPanel({ locale, kind, filter, scheduleCategories, billCategories, calendars, anchor,
-  settings, entries, items = [], onOpenItem, search, focusSearch, onSearch, onOpenEntry, onKindChange, onChange, onClose }: FilterPanelProps) {
+export function FilterPanel({ locale, kind: appliedKind, filter: appliedFilter, scheduleCategories, billCategories, calendars, anchor,
+  settings, entries, items = [], onOpenItem, search, focusSearch, onSearch, onOpenEntry, onKindChange, onChange, onReplace, onClose }: FilterPanelProps) {
   const [query, setQuery] = useState(search);
+  const [filter, onChangeDraft] = useState(appliedFilter);
+  const [kind, onKindDraft] = useState(appliedKind);
+  const apply = (close: boolean) => {
+    onChange(filter); onKindChange(kind); onSearch(query.trim());
+    if (close) onClose();
+  };
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   useFocusTrap(panelRef);
@@ -56,7 +65,7 @@ export function FilterPanel({ locale, kind, filter, scheduleCategories, billCate
   const selection = (bill: boolean) => bill ? filter.billCategories ?? billValues : filter.categories ?? scheduleValues;
   const changeCategories = (next: string[], bill: boolean) => {
     const values = bill ? billValues : scheduleValues;
-    onChange({ ...filter, [bill ? "billCategories" : "categories"]: values.every(value => next.includes(value)) ? null : next });
+    onChangeDraft({ ...filter, [bill ? "billCategories" : "categories"]: values.every(value => next.includes(value)) ? null : next });
   };
   const billGroups = new Map<string, EntryCategoryOption[]>();
   for (const option of bills) {
@@ -66,7 +75,7 @@ export function FilterPanel({ locale, kind, filter, scheduleCategories, billCate
   const categoryChip = (option: EntryCategoryOption, bill = false) => <button key={option.value} type="button"
     className={selection(bill).includes(option.value) ? "filter-chip is-active" : "filter-chip"}
     aria-pressed={selection(bill).includes(option.value)} onClick={() => changeCategories(toggleValue(selection(bill), option.value), bill)}>
-    {option.color && <i aria-hidden="true" style={{ color: option.color }} />}{option.label ?? option.value}
+    {!bill && option.color && <i aria-hidden="true" style={{ color: option.color }} />}{option.label ?? option.value}
   </button>;
   const groupToggle = (options: EntryCategoryOption[], bill = false) => {
     const selected = selection(bill);
@@ -83,7 +92,7 @@ export function FilterPanel({ locale, kind, filter, scheduleCategories, billCate
     const current = filter.calendarIds.length ? filter.calendarIds : calendarIds;
     if (current.length === 1 && current.includes(id)) return;
     const next = toggleValue(current, id);
-    onChange({ ...filter, calendarIds: next.length === calendarIds.length ? [] : next });
+    onChangeDraft({ ...filter, calendarIds: next.length === calendarIds.length ? [] : next });
   };
   const above = anchor.bottom > window.innerHeight * .55;
   const width = Math.min(380, window.innerWidth - 16);
@@ -92,7 +101,7 @@ export function FilterPanel({ locale, kind, filter, scheduleCategories, billCate
     "--filter-top": Math.max(8, Math.min(anchor.bottom + 6, window.innerHeight - 96)) + "px",
     ...(above ? { "--filter-bottom": Math.max(8, window.innerHeight - anchor.top + 8) + "px" } : {}),
   } as CSSProperties;
-  const active = filterActive(filter) || kind.length > 0 || Boolean(search.trim());
+  const active = filterActive(filter) || kind.length > 0 || Boolean(query.trim());
 
   return createPortal(<div className={above ? "filter-panel-backdrop filter-panel-backdrop--above" : "filter-panel-backdrop"}
     role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
@@ -102,21 +111,22 @@ export function FilterPanel({ locale, kind, filter, scheduleCategories, billCate
         <strong>{t("filterPanelTitle", locale)}</strong>
         <button type="button" role="checkbox" aria-checked={filter.photosOnly}
           className={filter.photosOnly ? "filter-check filter-photos is-checked" : "filter-check filter-photos"}
-          onClick={() => onChange({ ...filter, photosOnly: !filter.photosOnly })}>
+          onClick={() => onChangeDraft({ ...filter, photosOnly: !filter.photosOnly })}>
           <i aria-hidden="true"><Icon name="check" size={11} /></i>{t("filterPhotosOnly", locale)}
         </button>
       </header>
       <div className="filter-section filter-search-section">
         <div className="filter-section-heading"><p className="filter-label">{t("filterSearch", locale)}</p>
           {active && <button type="button" className="filter-clear" onClick={() => {
-            onChange(EMPTY_ENTRY_FILTER); onKindChange([]); onSearch(""); setQuery("");
+            onChangeDraft(EMPTY_ENTRY_FILTER); onKindDraft([]); setQuery("");
           }}><Icon name="close" size={11} />{t("filterReset", locale)}</button>}
         </div>
-        <form className="filter-search-form" onSubmit={event => { event.preventDefault(); onSearch(query.trim()); inputRef.current?.blur(); }}>
+        <form className="filter-search-form" onSubmit={event => { event.preventDefault(); apply(false); inputRef.current?.blur(); }}>
           <label><Icon name="search" size={14} /><input ref={inputRef} type="search" value={query}
             onChange={event => setQuery(event.target.value)} placeholder={t("filterSearchHint", locale)} aria-label={t("filterSearch", locale)} /></label>
           <button type="submit" className="filter-search-submit">{t("filterSearch", locale)}</button>
         </form>
+        {onReplace && <BulkReplacePanel key={search} entries={entries} items={items} search={search} locale={locale} onReplace={onReplace} />}
         <SearchResults items={items} onOpenItem={item => { onClose(); onOpenItem?.(item); }} entries={entries} search={search} settings={settings} locale={locale} onOpen={entry => { onClose(); onOpenEntry(entry); }} />
       </div>
       <div className="filter-section">
@@ -135,7 +145,7 @@ export function FilterPanel({ locale, kind, filter, scheduleCategories, billCate
           return <button key={option.id} type="button" role="checkbox" aria-checked={checked} disabled={last}
             className={checked ? "filter-check is-checked" : "filter-check"} onClick={() => {
               const next = toggleValue(kind.length ? kind : KIND_OPTIONS.map(item => item.id), option.id);
-              onKindChange(next.length === KIND_OPTIONS.length ? [] : next);
+              onKindDraft(next.length === KIND_OPTIONS.length ? [] : next);
             }}><i aria-hidden="true"><Icon name="check" size={11} /></i>{t(option.label, locale)}</button>;
         })}</div>
       </div>
@@ -149,10 +159,14 @@ export function FilterPanel({ locale, kind, filter, scheduleCategories, billCate
           </section>}
           {bills.length > 0 && <section className="filter-category-section">
             <div className="filter-section-heading"><p className="filter-label">{t("filterBillCategories", locale)}</p>{groupToggle(bills, true)}</div>
-            {[...billGroups].map(([group, options]) => <section key={group}><small>{group}</small><div className="filter-chips">{options.map(option => categoryChip(option, true))}</div></section>)}
+            {[...billGroups].map(([group, options]) => <section key={group}><small className="filter-bill-group"><i aria-hidden="true" style={{ background: options[0]?.color }} />{group}</small><div className="filter-chips">{options.map(option => categoryChip(option, true))}</div></section>)}
           </section>}
         </div>
       </div>
+      <footer className="filter-panel-actions">
+        <button type="button" className="secondary-button" onClick={onClose}>{t("cancel", locale)}</button>
+        <button type="button" className="primary-action filter-apply" onClick={() => apply(true)}><Icon name="check" size={14} />{t("filterApply", locale)}</button>
+      </footer>
     </section>
   </div>, document.body);
 }

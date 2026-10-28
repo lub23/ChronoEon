@@ -165,3 +165,24 @@ it("keeps complete stored history while bounding native model requests", async (
   const conversation = (await store.listConversations())[0];
   expect(await store.listMessages(conversation.id)).toHaveLength(36);
 });
+
+it("shows tool results and live answer text before saving the completed message", async()=>{
+ let finish!: (reply:any)=>void;
+ vi.mocked(requestAICompletion).mockImplementationOnce(async(_provider,_messages,_schema,_signal,options)=>{
+  options?.onProgress?.({content:"正在生成的回答",reasoning:""});
+  return new Promise(resolve=>{finish=resolve;});
+ });
+ const store=createMemoryConversationStore();render([],store);
+ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});
+ const textarea=host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
+ act(()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value")!.set!.call(textarea,askPresets("zh").find(preset=>preset.id==="dietPattern")!.prompt);textarea.dispatchEvent(new Event("input",{bubbles:true}));});
+ await act(async()=>{host.querySelector<HTMLButtonElement>(".chat-send")!.click();await new Promise(resolve=>setTimeout(resolve,30));});
+ expect(host.querySelector(".is-busy")?.textContent).toContain("正在生成的回答");
+ expect(host.querySelector(".is-busy")?.textContent).toContain("正在整理回答");
+ expect(host.querySelector(".chat-tool-trace")).not.toBeNull();
+ const conversation=(await store.listConversations())[0];
+ expect((await store.listMessages(conversation.id)).map(message=>message.role)).toEqual(["user"]);
+ await act(async()=>{finish({content:"完整回答"});await new Promise(resolve=>setTimeout(resolve,30));});
+ expect(host.querySelector(".is-busy")).toBeNull();
+ expect((await store.listMessages(conversation.id)).at(-1)?.content).toBe("完整回答");
+});

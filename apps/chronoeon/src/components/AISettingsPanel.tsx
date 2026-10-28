@@ -36,6 +36,10 @@ export function AISettingsPanel({ locale, preferences, onChange, onTest }: Props
     catch (error) { setResult({ ok: false, text: error instanceof Error ? error.message : String(error) }); }
     finally { busyRef.current = false; setBusy(""); }
   };
+  const pasteKey = () => void run("paste", async () => {
+    const text = isTauri() ? await (await import("@tauri-apps/plugin-clipboard-manager")).readText() : await navigator.clipboard.readText();
+    if (text?.trim()) setCredentials(current => ({ ...current, apiKey: text.trim() }));
+  });
   const add = () => {
     setDraft({ ...DEFAULT_AI_PROVIDER, ...AI_PROVIDER_PRESETS.compatible, id: createEntryId(), name: "", preset: "compatible" });
     setCredentials({ apiKey: "", headers: [] }); setModels([]); setResult(null);
@@ -98,7 +102,7 @@ export function AISettingsPanel({ locale, preferences, onChange, onTest }: Props
         </label>
         <label className="settings-field"><span>{t("aiProviderName", locale)}</span><input required value={draft.name} onChange={event => patch({ name: event.target.value })} /></label>
         <label className="settings-field"><span>{t("aiProviderUrl", locale)}</span><input required type="url" spellCheck={false} value={draft.baseUrl} onChange={event => patch({ baseUrl: event.target.value })} placeholder="https://example.com/v1" /></label>
-        <label className="settings-field"><span>{t("aiProviderKey", locale)}</span><input type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials(current => ({ ...current, apiKey: event.target.value }))} /></label>
+        <label className="settings-field"><span>{t("aiProviderKey", locale)}</span><div className="ai-key-controls"><input type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials(current => ({ ...current, apiKey: event.target.value }))} /><button type="button" className="icon-button paste-token-button" aria-label={t("paste", locale)} title={t("paste", locale)} onClick={pasteKey}><Icon name="clipboard" size={15} /></button></div></label>
         <div className="ai-provider-headers">
           <header><strong>{t("aiProviderHeaders", locale)}</strong><button type="button" className="icon-button" title={t("aiAddHeader", locale)} aria-label={t("aiAddHeader", locale)} disabled={credentials.headers.length >= 10} onClick={() => setCredentials(current => ({ ...current, headers: [...current.headers, { name: "", value: "" }] }))}><Icon name="plus" size={14} /></button></header>
           {credentials.headers.map((header, index) => <div key={index} className="ai-header-row">

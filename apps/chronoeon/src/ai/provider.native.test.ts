@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_AI_PROVIDER, requestAICompletion, warmUpAIProvider, saveAIProviderCredentials, readAIProviderCredentials } from "./provider";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("../platform/desktop", () => ({ isTauri: () => true }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke, Channel: class { onmessage = () => {}; } }));
 beforeEach(() => { invoke.mockReset(); });
 afterEach(() => vi.useRealTimers());
 const provider = { ...DEFAULT_AI_PROVIDER, id: "saved-profile", model: "test-model", baseUrl: "https://example.test/v1" };
@@ -14,12 +14,12 @@ describe("native AI completion bridge", () => {
     invoke.mockRejectedValueOnce("AI request failed: connection refused").mockResolvedValueOnce({ content: "ok" });
     expect((await requestAICompletion(provider, messages)).content).toBe("ok");
     expect(invoke).toHaveBeenCalledTimes(2);
-    expect(invoke).toHaveBeenLastCalledWith("ai_chat_completion", { request: expect.objectContaining({ disableReasoning: false, timeoutMs: 90_000 }) });
+    expect(invoke).toHaveBeenLastCalledWith("ai_chat_completion", { onProgress: expect.anything(), request: expect.objectContaining({ disableReasoning: false, timeoutMs: 90_000 }) });
   });
   it("sends profile identity so credentials cannot cross providers", async () => {
     invoke.mockResolvedValue({ content: "ok" });
     await requestAICompletion(provider, messages);
-    expect(invoke).toHaveBeenCalledWith("ai_chat_completion", { request: expect.objectContaining({ providerId: "saved-profile" }) });
+    expect(invoke).toHaveBeenCalledWith("ai_chat_completion", { onProgress: expect.anything(), request: expect.objectContaining({ providerId: "saved-profile" }) });
   });
   it("persists keys and headers as one profile-scoped native credential", async () => {
     const credentials = { apiKey: "secret", headers: [{ name: "X-Tenant", value: "home" }] };
@@ -55,4 +55,18 @@ it("retries reasoning-only exhaustion once with thinking disabled", async () => 
   expect(result.content).toBe("Diet analysis");
   expect(invoke).toHaveBeenCalledTimes(2);
   expect(invoke.mock.calls[1][1].request.disableReasoning).toBe(true);
+});
+
+it("delivers native channel previews and ignores previews after cancellation", async () => {
+ let finish!: (reply: any) => void;
+ invoke.mockReturnValue(new Promise(resolve=>{finish=resolve;}));
+ const progress=vi.fn(); const controller=new AbortController();
+ const result=requestAICompletion(provider,messages,undefined,controller.signal,{stream:true,onProgress:progress});
+ const assertion=expect(result).rejects.toMatchObject({name:"AbortError"});
+ await vi.waitFor(()=>expect(invoke).toHaveBeenCalledTimes(1));
+ const channel=invoke.mock.calls[0][1].onProgress;
+ channel.onmessage({content:"partial",reasoning:""});expect(progress).toHaveBeenLastCalledWith({content:"partial",reasoning:""});
+ controller.abort();await assertion;
+ channel.onmessage({content:"obsolete",reasoning:""});expect(progress).not.toHaveBeenCalledWith({content:"obsolete",reasoning:""});
+ finish({content:"obsolete"});
 });

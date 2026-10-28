@@ -1,3 +1,5 @@
+import { persistPreference, readPreferenceValue } from "../platform/preferences";
+import type { AIStreamProgress } from "./streaming";
 import type { AIChatMessage, AIProviderConfig, AIToolCall, AIToolDefinition } from "@chronoeon/domain";
 import { readAIStream } from "./streaming";
 import { isTauri } from "../platform/desktop";
@@ -37,6 +39,7 @@ export interface AIModelInfo {
 }
 
 export interface AICompletionOptions {
+  onProgress?: (value: AIStreamProgress) => void;
   tools?: AIToolDefinition[];
   toolChoice?: "auto" | "none";
   stream?: boolean;
@@ -138,7 +141,7 @@ export function normalizeAIProviderPreferences(value: unknown): AIProviderPrefer
 
 export function readAIProviderPreferences(): AIProviderPreferences {
   try {
-    const raw = window.localStorage.getItem(AI_PROVIDER_STORAGE_KEY);
+    const raw = readPreferenceValue(AI_PROVIDER_STORAGE_KEY);
     return raw ? normalizeAIProviderPreferences(JSON.parse(raw)) : structuredClone(DEFAULT_AI_PROVIDER_PREFERENCES);
   } catch {
     return structuredClone(DEFAULT_AI_PROVIDER_PREFERENCES);
@@ -147,7 +150,7 @@ export function readAIProviderPreferences(): AIProviderPreferences {
 
 export function writeAIProviderPreferences(value: AIProviderPreferences): void {
   // `normalize` also drops accidental unknown fields such as apiKey.
-  window.localStorage.setItem(AI_PROVIDER_STORAGE_KEY, JSON.stringify(normalizeAIProviderPreferences(value)));
+  persistPreference(AI_PROVIDER_STORAGE_KEY, JSON.stringify(normalizeAIProviderPreferences(value)));
 }
 
 export function activeAIProvider(preferences: AIProviderPreferences): AIProviderProfile | undefined {
@@ -283,7 +286,7 @@ async function browserCompletion(
       response = await send(fallback);
     }
     const payload = response.ok && response.headers?.get("Content-Type")?.includes("text/event-stream")
-      ? await readAIStream(response, progress)
+      ? await readAIStream(response, progress, options?.onProgress)
       : await response.json().catch((error: unknown) => {
       // A timeout/network failure can arrive after headers while reading JSON.
       // Preserve it for the bounded retry instead of reporting an empty answer.
@@ -341,10 +344,15 @@ export async function requestAICompletion(
   for (let attempt = 0; ; attempt++) {
     if (signal?.aborted) throw new DOMException("Request cancelled", "AbortError");
     try {
+      completionOptions?.onProgress?.({ content: "", reasoning: "" });
       if (!isTauri()) return await browserCompletion(provider, messages, responseSchema, signal, completionOptions);
       const { invoke } = await import("@tauri-apps/api/core");
+      const { Channel } = await import("@tauri-apps/api/core");
+      const onProgress = new Channel<AIStreamProgress>();
+      onProgress.onmessage = value => { if (!signal?.aborted) completionOptions?.onProgress?.(value); };
       if (signal?.aborted) throw new DOMException("Request cancelled", "AbortError");
       return await withAbort(invoke<AICompletionResult>("ai_chat_completion", {
+        onProgress,
         request: {
           baseUrl: provider.baseUrl, model: provider.model, messages, responseSchema,
           temperature: provider.temperature, maxTokens: completionOptions?.maxTokens ?? provider.maxTokens, timeoutMs: provider.timeoutMs,

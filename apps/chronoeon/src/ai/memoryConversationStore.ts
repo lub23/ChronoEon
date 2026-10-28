@@ -87,9 +87,8 @@ export function createMemoryConversationStore(): AiConversationApi {
       return message;
     },
     async listMessages(conversationId: string): Promise<AiMessageRecord[]> {
-      return [...(conversations.get(conversationId)?.messages ?? [])].sort((left, right) =>
-        left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
-      );
+      // This store is append-only; random UUIDs cannot order same-millisecond replies.
+      return [...(conversations.get(conversationId)?.messages ?? [])];
     },
     async archiveConversation(id: string): Promise<void> {
       const conversation = conversations.get(id);

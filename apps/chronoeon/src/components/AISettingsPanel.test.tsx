@@ -54,3 +54,14 @@ it("does not replace an active provider until its replacement passes the test", 
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Activate Second"]')!.click());
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ activeProviderId: "second" }));
 });
+
+it("pastes the API key without storing clipboard text in provider preferences", async () => {
+ Object.defineProperty(navigator, "clipboard", {configurable:true,value:{readText:vi.fn(async()=>"  debug-secret  ")}});
+ act(() => root.render(<AISettingsPanel locale="en" preferences={DEFAULT_AI_PROVIDER_PREFERENCES} onChange={vi.fn()} onTest={vi.fn()} />));
+ act(() => button("Add").click());
+ await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Paste"]')!.click());
+ const key = host.querySelector<HTMLInputElement>('input[type="password"]')!;
+ expect(key.value).toBe("debug-secret");
+ expect(key.type).toBe("password");
+ expect(localStorage.getItem("chronoeon.ai.providers") ?? "").not.toContain("debug-secret");
+});

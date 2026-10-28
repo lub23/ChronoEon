@@ -19,7 +19,7 @@ describe("AI capture", () => {
     expect(result.parsed.candidates[0].draft.tags).toEqual(["coffee"]);
     const call = vi.mocked(requestAICompletion).mock.calls.at(-1)!;
     expect(call[1][1].content).toContainEqual(image); expect(call[2]).toHaveProperty("properties.entries");
-    expect(call[4]).toMatchObject({ disableReasoning: true, stream: false, maxTokens: 4096 });
+    expect(call[4]).toMatchObject({ disableReasoning: true, stream: true, maxTokens: 4096 });
   });
   it("rejects empty model results so they cannot become an empty saved review", async () => {
     vi.mocked(requestAICompletion).mockResolvedValue({ content: '{"entries":[]}' });

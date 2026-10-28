@@ -42,3 +42,5 @@ export * from "./sync/protocol";
 export * from "./sync/SyncEngine";
 
 export * from "./sync/snapshotPolicy";
+
+export { LocalPreferences } from "./LocalPreferences";

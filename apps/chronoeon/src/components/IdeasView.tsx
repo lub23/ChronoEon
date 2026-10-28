@@ -1,13 +1,16 @@
+import "./items.css";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { format, formatDistanceToNow, parseISO } from "date-fns";
 import { enUS, zhCN } from "date-fns/locale";
 import { resolveEntryColors, type ChronoEonSettings } from "@chronoeon/domain";
 import type { Entry, Locale } from "../domain/entry";
 import { titleFor } from "../domain/entry";
-import { calendarDisplayName, t } from "../i18n";
+import { calendarDisplayName, categoryLabel, t } from "../i18n";
 import { entryMatchesSearch } from "../domain/search";
 import { Icon } from "./Icon";
 import { IdeaGallery } from "./IdeaGallery";
+import { GlassSelect } from "./GlassSelect";
+import { usePersistentPreference } from "../hooks/usePersistentPreference";
 import { IdeaGlyph } from "./ItemGlyph";
 
 interface IdeasViewProps {
@@ -36,8 +39,20 @@ function sealInitial(name: string): string {
 }
 
 export function IdeasView({ entries, locale, settings, search, today, onEdit, onNew }: IdeasViewProps) {
+  const [sortField, setSortField] = usePersistentPreference("ideas-sort", "time");
+  const [direction, setDirection] = usePersistentPreference("ideas-direction", "desc");
+  const [grouped, setGrouped] = usePersistentPreference("ideas-grouped", false);
   const query = search.trim().toLowerCase();
   const ideas = useMemo(() => entries.filter((entry) => entry.kind === "idea" && (!query || entryMatchesSearch(entry, search, locale))), [entries, query, search, locale]);
+  const sorted = [...ideas].sort((a, b) => (direction === "asc" ? 1 : -1) * (sortField === "title" ? titleFor(a, locale).localeCompare(titleFor(b, locale), locale) : (a.start ? `${a.date}T${a.start}` : a.createdAt).localeCompare(b.start ? `${b.date}T${b.start}` : b.createdAt)));
+  const groups = new Map<string, Entry[]>();
+  for (const entry of sorted) {
+    const label = grouped ? categoryLabel(entry.category ?? "", locale, undefined, settings) || t("categoryUncategorized", locale) : "";
+    const group = groups.get(label);
+    if (group) group.push(entry);
+    else groups.set(label, [entry]);
+  }
+  const orderedGroups = [...groups].sort(([a], [b]) => a.localeCompare(b, locale));
   const dateLocale = locale === "zh" ? zhCN : enUS;
   const board = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -58,7 +73,7 @@ export function IdeasView({ entries, locale, settings, search, today, onEdit, on
     for (const node of element.children) if (node.firstElementChild) observer.observe(node.firstElementChild);
     layout();
     return () => observer.disconnect();
-  }, [ideas, locale]);
+  }, [ideas, locale, grouped, direction, sortField]);
 
   const ideaCard = (entry: Entry, index: number) => {
     const colors = resolveEntryColors(entry, settings);
@@ -82,6 +97,7 @@ export function IdeasView({ entries, locale, settings, search, today, onEdit, on
           {paragraphs.length > 0 && <button className="idea-body-main" type="button" onClick={() => onEdit(entry)} aria-label={titleFor(entry, locale)}>
             {paragraphs.map((paragraph, paragraphIndex) => <p key={paragraphIndex}>{paragraph}</p>)}
           </button>}
+          {(entry.tags?.length ?? 0) > 0 && <div className="idea-tags">{entry.tags!.map(tag => <span key={tag}>#{tag}</span>)}</div>}
           <div className="idea-signature">
             <time title={formatDistanceToNow(parseISO(entry.createdAt), { addSuffix: true, locale: dateLocale })}>
               {entry.start
@@ -110,15 +126,18 @@ export function IdeasView({ entries, locale, settings, search, today, onEdit, on
         <div>
           <h2 className="view-heading"><span className="headline-leaf">{t("ideasTitle", locale)}</span></h2>
         </div>
+        <div className="items-toolbar-controls">
+          <GlassSelect value={sortField} options={[{ value: "time", label: t("itemSortDate", locale) }, { value: "title", label: t("title", locale) }]} onChange={setSortField} ariaLabel={t("itemSort", locale)} />
+          <button type="button" className={`item-sort-direction is-${direction}`} aria-label={t(direction === "asc" ? "sortAscending" : "sortDescending", locale)} onClick={() => setDirection(value => value === "asc" ? "desc" : "asc")}><i aria-hidden="true"><b className="is-up" /><b className="is-down" /></i></button>
+          <button type="button" className="icon-button" aria-label={t(grouped ? "viewList" : "viewGrouped", locale)} onClick={() => setGrouped(value => !value)}><Icon name={grouped ? "agenda" : "folder"} size={17} /></button>
+          <button type="button" className="primary-button items-add-button" aria-label={t("newEntry", locale)} onClick={onNew}><Icon name="plus" size={16} /></button>
+        </div>
       </header>
+      {grouped && <nav className="idea-category-nav" aria-label={t("viewGrouped", locale)}>{orderedGroups.map(([label], index) => <button key={label} type="button" onClick={() => document.getElementById(`idea-group-${index}`)?.scrollIntoView({ block: "start" })}>{label}</button>)}</nav>}
 
       {ideas.length ? (
         <>
-          <div ref={board} className="ideas-vine ideas-masonry">{ideas.map((entry, index) => ideaCard(entry, index))}</div>
-          <button className="idea-new-card idea-vine-bud" type="button" onClick={onNew}>
-            <span><Icon name="plus" size={21} /></span>
-            <strong>{t("newEntry", locale)}</strong>
-          </button>
+          {grouped ? orderedGroups.map(([label, group], index) => <section className="idea-group" id={`idea-group-${index}`} key={label}><h3 className="idea-vine-label"><span>{label}</span><small>{group.length}</small></h3><div className="ideas-vine">{group.map(ideaCard)}</div></section>) : <div ref={board} className="ideas-vine ideas-masonry">{sorted.map(ideaCard)}</div>}
         </>
       ) : query ? (
         <div className="ideas-empty panel" role="status">

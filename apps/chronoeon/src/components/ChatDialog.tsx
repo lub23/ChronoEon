@@ -318,6 +318,23 @@ export function ChatDialog({
     requestAnimationFrame(() => composerRef.current?.setSelectionRange(before.length, before.length));
   }, [draft]);
   const [busy, setBusy] = useState(false);
+  const [agentStage, setAgentStage] = useState<MessageKey>("aiStagePrepare");
+  const [streamText, setStreamText] = useState("");
+  const [streamReasoning, setStreamReasoning] = useState("");
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!busy) return;
+    const started = Date.now(); setElapsed(0);
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [busy]);
+  const captureProgress = (value: import("../ai/streaming").AIStreamProgress) => {
+    // Structured JSON remains a draft until validated; show readable progress.
+    setStreamText(""); setStreamReasoning("");
+    setAgentStage("aiStageCapture");
+    setCaptureCharacters(value.content.length);
+  };
+  const [captureCharacters, setCaptureCharacters] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [conversationQuery, setConversationQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -511,6 +528,12 @@ export function ChatDialog({
   }, [messages.length, busy]);
 
   useEffect(() => {
+    const node = scrollRef.current;
+    // Follow generation while the reader stays near the bottom.
+    if (node && node.scrollHeight - node.clientHeight - node.scrollTop < 160) node.scrollTop = node.scrollHeight;
+  }, [streamText, streamReasoning, agentTraces.length]);
+
+  useEffect(() => {
     const node = composerRef.current;
     if (!node) return;
     node.style.height = "auto";
@@ -609,7 +632,7 @@ export function ChatDialog({
     if ((!text && !photos.length) || !conversations || busy) return;
     const controller = new AbortController();
     abortRef.current = controller;
-    setBusy(true);
+    setBusy(true); setAgentStage(mode === "capture" ? "aiStageCapture" : "aiStagePrepare"); setStreamText(""); setStreamReasoning(""); setCaptureCharacters(0); setAgentTraces([]);
     setError(null);
     setDraft("");
     let succeeded = false;
@@ -666,7 +689,7 @@ export function ChatDialog({
         if (photoRefs.length) {
           const provider = activeAIProvider(aiPreferences);
           if (!provider || !modelConfigured) throw new Error("AI not configured");
-          const result = await parseAICapture({ provider, text, images: imageParts, entries, settings, locale, signal: controller.signal });
+          const result = await parseAICapture({ provider, text, images: imageParts, entries, settings, locale, signal: controller.signal, onProgress: captureProgress, onValidate: () => setAgentStage("aiStageValidate") });
           usage = result.reply;
           items = result.parsed.candidates.map((candidate, index) => ({ key: `ai-${index}`, ai: true, draft: candidate.draft, baseline: candidate.draft, touched: [], warnings: candidate.issues }));
         } else items = offlineCapture(text, settings, locale, entries, captureDecisionIndex.current);
@@ -730,12 +753,17 @@ export function ChatDialog({
       };
       const answerOptions = {
         stream: true,
+        onProgress: (value: import("../ai/streaming").AIStreamProgress) => {
+          if (controller.signal.aborted) return;
+          setStreamText(value.content); setStreamReasoning(value.reasoning);
+          setAgentStage(value.content ? "aiStageAnswer" : value.reasoning ? "aiStageThinking" : "aiStageAnswer");
+        },
         // 随心问 owns the thinking switch; 随心记 always answers with JSON only.
         disableReasoning: !aiPreferences.ask.thinking,
         maxTokens: Math.max(provider.maxTokens ?? 0, ADVISOR_MIN_MAX_TOKENS),
       };
       const advisorOptions = useTools
-        ? { ...answerOptions, stream: false, maxTokens: 1024, disableReasoning: true, tools: advisorTools, toolChoice: "auto" as const }
+        ? { ...answerOptions, stream: false, onProgress: undefined, maxTokens: 1024, disableReasoning: true, tools: advisorTools, toolChoice: "auto" as const }
         : answerOptions;
       const toolResults: AdvisorToolResult[] = [];
       let reply: AICompletionResult;
@@ -749,10 +777,11 @@ export function ChatDialog({
         },
         ...providerMessages.slice(1),
       ];
+      setAgentStage(useTools ? "aiStageRetrieve" : "aiStageAnswer");
       if (presetPlan) {
         const rawCalls = plannedToolCalls(presetPlan);
         appendAdvisorResults(rawCalls, entries, contextToday, toolResults);
-        setAgentTraces([...toolResults]);
+        setAgentTraces([...toolResults]); setAgentStage("aiStageAnswer");
         reply = await requestAICompletion(provider, synthesisMessages(), undefined, controller.signal, answerOptions);
         recordUsage(reply);
       } else {
@@ -760,7 +789,7 @@ export function ChatDialog({
         recordUsage(reply);
         if (reply.toolCalls?.length) {
           appendAdvisorResults(reply.toolCalls, entries, contextToday, toolResults);
-          setAgentTraces([...toolResults]);
+          setAgentTraces([...toolResults]); setAgentStage("aiStageAnswer");
           reply = await requestAICompletion(provider, synthesisMessages(), undefined, controller.signal, answerOptions);
           recordUsage(reply);
         }
@@ -801,7 +830,7 @@ export function ChatDialog({
     if (!conversations || !provider || !modelConfigured || busy || captureSaving || review.saved) return;
     setPendingCapture(current => current?.id === review.id ? { ...current, edited: true } : current);
     const controller = new AbortController(); abortRef.current = controller;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setAgentStage("aiStageCapture"); setStreamText(""); setStreamReasoning(""); setCaptureCharacters(0);
     try {
       const references = [...new Set(review.drafts.flatMap(item => item.draft.images ?? []))];
       const images: AIChatContentPart[] = [];
@@ -811,7 +840,7 @@ export function ChatDialog({
         images.push({type: "image_url", image_url: {url}});
       }
       const result = await parseAICapture({ provider, text: review.source, images, entries, settings, locale,
-        signal: controller.signal, preliminary: review.drafts.map(item => item.draft) });
+        signal: controller.signal, preliminary: review.drafts.map(item => item.draft), onProgress: captureProgress, onValidate: () => setAgentStage("aiStageValidate") });
       const drafts: CaptureDraftItem[] = result.parsed.candidates.map((candidate, index) => ({
         key: `optimized-${index}`, ai: true, draft: { ...normalizeCapturedDraft(candidate.draft, settings.timeScale), images: references.length ? references : undefined }, baseline: candidate.draft, touched: [], warnings: candidate.issues,
       }));
@@ -1215,7 +1244,9 @@ export function ChatDialog({
                     <span className="chat-avatar is-assistant" aria-hidden="true"><Icon name={MODE_ICONS[mode]} size={13} /></span>
                     <div className="chat-bubble">
                       <span className="chat-typing" aria-hidden="true"><i /><i /><i /></span>
-                      <p>{t("loading", locale)}</p>
+                      <p role="status">{t(agentStage, locale)} · {elapsed}s{captureCharacters > 0 ? ` · ${t("aiStreamReceived", locale).replace("{count}", String(captureCharacters))}` : ""}</p>
+                      {streamReasoning && <details className="chat-stream-reasoning"><summary>{t("aiStageThinking", locale)}</summary><p className="chat-stream-text">{streamReasoning}</p></details>}
+                      {streamText && <div className="chat-stream-text">{streamText}</div>}
                     </div>
                   </div>
                 )}

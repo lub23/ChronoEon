@@ -1,3 +1,4 @@
+import { hydrateNativePreferences, readPreferenceValue } from "./platform/preferences";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
@@ -11,7 +12,7 @@ const params = new URLSearchParams(window.location.search);
 
 function readPreference<T>(key: string, fallback: T): T {
   try {
-    const raw = window.localStorage.getItem(`chronoeon.preference.${key}`);
+    const raw = readPreferenceValue(`chronoeon.preference.${key}`);
     return raw ? JSON.parse(raw) as T : fallback;
   } catch {
     return fallback;
@@ -31,8 +32,12 @@ function TimerWindowRoot() {
   return <TimerOverlay locale={locale} />;
 }
 
-createRoot(document.getElementById("root")!).render(
+async function start() {
+  await hydrateNativePreferences().catch(error => console.error("Could not load native preferences", error));
+  createRoot(document.getElementById("root")!).render(
   <StrictMode>
     {params.get("timer") === "1" ? <TimerWindowRoot /> : <App />}
   </StrictMode>
 );
+}
+void start();

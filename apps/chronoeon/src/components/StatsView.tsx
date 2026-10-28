@@ -6,7 +6,7 @@ import {
   buildReview,
   collectTags,
   currencySymbol,
-  expenseHeatmap,
+  entryDurationMinutes,
   formatMinutes,
   keywordStats,
   outstandingTaskSections,
@@ -38,6 +38,7 @@ import { Icon } from "./Icon";
 import { TaskSummaryList } from "./TaskSummaryList";
 import { registerModalDismiss, useFocusTrap } from "./modalLayer";
 import { usePersistentPreference } from "../hooks/usePersistentPreference";
+import { StatsHeatmap } from "./StatsHeatmap";
 import { ItemsView } from "./ItemsView";
 
 interface StatsViewProps {
@@ -71,6 +72,7 @@ interface CategoryDetail {
   color: string;
   entries: Entry[];
   total: number;
+  duration?: boolean;
 }
 type DetailSortField = "date" | "title" | "amount";
 type DetailSort = { field: DetailSortField; direction: "asc" | "desc" } | null;
@@ -237,10 +239,6 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
 
  const bills = useMemo(() => aggregateBillStats(entries, range, settings), [entries, range, settings]);
  const tasks = useMemo(() => aggregateTaskStats(entries, range, settings, locale), [entries, locale, range, settings]);
- const heatmap = useMemo(
-   () => expenseHeatmap(entries, Number(today.slice(0, 4)), settings.firstDay, settings),
-   [entries, settings, today]
- );
  const scopedEntries = useMemo(() => entries.filter((entry) => tab === "bills"
    ? entry.kind === "bill"
    : entry.kind === "task" || entry.kind === "event" || entry.kind === "idea"
@@ -325,7 +323,7 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
     const sign = detailSort.direction === "asc" ? 1 : -1;
     return [...(detail?.entries ?? [])].sort((left, right) => {
       if (detailSort.field === "title") return sign * titleFor(left, locale).localeCompare(titleFor(right, locale), locale);
-      if (detailSort.field === "amount") return sign * (Math.abs(left.amount ?? 0) - Math.abs(right.amount ?? 0));
+      if (detailSort.field === "amount") return sign * (detail?.duration ? entryDurationMinutes(left) - entryDurationMinutes(right) : Math.abs(left.amount ?? 0) - Math.abs(right.amount ?? 0));
       const leftAt = `${left.date} ${left.start ?? "00:00"}`;
       const rightAt = `${right.date} ${right.start ?? "00:00"}`;
       return sign * leftAt.localeCompare(rightAt);
@@ -419,6 +417,7 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
       ) : (
         <TasksPanel
           tasks={tasks}
+          onOpenDetail={setDetail}
           locale={locale}
           settings={settings}
           review={review}
@@ -480,45 +479,7 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
        )}
      </section>
 
-      {tab === "bills" && (
-      <section className="stats-card panel">
-        <header className="stats-card-header">
-          <h3><Icon name="calendar" size={16} /> {t("statsHeatmap", locale)}</h3>
-          <span className="stats-card-total">{t("statsHeatmapYearTotal", locale)} · {money(symbol, -heatmap.total)}</span>
-        </header>
-        <div className="heatmap-scroll">
-          <div className="heatmap-grid" style={{ "--heatmap-weeks": heatmap.weeks.length } as React.CSSProperties} role="img" aria-label={`${t("statsHeatmap", locale)} ${heatmap.year}`}>
-            <div className="heatmap-months">
-              {heatmap.monthLabels.map((label) => (
-                <span key={`${label.week}-${label.month}`} style={{ gridColumnStart: label.week + 1 }}>{monthLabel(label.month, locale)}</span>
-              ))}
-            </div>
-            <div className="heatmap-weeks">
-              {heatmap.weeks.map((week, weekIndex) => (
-                <div key={weekIndex} className="heatmap-week">
-                  {week.map((day) => (
-                    <button
-                      key={day.date}
-                      type="button"
-                      className={`heatmap-cell heat-${day.level}${day.inYear ? "" : " is-outside"}${day.date === today ? " is-today" : ""}`}
-                      title={day.inYear ? `${day.date} · ${day.total > 0 ? money(symbol, -day.total) : t("statsHeatmapLess", locale)}` : day.date}
-                      aria-label={`${day.date} ${day.total > 0 ? money(symbol, -day.total) : ""}`}
-                      onClick={() => day.inYear && onOpenDate?.(day.date)}
-                      tabIndex={day.inYear && day.total > 0 ? 0 : -1}
-                    />
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        <footer className="heatmap-legend">
-          <span>{t("statsHeatmapLess", locale)}</span>
-          {[0, 1, 2, 3, 4].map((level) => <i key={level} className={`heatmap-cell heat-${level}`} />)}
-          <span>{t("statsHeatmapMore", locale)}</span>
-       </footer>
-      </section>
-      )}
+      <StatsHeatmap entries={entries} range={range} settings={settings} locale={locale} today={today} tab={tab} options={allSeries} onOpenDate={onOpenDate} />
 
       <section className="stats-card panel">
         <header className="stats-card-header">
@@ -573,7 +534,7 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
                 <h3>{detail.title}</h3>
                 <small>{detail.entries.length} {t("entriesSuffix", locale)}</small>
               </div>
-              <strong className={`stats-detail-total ${detail.total >= 0 ? "is-income" : "is-expense"}`}>{money(symbol, detail.total)}</strong>
+              <strong className={`stats-detail-total ${detail.total >= 0 ? "is-income" : "is-expense"}`}>{detail.duration ? formatMinutes(detail.total) : money(symbol, detail.total)}</strong>
               <button type="button" className="icon-button subtle" onClick={() => setDetail(null)} aria-label={t("close", locale)}><Icon name="close" size={15} /></button>
             </header>
             <div className="stats-detail-table" role="table" aria-label={detail.title}>
@@ -583,17 +544,17 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
                     aria-sort={detailSort?.field === field ? (detailSort.direction === "asc" ? "ascending" : "descending") : "none"}
                     className={`stats-detail-sort${detailSort?.field === field ? " is-active" : ""}`}
                     onClick={() => toggleDetailSort(field)}>
-                    <span>{t(field === "date" ? "detailTime" : field === "title" ? "detailTitle" : "detailAmount", locale)}</span>
+                    <span>{t(field === "date" ? "detailTime" : field === "title" ? "detailTitle" : detail.duration ? "statsTotalLabel" : "detailAmount", locale)}</span>
                     <i aria-hidden="true"><b /><b /></i>
                   </button>
                 ))}
               </div>
               {sortedDetailEntries.map(entry => (
                 <button key={`${entry.id}:${entry.date}`} type="button" role="row" className="stats-detail-row"
-                  onClick={() => { setDetail(null); onOpenDate?.(entry.date); }}>
+                  onClick={() => { setDetail(null); if (onEditEntry) onEditEntry(entry); else onOpenDate?.(entry.date); }}>
                   <span role="cell">{entry.date} {formatEntryTime(entry, locale)}</span>
                   <span role="cell">{titleFor(entry, locale)}</span>
-                  {typeof entry.amount === "number"
+                  {detail.duration ? <span role="cell">{formatMinutes(entryDurationMinutes(entry))}</span> : typeof entry.amount === "number"
                     ? <span role="cell" className={entry.amount >= 0 ? "is-income" : "is-expense"}>{money(symbol, Math.abs(entry.amount))}</span>
                     : <span role="cell" />}
                 </button>
@@ -867,7 +828,9 @@ function TasksPanel({
   onToggle,
   onStatus,
   onOpenDate,
+  onOpenDetail,
 }: {
+  onOpenDetail: (detail: CategoryDetail) => void;
   tasks: ReturnType<typeof aggregateTaskStats>;
   locale: Locale;
   settings: ChronoEonSettings;
@@ -956,7 +919,7 @@ function TasksPanel({
         <ul className="stats-category-list">
           {tasks.categories.map((category) => (
             <li key={category.id}>
-              <div className="stats-category-row is-static">
+              <button type="button" className="stats-category-row" onClick={() => onOpenDetail({ title: categoryLabel(category.id, locale, category.name), color: category.color, total: category.totalMinutes, entries: tasks.entries.filter(entry => (entry.category || "uncategorized") === category.id && entryDurationMinutes(entry) > 0), duration: true })}>
                 <FadeText className="stats-category-name">
                   <i style={{ background: category.color }} />
                   {categoryLabel(category.id, locale, catalogLabel(category.id, locale, category.name))} <small>({category.count})</small>
@@ -966,7 +929,7 @@ function TasksPanel({
                 </span>
                 <span className="stats-category-share">{t("statsLongest", locale)} {formatMinutes(category.longestMinutes)}</span>
                 <strong>{formatMinutes(category.totalMinutes)}</strong>
-              </div>
+              </button>
             </li>
           ))}
         </ul>

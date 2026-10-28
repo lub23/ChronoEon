@@ -1,3 +1,4 @@
+import type { EntryReplacement, ItemReplacement } from "./domain/bulkReplace";
 import { isMobilePlatform } from "./hooks/useTouchDevice";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -8,7 +9,7 @@ import { EMPTY_ENTRY_FILTER, entryMatchesFilter, filterActive, type EntryFilter 
 import { billCategoryOptions, createDefaultSettings, createEntryId, defaultItemCategoryForCalendar, defaultPaymentMethodForCalendar, formatEntryTime, localizeBuiltinSettings, mergeSharedSettings, normalizeChronoEonSettings, outstandingTaskSections, scheduleCategoryOptions, timerSessionToDraft, type AIProviderConfig, type ChronoEonSettings, type TimerSegment, type TimerSession } from "@chronoeon/domain";
 import type { LunarPreference } from "./domain/lunar";
 import { entryToDraft, entryWithDraft, entryWithOccurrenceMove, entryWithOccurrenceStatus, sourceEntryId, type EntryEditContext } from "./domain/entryWorkflow";
-import { entryMatchesSearch } from "./domain/search";
+import { entryMatchesSearch, itemMatchesSearch } from "./domain/search";
 import { exportEntriesCsv, settingsSyncPayload } from "./domain/dataTransfer";
 import { useChronoEonStore } from "./hooks/useChronoEonStore";
 import { useLiveTimer, type TimerLifecycleEvent } from "./hooks/useLiveTimer";
@@ -181,10 +182,9 @@ function App() {
   );
   const searchedItems = useMemo(() => {
     if (!itemAllowed(filter)) return [];
-    const query = deferredSearch.trim().toLocaleLowerCase();
     return items.filter(item => (entryFilter.calendarIds.length === 0 || entryFilter.calendarIds.includes(item.calendarId))
-      && (!query || [item.name, item.notes, item.location].some(value => value?.toLocaleLowerCase().includes(query))));
-  }, [entryFilter.calendarIds, filter, items, deferredSearch]);
+      && itemMatchesSearch(item, deferredSearch, locale));
+  }, [entryFilter.calendarIds, filter, items, deferredSearch, locale]);
   const [composerOpen, setComposerOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [editingSourceEntry, setEditingSourceEntry] = useState<Entry | null>(null);
@@ -265,6 +265,12 @@ function App() {
     if (tone === "warning" && !action) return;
     toastTimer.current = window.setTimeout(() => setToast(null), action ? 6500 : 3600);
   }, []);
+
+  useEffect(() => {
+    const failed = () => notify(t("preferenceSaveFailed", locale), "warning");
+    window.addEventListener("chronoeon:preference-error", failed);
+    return () => window.removeEventListener("chronoeon:preference-error", failed);
+  }, [locale, notify]);
 
   const dismissToast = useCallback(() => {
     if (toastTimer.current !== undefined) window.clearTimeout(toastTimer.current);
@@ -412,6 +418,23 @@ function App() {
     }
     demoStore.replace(entry.id, entry);
   }, [demoStore, ensureSqliteStore]);
+
+  const replaceEntryFields = async (changes: EntryReplacement[], itemChanges: ItemReplacement[]) => {
+    if (!writable) throw new Error("Storage is not writable");
+    const batch = changes.map(change => {
+      const current = entriesRef.current.find(entry => entry.id === change.before.id);
+      if (!current || JSON.stringify(current) !== JSON.stringify(change.before)) throw new Error("Record changed during review");
+      return { entry: { ...change.after, color: resolveEntryColor(change.after.category, change.after.kind, settingsRef.current, change.after.calendar) }, expectedUpdatedAt: sqliteEntriesRef.current.revisions.get(current.id) };
+    });
+    if (isTauri()) {
+      if (batch.some(change => change.expectedUpdatedAt === undefined)) throw new Error("Missing record revision");
+      const store = await ensureSqliteStore();
+      await store.updateMany(batch as { entry: Entry; expectedUpdatedAt: string }[], { changes: itemChanges.map(change => change.after), settings: settingsRef.current });
+    } else {
+      for (const { entry } of batch) demoStore.replace(entry.id, entry);
+      setDemoItems(current => current.map(item => itemChanges.find(change => change.before.id === item.id)?.after ?? item));
+    }
+  };
 
   const reassignCategories = useCallback(async (sourceCategory: string, targetCategory: string) => {
     if (!sourceCategory || !targetCategory || sourceCategory === targetCategory) return;
@@ -1173,7 +1196,7 @@ function App() {
     calendars={calendars} anchor={filterAnchor} focusSearch={focusFilterSearch}
     items={entryFilter.photosOnly ? searchedItems.filter(item => item.images?.length) : searchedItems} onOpenItem={item => openItemComposer(item)}
     entries={entryFilter.photosOnly ? filteredEntries.filter(entry => entry.images?.length) : filteredEntries}
-    search={search} onSearch={setSearch} onKindChange={setFilter} onChange={setEntryFilter} onClose={closeFilter}
+    onReplace={replaceEntryFields} search={search} onSearch={setSearch} onKindChange={setFilter} onChange={setEntryFilter} onClose={closeFilter}
     onOpenEntry={entry => { setSelectedDate(parseISO(entry.date)); openComposer(entry); }} /> : null;
 
   async function createItemFromBill(entry: Entry, category: Item["category"]) {

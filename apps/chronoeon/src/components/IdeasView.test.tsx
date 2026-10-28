@@ -49,7 +49,7 @@ afterEach(() => {
 });
 
 describe("variable-height ideas", () => {
-  it("keeps short boards in natural flow with the new-card action", async () => {
+  it("keeps short boards in natural flow with a toolbar add action", async () => {
     const onConvert = vi.fn();
     act(() => {
       root.render(
@@ -70,7 +70,8 @@ describe("variable-height ideas", () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
     expect(host.textContent).toContain("Learn Erlang");
     expect(host.querySelector(".idea-card")).not.toBeNull();
-    expect(host.querySelector(".idea-vine-bud")).not.toBeNull();
+    expect(host.querySelector(".idea-vine-bud")).toBeNull();
+    expect(host.querySelector(".items-add-button")).not.toBeNull();
     expect(host.querySelectorAll(".idea-card-top .idea-card-action")).toHaveLength(2);
     expect(host.querySelector(".idea-category")).toBeNull();
     expect(host.querySelector(".idea-card footer")).toBeNull();
@@ -137,4 +138,16 @@ it("measures each card independently for masonry track spans", () => {
   act(() => root.render(<IdeasView entries={[idea("tall", "Tall"), idea("short", "Short")]} locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} search="" today="2026-10-05" onEdit={()=>{}} onNew={()=>{}} />));
   expect([...host.querySelectorAll<HTMLElement>(".idea-vine-node")].map(node => node.style.gridRowEnd)).toEqual(["span 424", "span 190"]);
  } finally { measure.mockRestore(); }
+});
+it("groups sorted ideas, exposes category navigation and renders tag bubbles", () => {
+ const entries = [{ ...idea("b", "Zebra"), category: "work", tags: ["one", "two"] }, { ...idea("a", "Alpha"), category: "personal" }];
+ act(() => root.render(<IdeasView entries={entries} locale="en" settings={DEFAULT_CHRONOEON_SETTINGS} search="" today="2026-08-10" onEdit={()=>{}} onNew={()=>{}} />));
+ expect(host.querySelectorAll(".idea-tags span")).toHaveLength(2);
+ act(() => host.querySelector<HTMLButtonElement>('button[aria-label="Group by category"]')!.click());
+ expect(host.querySelectorAll(".idea-group")).toHaveLength(2);
+ expect(host.querySelectorAll(".idea-category-nav button")).toHaveLength(2);
+ expect(host.querySelectorAll(".idea-card")).toHaveLength(2);
+ act(() => host.querySelector<HTMLButtonElement>('button[aria-label="List"]')!.click());
+ expect(host.querySelector(".idea-group")).toBeNull();
+ expect(host.querySelectorAll(".idea-card")).toHaveLength(2);
 });

@@ -8,7 +8,7 @@ export interface SyncConfig {
 export const DEFAULT_SYNC_CONFIG: SyncConfig = { webdavUrl: "", webdavUsername: "", webdavPassword: "" };
 export function syncConfigured(config: SyncConfig): boolean { return Boolean(config.webdavUrl.trim()); }
 export type SyncResult = EngineResult | { ok: false; code: string; message: string };
-export interface StorageUsage { syncCacheBytes: number; attachmentBytes: number; databaseBytes: number }
+export interface StorageUsage { syncDatabaseBytes: number | null; databaseBytes: number }
 /** Human sizes for the storage panel: bytes are never shown raw. */
 export function formatBytes(bytes: number, locale: "en" | "zh"): string {
   const units = ["B", "KB", "MB", "GB"];

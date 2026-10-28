@@ -43,11 +43,11 @@ describe("unified entry filtering", () => {
   it("selects and clears each category group independently, including none selected", () => {
     const { change } = setup();
     const toggles = () => document.querySelectorAll(".filter-select-all");
-    click(toggles()[0]); expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ categories: [], billCategories: null }));
+    click(toggles()[0]); expect(change).not.toHaveBeenCalled(); click(document.querySelector(".filter-apply")!); expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ categories: [], billCategories: null }));
     expect(toggles()[0].textContent).toBe("全选"); expect(toggles()[1].textContent).toBe("取消全选");
-    click(toggles()[1]); expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ categories: [], billCategories: [] }));
-    click(toggles()[0]); expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ categories: null, billCategories: [] }));
-    click(toggles()[1]); expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ categories: null, billCategories: null }));
+    click(toggles()[1]); click(document.querySelector(".filter-apply")!); expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ categories: [], billCategories: [] }));
+    click(toggles()[0]); click(document.querySelector(".filter-apply")!); expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ categories: null, billCategories: [] }));
+    click(toggles()[1]); click(document.querySelector(".filter-apply")!); expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ categories: null, billCategories: null }));
   });
   it("searches places and long notes, showing colored categories and bounded highlighted matches", () => {
     const { apply, open, close } = setup([entry]); search("清华园");
@@ -71,6 +71,8 @@ describe("unified entry filtering", () => {
   it("clears search, kind and category state together", () => {
     const { apply, change } = setup([entry]); search("清华园"); click(document.querySelector(".filter-select-all")!);
     click(document.querySelector(".filter-clear")!);
+    expect(apply).toHaveBeenLastCalledWith("清华园");
+    click(document.querySelector(".filter-apply")!);
     expect(apply).toHaveBeenLastCalledWith(""); expect(change).toHaveBeenLastCalledWith(EMPTY_ENTRY_FILTER);
     expect(document.querySelector(".filter-search-results")).toBeNull();
   });
@@ -102,4 +104,13 @@ it("navigates mixed item and entry results from the actual focused row", () => {
   press("ArrowUp"); expect(document.activeElement).toBe(rows[2]);
   act(() => rows[0].focus());
   press("ArrowDown"); expect(document.activeElement).toBe(rows[1]);
+});
+
+it("discards category and kind drafts on cancel without running a filter",()=>{
+ const {change,apply,close}=setup();
+ click(document.querySelector(".filter-chip")!);
+ click([...document.querySelectorAll<HTMLButtonElement>('[role="checkbox"]')].find(button=>button.textContent==="账目")!);
+ expect(change).not.toHaveBeenCalled();expect(apply).not.toHaveBeenCalled();
+ click([...document.querySelectorAll<HTMLButtonElement>(".filter-panel-actions button")].find(button=>button.textContent==="取消")!);
+ expect(close).toHaveBeenCalledOnce();expect(change).not.toHaveBeenCalled();expect(apply).not.toHaveBeenCalled();
 });

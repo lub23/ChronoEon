@@ -218,3 +218,33 @@ describe("independent operation recovery", () => {
   await d.sync.recordLanguageChange("en", "en");
   expect(await d.sync.history()).toHaveLength(1);
  });
+
+it("batch replacement is atomic, revision checked and recovered as one operation", async () => {
+ const d = await device();
+ const a = await d.store.create(entry({title: "北京 A"})); const b = await d.store.create(entry({title: "北京 B"}));
+ const revisions = await d.store.readRevisions([a.id, b.id]);
+ await d.store.updateMany([{entry: {...a,title: "北京市 A"},expectedUpdatedAt: revisions.get(a.id)!},{entry: {...b,title: "北京市 B"},expectedUpdatedAt: revisions.get(b.id)!}]);
+ const history = await d.sync.history();
+ expect(history[0].changes.filter(change => change.table === "entries")).toHaveLength(2);
+ await d.sync.restoreHistory(history[0].id);
+ expect((await d.store.get(a.id))?.title).toBe("北京 A"); expect((await d.store.get(b.id))?.title).toBe("北京 B");
+ const fresh = await d.store.readRevisions([a.id, b.id]);
+ const before = await d.sync.history();
+ await expect(d.store.updateMany([{entry: {...a,title: "partial"},expectedUpdatedAt: fresh.get(a.id)!},{entry: {...b,title: "stale"},expectedUpdatedAt: "stale"}])).rejects.toThrow("changed during review");
+ expect((await d.store.get(a.id))?.title).toBe("北京 A");
+ expect(await d.sync.history()).toEqual(before);
+});
+
+it("commits item and entry field replacements together and schedules sync",async()=>{
+ const d=await device();const settings=createDefaultSettings("en");const a=await d.store.create(entry());
+ const item=await d.items.save(draftToItem({name:"北京相机",calendarId:settings.defaultCalendarID,category:"electronics",acquisition:"gift",acquiredOn:"2026-10-28",acquiredAt:"09:00",cost:0,currency:"CNY"}),settings);
+ const revision=(await d.store.readRevisions([a.id])).get(a.id)!;
+ const changed=vi.fn();const off=d.sync.subscribe(changed);
+ await d.store.updateMany([{entry:{...a,location:"北京市"},expectedUpdatedAt:revision}],{changes:[{...item,location:"北京市"}],settings});
+ expect(changed).toHaveBeenCalledOnce();expect((await d.items.list())[0].location).toBe("北京市");
+ const history=await d.sync.history();expect(history[0].changes.map(change=>change.table)).toEqual(expect.arrayContaining(["entries","items"]));
+ await d.sync.restoreHistory(history[0].id);expect((await d.items.list())[0].location).toBeUndefined();
+ const fresh=(await d.store.readRevisions([a.id])).get(a.id)!;
+ await expect(d.store.updateMany([{entry:{...a,location:"partial"},expectedUpdatedAt:fresh}],{changes:[{...item,location:"stale"}],settings})).rejects.toThrow("changed since");
+ expect((await d.store.get(a.id))?.location).toBeUndefined();off();
+});

@@ -22,6 +22,20 @@ impl WebDAVBackend {
             .redirect(reqwest::redirect::Policy::none()).build().map_err(|error| error.without_url().to_string())?;
         Ok(Self { client, base, username: config.webdav_username.clone().unwrap_or_default(), password: config.webdav_password.clone().unwrap_or_default(), collections: HashSet::new(), lock_token: None, locked_at: Instant::now() })
     }
+    pub fn database_bytes(&mut self) -> Result<u64, String> {
+        let head = self.fetch_index()?;
+        let Some(bytes) = head.bytes else { return Ok(0); };
+        let index = serde_json::from_slice(&bytes).map_err(|_| "SYNC_INVALID_INDEX")?;
+        let mut total = bytes.len() as u64;
+        for object in super::refs(&index)? {
+            let response = Self::send(self.plain_request(Method::HEAD, &object.path)?)?;
+            if !response.status().is_success() { return Err("SYNC_STORAGE_SIZE_FAILED".into()); }
+            total += response.headers().get(reqwest::header::CONTENT_LENGTH)
+                .and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<u64>().ok())
+                .ok_or("SYNC_STORAGE_SIZE_FAILED")?;
+        }
+        Ok(total)
+    }
     fn plain_request(&self, method: Method, path: &str) -> Result<RequestBuilder, String> {
         let url = self.base.join(path).map_err(|_| "SYNC_INVALID_REMOTE")?;
         let request = self.client.request(method, url);
@@ -280,7 +294,7 @@ mod tests {
                         "GET" if nutstore && !collection_created => (409,vec![]),
                         "LOCK" if nutstore => (403,vec![]),
                         "GET" if headers.get("if-none-match").is_some_and(|value| Some(value) == etag.as_ref()) => (304,vec![]),
-                        "GET" => current.map(|bytes|(200,bytes.clone())).unwrap_or((404,vec![])),
+                        "GET" | "HEAD" => current.map(|bytes|(200,bytes.clone())).unwrap_or((404,vec![])),
                         "PUT" if stale => (412,vec![]),
                         "PUT" => { objects.insert(path.clone(),body); (201,vec![]) },
                         "MOVE" => {
@@ -294,13 +308,27 @@ mod tests {
                     };
                     let etag=objects.get(path).map(|bytes| if nutstore { format!("ETag: {}\r\n", crate::attachments::hash(bytes)) } else {format!("ETag: \"{}\"\r\n",crate::attachments::hash(bytes))}).unwrap_or_default();
                     let response=format!("HTTP/1.1 {status} Status\r\n{etag}Content-Length: {}\r\nConnection: close\r\n\r\n",body.len());
-                    stream.write_all(response.as_bytes()).unwrap(); stream.write_all(&body).unwrap();
+                    stream.write_all(response.as_bytes()).unwrap(); if method != "HEAD" { stream.write_all(&body).unwrap(); }
                 }
             });
             Self { url: format!("http://{address}/sync/"), stop, thread: Some(thread) }
         }
     }
     impl Drop for Server { fn drop(&mut self) { self.stop.store(true,Ordering::Relaxed); self.thread.take().unwrap().join().unwrap(); } }
+    #[test]
+    fn database_size_counts_published_compressed_documents_and_index_only() {
+        let server = Server::new(false);
+        let config = TransportConfig { webdav_url: Some(server.url.clone()), ..Default::default() };
+        let mut backend = WebDAVBackend::new(&config).unwrap();
+        assert_eq!(backend.database_bytes().unwrap(), 0);
+        let path = "sync/device/1.jsonl.zst";
+        let bytes = b"compressed database".to_vec();
+        let index = serde_json::json!({ "version": 1, "datasetId": "size-test", "batches": [{ "path": path, "hash": "a".repeat(64) }], "attachments": [] });
+        let manifest = serde_json::to_vec(&index).unwrap();
+        let object = EncodedObject { path: path.into(), hash: "a".repeat(64), bytes: bytes.clone() };
+        assert!(!backend.publish(None, &manifest, &[object], &[]).unwrap().conflict);
+        assert_eq!(backend.database_bytes().unwrap(), (manifest.len() + bytes.len()) as u64);
+    }
     #[test]
     fn webdav_uses_etag_cas_and_refuses_stale_publications() {
         let server=Server::new(false); let config=TransportConfig { webdav_url:Some(server.url.clone()),..Default::default() };

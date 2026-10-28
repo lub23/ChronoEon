@@ -6,10 +6,19 @@
 A local-first home for **schedules, tasks, ideas and expenses**, for Windows,
 Linux, macOS and Android. SQLite is the authoritative store.
 
+**v0.1.0 — first stable release / 首个正式版本。** [Download / 下载](https://github.com/lub23/ChronoEon/releases/tag/v0.1.0)
+
+日常使用请打开构建或安装后的 ChronoEon；`tauri:dev` 用于开发。Windows 原生 dev 与 exe 共用 `%LOCALAPPDATA%\app.chronoeon.desktop\chronoeon.db`，本机设置也保存于该 SQLite 数据库；浏览器演示的数据独立。
+Use the built application for daily work. Native dev and packaged builds share SQLite records and device settings; the browser demo is separate.
+
 ![Agenda view with today's schedule](apps/chronoeon/public/screenshots/agenda.jpg)
 ![Month calendar](apps/chronoeon/public/screenshots/month.jpg)
 ![Day timeline](apps/chronoeon/public/screenshots/day.jpg)
 ![Statistics and review](apps/chronoeon/public/screenshots/stats.jpg)
+![Ideas grouped along the vine / 藤蔓分组灵感](apps/chronoeon/public/screenshots/ideas.png)
+![Reviewed batch replacement / 批量替换预览](apps/chronoeon/public/screenshots/batch-replace.png)
+![Compact mobile filters / 手机筛选](apps/chronoeon/public/screenshots/filter-mobile.png)
+![Category heatmap legend / 分类热力图图例](apps/chronoeon/public/screenshots/heatmap.png)
 
 The product code is `apps/chronoeon/` (`app.chronoeon.desktop`). `packages/*`
 holds the UI-independent rules: `domain`, `storage`, `ports`.
@@ -20,11 +29,11 @@ Use Node.js 24+ (the storage tests use the built-in `node:sqlite` module). / 使
 
 ```bash
 npm install
-npm run dev          # http://localhost:1420   (?compact=1 previews the mini window)
+npm run dev          # http://localhost:1420
 ```
 
 The demo keeps everything in browser local storage. What it shows: the List /
-Day / Week / Month / Ideas / Statistics views, the mini window, the Dock with
+Day / Week / Month / Ideas / Statistics views, the Dock with
 its quick-note button, natural-language capture, both
 languages and both themes.
 
@@ -69,6 +78,7 @@ before `npm run tauri:build`.
 ```bash
 npm install
 npm run android:apk     # → .build/android/chronoeon-arm64-YYYYMMDD.apk
+# v0.1.0 local verified output: .build/android/ChronoEon-0.1.0-arm64.apk
 ```
 
 That command builds the frontend, the `aarch64-linux-android` Rust library,
@@ -80,12 +90,11 @@ the Gradle release variant, then aligns and signs the APK. What it needs:
 | Windows host toolchain | MSVC C++ Build Tools + Windows SDK; use the x64 Native Tools prompt so `link.exe` is the MSVC linker, not Git/coreutils                                                                     |
 | Android SDK + NDK      | `ANDROID_HOME` / `ANDROID_SDK_ROOT`; the newest NDK under it is picked automatically, or set `NDK_HOME`                                                                                     |
 | Rust + target          | `rustup target add aarch64-linux-android`                                                                                                                                                   |
-| `perl`                 | only for a **Rust** rebuild: `git2` vendors OpenSSL, whose Configure step is a Perl script. Install Strawberry Perl, or set `CHRONOEON_SKIP_CARGO=1` to repackage the library already built |
+| `perl`                 | only for a **Rust** rebuild: the HTTPS transport vendors OpenSSL, whose Configure step is a Perl script. Install Strawberry Perl, or set `CHRONOEON_SKIP_CARGO=1` to repackage the library already built |
 
 Signing uses `CHRONOEON_KEYSTORE` (+ `CHRONOEON_KEYSTORE_PASSWORD`,
 `CHRONOEON_KEY_ALIAS`). Without them the script creates and uses a debug key, so
-the result still installs on a phone; keep a real keystore in the project
-(`src-tauri/certs/` is the intended home) or in CI secrets for anything you
+the result still installs on a phone; keep a release keystore outside the repository or in CI secrets for anything you
 distribute, and never commit it.
 
 `npm run tauri android build --apk --target aarch64` then builds the
@@ -107,8 +116,7 @@ uploads:
 | macOS   | universal (arm64 + x86_64) dmg         |
 | Android | signed arm64 APK (`chronoeon-android`) |
 
-Everything lands as workflow artifacts and on a **draft** release; publishing it
-is a deliberate human step. `ANDROID_KEYSTORE_BASE64` (+ password/alias) secrets
+Installers are attached to the published release and retained as workflow artifacts. `ANDROID_KEYSTORE_BASE64` (+ password/alias) secrets
 switch the APK from the debug key to yours.
 
 ## Data and sync
@@ -119,6 +127,10 @@ switch the APK from the debug key to yours.
   targets — live in the settings document, which the desktop app stores in its
   `sync_settings` row and applies on boot. The browser demo keeps the same
   document in local storage.
+- WebDAV uploads after 15 seconds without edits and checks peers every five minutes.
+  / WebDAV 停止编辑 15 秒后上传，每 5 分钟检查其他设备。
+- Android timing runs in a separate native process; reminders use system alarms.
+  / Android 使用独立原生进程计时和系统闹钟提醒，无需保持页面运行。
 - Sync is a semantic journal: per-entity operations, deterministic conflicts
   with both versions preserved, seven-day snapshots and a Recycle Bin that
   survives until the next successful snapshot.
@@ -147,3 +159,12 @@ If ChronoEon is useful to you, you can buy me a coffee with WeChat.
 如果时元对你有帮助，欢迎通过微信请作者喝杯咖啡。
 
 ![WeChat payment QR code](./WechatPay.png)
+
+## v0.1.0 everyday workflows / 日常操作
+
+- Search → Batch replace → select a field and replacement → preview and tick changes → apply. Entry and item edits commit together; Data → Operation history can restore the whole batch. Literal replacement is case-sensitive. / 搜索后点击“批量替换”，选择字段与替换文字，预览并勾选后确认；条目与物品统一提交，可在“设置 → 数据 → 操作历史”恢复整批修改。按字面匹配，区分英文大小写。
+- Filters keep a draft until **Apply filters** (or an explicit Search submission). Cancel, Escape or tapping outside discards uncommitted selections. / 筛选选项先保留草稿，点击“确认筛选”或主动提交搜索后生效；取消、Esc 或点击外部放弃未提交选择。
+- API keys support native clipboard paste. Ask displays search/tool results, generation steps, elapsed time and streamed text; capture streams progress while validating the structured draft before review. Partial answers are never saved. / 密钥支持粘贴；随心问显示检索结果、生成步骤、耗时与流式正文，随心记显示流式识别进度并在字段核验后交付草稿，未完成回答不会保存。
+- Android keeps package ID `app.chronoeon.desktop` and an increasing internal version code (v0.1.0: `3000004`) so this release can install over earlier test builds with the same signing certificate. Keep your existing signing identity for future releases. / Android 保持包名及递增内部版本号（v0.1.0 为 `3000004`），相同证书下可覆盖测试版并保留数据，后续发布请持续使用相同证书。
+
+Agent progress follows the transparency pattern described in [Building effective agents](https://www.anthropic.com/research/building-effective-agents), using [Tauri Channels](https://v2.tauri.app/develop/calling-frontend/#channels) for native streaming.

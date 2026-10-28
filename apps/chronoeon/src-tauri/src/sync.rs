@@ -165,45 +165,20 @@ pub fn publish_files(config: &TransportConfig, root: &Path, images: &Path, publi
     work().map_err(|error| redact(error, config))
 }
 
-/// Disk footprint of everything synchronization keeps on this device. The
-/// WebDAV has no local mirror; photos and the database are stored locally.
+/// SQLite footprint on this device and compressed database documents published to WebDAV.
+/// Remote size is unknown when the server is unreachable.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StorageUsage { sync_cache_bytes: u64, attachment_bytes: u64, database_bytes: u64 }
-
-fn directory_bytes(path: &Path) -> u64 {
-    let Ok(entries) = fs::read_dir(path) else { return 0; };
-    entries.flatten().map(|entry| {
-        // Symlinks are never followed: a cache must not count (or loop over) the rest of the disk.
-        let Ok(metadata) = entry.metadata() else { return 0; };
-        if metadata.is_dir() { directory_bytes(&entry.path()) } else if metadata.is_file() { metadata.len() } else { 0 }
-    }).sum()
-}
-
-/// The transport set is bounded WebP only; an accidentally copied original,
-/// screenshot export or cache artifact must not inflate reported sync usage.
-fn transportable_attachment_bytes(path: &Path) -> u64 {
-    let Ok(entries) = fs::read_dir(path) else { return 0; };
-    entries.flatten().filter_map(|entry| {
-        let name = entry.file_name();
-        let name = name.to_str()?;
-        let hash = name.strip_suffix(".webp")?;
-        if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) { return None; }
-        let metadata = entry.metadata().ok()?;
-        metadata.is_file().then(|| metadata.len()).filter(|bytes| *bytes <= attachments::MAX_BYTES as u64)
-    }).sum()
-}
+pub struct StorageUsage { sync_database_bytes: Option<u64>, database_bytes: u64 }
 
 #[tauri::command]
 pub async fn sync_storage_usage(app: tauri::AppHandle, config: TransportConfig) -> Result<StorageUsage, String> {
-    let root = cache_root(&app, &config)?;
     let local = app.path().app_local_data_dir().map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let database_bytes = ["chronoeon.db", "chronoeon.db-wal", "chronoeon.db-shm"].iter()
             .filter_map(|name| fs::metadata(local.join(name)).ok()).map(|metadata| metadata.len()).sum();
         StorageUsage {
-            sync_cache_bytes: directory_bytes(&root),
-            attachment_bytes: transportable_attachment_bytes(&local.join("attachments")),
+            sync_database_bytes: webdav::WebDAVBackend::new(&config).and_then(|mut backend| backend.database_bytes()).ok(),
             database_bytes,
         }
     }).await.map_err(|error| error.to_string())
@@ -222,32 +197,6 @@ pub async fn sync_backend_publish(app: tauri::AppHandle, config: TransportConfig
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn measures_cache_folders_without_following_links() {
-        let root = std::env::temp_dir().join(format!("chronoeon-usage-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("objects/aa")).unwrap();
-        fs::write(root.join("objects/aa/one"), [0u8; 1200]).unwrap();
-        fs::write(root.join("HEAD"), b"ref: refs/heads/main
-").unwrap();
-        assert_eq!(directory_bytes(&root), 1200 + 21);
-        assert_eq!(directory_bytes(&root.join("missing")), 0);
-        fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn usage_counts_only_bounded_canonical_webp_photos() {
-        let root = std::env::temp_dir().join(format!("chronoeon-usage-photos-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        let hash = attachments::hash(b"photo");
-        fs::write(root.join(format!("{hash}.webp")), [0u8; 512]).unwrap();
-        fs::write(root.join("original.jpg"), [0u8; 4096]).unwrap();
-        fs::write(root.join(format!("{}.jpg", "a".repeat(64))), [0u8; 4096]).unwrap();
-        fs::write(root.join("oversized.webp"), [0u8; attachments::MAX_BYTES + 1]).unwrap();
-        assert_eq!(transportable_attachment_bytes(&root), 512);
-        fs::remove_dir_all(&root).unwrap();
-    }
     #[test]
     fn only_compressed_logs_snapshots_and_bounded_webp_are_transportable() {
         assert!(!valid_document_path("data/chronoeon.db")); assert!(!valid_document_path("sync/../../secret.jsonl.zst"));

@@ -72,18 +72,15 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
         ? <time dateTime={nextSnapshot}>{new Date(nextSnapshot).toLocaleString(localeTag[locale])}</time>
         : t("syncSnapshotFirst", locale)}</p>
       {snapshotDue && <p className="settings-footnote" role="status">{t("syncSnapshotDue", locale)}</p>}
-      <p className="settings-footnote">{t("syncSnapshotRetention", locale)}</p>
     </div>
     <MotionPresence>{dialog && createPortal(dialog, document.body)}</MotionPresence>
     {service.status?.lastSuccess && <p className="settings-footnote">{t("syncLastSuccess", locale)}: {new Date(service.status.lastSuccess).toLocaleString(localeTag[locale])}</p>}
     {service.usage && <>
       <dl className="sync-usage" aria-label={t("syncStorageUsage", locale)}>
         <div><dt>{t("syncStorageDatabase", locale)}</dt><dd>{formatBytes(service.usage.databaseBytes, locale)}</dd></div>
-        <div><dt>{t("syncStoragePhotos", locale)}</dt><dd>{formatBytes(service.usage.attachmentBytes, locale)}</dd></div>
-        <div className="sync-usage-total"><dt>{t("syncStorageTotal", locale)}</dt><dd>{formatBytes(service.usage.attachmentBytes + service.usage.databaseBytes, locale)}</dd></div>
-        <div><dt>{t("syncStorageRepositoryWebdav", locale)}</dt><dd>{formatBytes(service.usage.syncCacheBytes, locale)}</dd></div>
+        <div><dt>{t("syncRemoteDatabase", locale)}</dt><dd>{service.usage.syncDatabaseBytes === null ? "—" : formatBytes(service.usage.syncDatabaseBytes, locale)}</dd></div>
       </dl>
-      <p className="settings-footnote">{t("syncStorageExplanation", locale)}</p>
+
     </>}
     {error && <div role="status" className={error.code === "SYNC_OFFLINE" ? "settings-footnote" : "sync-error"}>
       <p>{t(errors[error.code] ?? "syncFailedSafe", locale)}</p>
@@ -147,9 +144,6 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
         </ul>
       </section>
     )}
-    <p className="settings-footnote">{t("syncFirstRunHelp", locale)}</p>
-    <p className="settings-footnote">{t("syncDataNote", locale)}</p>
-    <p className="settings-footnote">{t("syncWebdavRetention", locale)}</p>
     {service.conflicts.length > 0 && <section className="sync-conflict-list" aria-label={t("syncConflicts", locale)}>
       <h4>{t("syncConflicts", locale)}</h4><p>{t("syncConflictHelp", locale)}</p>
       {service.conflicts.map((conflict) => {

@@ -25,10 +25,10 @@ beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; host = d
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); });
 
 describe("snapshot rebuild settings", () => {
-  it.each(["zh", "en"] as const)("shows the persisted next rebuild time and seven-day retention in %s", (locale) => {
+  it.each(["zh", "en"] as const)("shows the persisted next rebuild time in %s", (locale) => {
     act(() => render(service(), locale));
     expect(host.querySelector(".sync-snapshot-schedule time")?.getAttribute("datetime")).toBe("2026-09-16T08:00:00.000Z");
-    expect(host.textContent).toContain(locale === "zh" ? "每 7 天" : "every 7 days");
+    expect(host.textContent).toContain(locale === "zh" ? "15 秒" : "15 seconds");
     expect(rebuildButton().textContent).toContain(locale === "zh" ? "立即重建快照" : "Rebuild snapshot now");
   });
 
@@ -81,15 +81,16 @@ describe("snapshot rebuild settings", () => {
 describe("storage usage", () => {
   it("measures when the panel is available and shows human sizes", async () => {
     const refreshUsage = vi.fn(async () => {});
-    const sync = service({ refreshUsage, usage: { syncCacheBytes: 12_582_912, attachmentBytes: 2_048, databaseBytes: 1_048_576 } });
+    const sync = service({ refreshUsage, usage: { syncDatabaseBytes: 12_582_912, databaseBytes: 1_048_576 } });
     await act(async () => render(sync, "zh"));
     expect(refreshUsage).toHaveBeenCalledTimes(1);
     const usage = host.querySelector(".sync-usage")!;
-    expect(usage.textContent).toContain("同步缓存");
+    expect(usage.textContent).toContain("同步数据库");
+    expect(usage.querySelectorAll("dd")).toHaveLength(2);
     expect(usage.textContent).toContain("12 MB");
-    expect(usage.textContent).toContain("2 KB");
-    expect(usage.querySelector(".sync-usage-total")?.textContent).toContain("1 MB");
-    expect(host.textContent).toContain("仅传输压缩变更");
+    expect(usage.textContent).not.toContain("2 KB");
+    expect(usage.textContent).toContain("1 MB");
+
   });
   it("does not measure or render figures while sync is unconfigured", async () => {
     const refreshUsage = vi.fn(async () => {});

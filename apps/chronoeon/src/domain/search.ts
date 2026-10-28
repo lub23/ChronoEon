@@ -1,3 +1,4 @@
+import type { Item } from "@chronoeon/domain";
 import { categoryLabel, localeTag, paymentMethodLabel } from "../i18n";
 import { titleFor, type ChronoEonSettings, type Entry, type Locale } from "./entry";
 
@@ -40,4 +41,10 @@ export function searchExcerpt(text: string, needle: string, locale: Locale, maxL
   const start = Math.max(0, index - 24);
   const end = Math.min(clean.length, Math.max(start + maxLength, index + needle.length + 24));
   return (start ? "…" : "") + clean.slice(start, end) + (end < clean.length ? "…" : "");
+}
+
+/** Asset search uses the same visible text fields on every search surface. */
+export function itemMatchesSearch(item: Item, search: string, locale: Locale): boolean {
+  const needle = search.trim().toLocaleLowerCase(localeTag[locale]);
+  return !needle || [item.name, item.notes, item.location, item.payment].some(value => value?.toLocaleLowerCase(localeTag[locale]).includes(needle));
 }

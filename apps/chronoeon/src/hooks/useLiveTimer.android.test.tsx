@@ -37,13 +37,13 @@ describe("Android timer ownership", () => {
     await visibility(false);
     expect(live.elapsed).toBe(180_000); expect(live.running).toBe(true); expect(live.recovered).toBe(false);
   });
-  it("does not invent elapsed time when the native service was interrupted", async () => {
+  it("resumes the durable running session after the native process was reclaimed", async () => {
     const started = Date.now() - 600_000;
     stored = { ...createTimerSession({ title: "Interrupted", calendarId: "default" }, started), lastTick: started + 60_000 };
     native.snapshot.mockImplementation(async () => ({ session: stored }));
     await act(async () => root.render(<Harness />));
-    expect(live.running).toBe(false); expect(live.recovered).toBe(true); expect(live.elapsed).toBe(60_000);
-    expect(stored?.segments.at(-1)?.end).toBe(started + 60_000);
+    expect(live.running).toBe(true); expect(live.recovered).toBe(false); expect(live.elapsed).toBe(600_000);
+    expect(stored?.segments.at(-1)?.end).toBeUndefined();
   });
   it("clears the authoritative row before cancelling the service", async () => {
     await start(); await act(async () => live.cancel());

@@ -718,7 +718,7 @@ async fn send_ai_request(
 }
 
 #[tauri::command]
-async fn ai_chat_completion(app: tauri::AppHandle, request: AiChatRequest) -> Result<AiChatResponse, String> {
+async fn ai_chat_completion(app: tauri::AppHandle, request: AiChatRequest, on_progress: tauri::ipc::Channel<serde_json::Value>) -> Result<AiChatResponse, String> {
     let base = normalize_ai_base_url(&request.base_url)?;
     if request.model.trim().is_empty() {
         return Err("AI model is empty".into());
@@ -752,7 +752,7 @@ async fn ai_chat_completion(app: tauri::AppHandle, request: AiChatRequest) -> Re
     let streaming = status.is_success() && response.headers().get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok()).is_some_and(|value| value.contains("text/event-stream"));
     let payload: serde_json::Value = if streaming {
-        ai_stream::read(response).await?
+        ai_stream::read_with_progress(response, Some(on_progress)).await?
     } else {
         let bytes = response.bytes().await.map_err(|error| format!("Could not read AI response: {error}"))?;
         if bytes.len() > MAX_AI_RESPONSE_BYTES { return Err("AI response exceeded the 2 MB safety limit".into()); }
