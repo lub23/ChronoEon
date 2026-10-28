@@ -430,7 +430,11 @@ export class SqliteEntryStore implements EntryStore {
           await this.replaceTags(entry.id, entry.tags ?? []);
           await this.replaceAttachmentRows(entry.id, entry.images ?? []);
         }
-        for (const item of items?.changes ?? []) await new SqliteItemStore(this.backend).saveInTransaction(item, items!.settings);
+        for (const item of items?.changes ?? []) {
+          const rows = await this.backend.select<{ id: string }>("SELECT id FROM items WHERE id = ?", [item.id]);
+          if (!rows.length) throw new StorageError("RevisionMismatch", "The item was deleted during review", item.id);
+          await new SqliteItemStore(this.backend).saveInTransaction(item, items!.settings);
+        }
       });
       notifyLocalChange(this.backend);
       this.notifyRebuilt();

@@ -246,5 +246,9 @@ it("commits item and entry field replacements together and schedules sync",async
  await d.sync.restoreHistory(history[0].id);expect((await d.items.list())[0].location).toBeUndefined();
  const fresh=(await d.store.readRevisions([a.id])).get(a.id)!;
  await expect(d.store.updateMany([{entry:{...a,location:"partial"},expectedUpdatedAt:fresh}],{changes:[{...item,location:"stale"}],settings})).rejects.toThrow("changed since");
- expect((await d.store.get(a.id))?.location).toBeUndefined();off();
+ expect((await d.store.get(a.id))?.location).toBeUndefined();
+ await d.items.delete(item.id);
+ const latest=(await d.store.readRevisions([a.id])).get(a.id)!;
+ await expect(d.store.updateMany([{entry:{...a,location:"partial"},expectedUpdatedAt:latest}],{changes:[item],settings})).rejects.toThrow("deleted during review");
+ expect(await d.items.list()).toEqual([]);expect((await d.store.get(a.id))?.location).toBeUndefined();off();
 });
