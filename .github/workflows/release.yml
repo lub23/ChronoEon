@@ -78,6 +78,16 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: npm run verify:windows
 
+      - name: Read product release description
+        id: release-notes
+        shell: bash
+        run: |
+          {
+            echo "body<<CHRONOEON_RELEASE_DESCRIPTION"
+            cat CHANGELOG.md
+            echo "CHRONOEON_RELEASE_DESCRIPTION"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build bundles
         uses: tauri-apps/tauri-action@v0
         env:
@@ -95,7 +105,7 @@ jobs:
           projectPath: apps/chronoeon
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: "ChronoEon ${{ inputs.tag || github.ref_name }}"
-          releaseBody: "See CHANGELOG for details. Installers are attached below."
+          releaseBody: ${{ steps.release-notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

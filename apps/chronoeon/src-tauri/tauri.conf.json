@@ -54,9 +54,6 @@
         "displayLanguageSelector": true,
         "installerIcon": "icons/icon.ico"
       }
-    },
-    "android": {
-      "versionCode": 3000004
     }
   }
 }
