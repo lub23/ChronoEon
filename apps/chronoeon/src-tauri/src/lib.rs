@@ -714,7 +714,7 @@ async fn send_ai_request(
         .post(endpoint)
         .headers(headers.clone())
         .json(&body);
-    builder.send().await.map_err(|error| format!("AI request failed: {error}"))
+    builder.send().await.map_err(network::ai_request_error)
 }
 
 #[tauri::command]
@@ -794,16 +794,26 @@ async fn ai_list_models(app: tauri::AppHandle, request: AiModelListRequest) -> R
     let base = normalize_ai_base_url(&request.base_url)?;
     let endpoint = format!("{base}/models");
     let timeout = Duration::from_millis(request.timeout_ms.unwrap_or(8_000).clamp(2_000, 30_000));
+    let headers = ai_credentials::resolve(app.clone(), request.provider_id.as_deref(), request.credentials).await?;
+    #[cfg(target_os = "android")]
+    {
+        let headers = headers.iter().map(|(name, value)| Ok((name.to_string(), value.to_str().map_err(|_| "Invalid AI header")?.to_string())))
+            .collect::<Result<std::collections::HashMap<String, String>, String>>()?;
+        let payload = device::ai_models(app, endpoint, headers, timeout.as_millis() as u64).await?;
+        let items = payload.get("models").and_then(serde_json::Value::as_array).ok_or("AI endpoint returned no model list")?;
+        return Ok(items.iter().filter_map(|item| item.get("id").and_then(serde_json::Value::as_str).map(|id| AiModel { id: id.to_string() })).collect());
+    }
+    #[cfg(not(target_os = "android"))]
+    {
     network::ensure_tls_ready()?;
     let client = reqwest::Client::builder()
         .timeout(timeout)
         .build()
         .map_err(|error| format!("Could not create AI client: {error}"))?;
-    let headers = ai_credentials::resolve(app, request.provider_id.as_deref(), request.credentials).await?;
     let builder = client
         .get(endpoint)
         .headers(headers);
-    let response = builder.send().await.map_err(|error| format!("AI request failed: {error}"))?;
+    let response = builder.send().await.map_err(network::ai_request_error)?;
     let status = response.status();
     let bytes = response.bytes().await.map_err(|error| format!("Could not read AI response: {error}"))?;
     if bytes.len() > MAX_AI_RESPONSE_BYTES {
@@ -835,6 +845,7 @@ async fn ai_list_models(app: tauri::AppHandle, request: AiModelListRequest) -> R
         .map(|id| AiModel { id })
         .collect();
     Ok(models)
+    }
 }
 
 /// The administrative names around one coordinate pair.

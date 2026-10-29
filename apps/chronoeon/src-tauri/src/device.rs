@@ -33,6 +33,11 @@ async fn call(app: AppHandle, command: &'static str, payload: Value) -> Result<V
 }
 
 #[cfg(target_os = "android")]
+pub async fn ai_models(app: AppHandle, endpoint: String, headers: std::collections::HashMap<String, String>, timeout_ms: u64) -> Result<Value, String> {
+    call(app, "aiModels", serde_json::json!({ "endpoint": endpoint, "headers": headers, "timeoutMs": timeout_ms })).await
+}
+
+#[cfg(target_os = "android")]
 pub async fn credentials(app: AppHandle, action: &str, id: &str, value: Option<String>) -> Result<Value, String> {
     call(app, "credentials", serde_json::json!({ "action": action, "id": id, "value": value })).await
 }

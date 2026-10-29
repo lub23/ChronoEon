@@ -31,6 +31,8 @@ class BackgroundArgs { var action: String = ""; var database: String = ""; var l
 class InstallArgs { var path: String = "" }
 @InvokeArg
 class CredentialArgs { var action: String = ""; var id: String = ""; var value: String? = null }
+@InvokeArg
+class AiModelsArgs { var endpoint: String = ""; var timeoutMs: Int = 15000; var headers: java.util.HashMap<String, String> = java.util.HashMap() }
 
 @TauriPlugin(permissions = [
     Permission(alias = "location", strings = [Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION])
@@ -45,6 +47,19 @@ class DevicePlugin(private val activity: Activity) : Plugin(activity) {
     private val backgroundWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val geocoder = PlaceGeocoder(activity.applicationContext)
     private var cancelLocation: (() -> Unit)? = null
+    @Command
+    fun aiModels(invoke: Invoke) = backgroundWorker.execute {
+        try {
+            val args = invoke.parseArgs(AiModelsArgs::class.java)
+            val models = AiModelsClient.fetch(args.endpoint, args.headers, args.timeoutMs.coerceIn(2000, 30000))
+            invoke.resolve(JSObject().apply { put("models", models) })
+        } catch (error: Exception) {
+            // Only exception classes are returned: request headers and credentials stay private.
+            val chain = generateSequence(error as Throwable) { it.cause }.take(8).joinToString(" -> ") { it.javaClass.simpleName }
+            val status = error.message?.takeIf { it.matches(Regex("AI endpoint returned HTTP [0-9]{3}")) }
+            invoke.reject(status ?: "AI request failed: $chain")
+        }
+    }
     private fun granted(permission: String) = ContextCompat.checkSelfPermission(activity, permission) == PackageManager.PERMISSION_GRANTED
     private fun canLocate() = granted(Manifest.permission.ACCESS_COARSE_LOCATION) || granted(Manifest.permission.ACCESS_FINE_LOCATION)
 

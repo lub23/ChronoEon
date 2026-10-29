@@ -1,6 +1,9 @@
 import { allBillCategories, createDefaultSettings, type ChronoEonSettings, type Locale } from "./domain/entry";
 
 const messages = {
+  showSecret: { en: "Show", zh: "显示" },
+  hideSecret: { en: "Hide", zh: "隐藏" },
+  clipboardUnavailable: { en: "Clipboard access failed. Select the text to copy or paste manually.", zh: "剪贴板访问失败，请选择文本手动复制或粘贴。" },
   productName: { en: "ChronoEon", zh: "时元" },
   productTagline: { en: "Grace in time, worlds in years", zh: "时秉元德，岁载玄黄" },
   agenda: { en: "Agenda", zh: "日程" },

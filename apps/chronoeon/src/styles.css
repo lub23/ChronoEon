@@ -4882,3 +4882,11 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
 .bulk-preview-row strong { font-size: 11px; color: var(--ink-soft); }
 .bulk-preview-row del, .bulk-preview-row ins { white-space: pre-wrap; max-height: 100px; overflow: auto; }
 .bulk-preview-row ins { text-decoration: none; color: var(--accent); }
+
+.secret-field { min-width: 0; width: 100%; }
+.secret-input-controls { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.secret-input-controls input { flex: 1; min-width: 0; width: 0; user-select: text; -webkit-user-select: text; }
+.secret-input-controls button { flex-shrink: 0; min-height: 36px; }
+.secret-visibility { border: 0; background: transparent; color: var(--ink-soft); padding: 4px; font-size: 12px; }
+.ai-model-controls .glass-select { flex: 1; min-width: 0; }
+.ai-header-row > .secret-field { min-width: 0; }

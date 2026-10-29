@@ -22,6 +22,7 @@
 # Tauri loads the application device plugin and invoke arguments reflectively.
 -keep class app.chronoeon.desktop.DevicePlugin { *; }
 -keep class app.chronoeon.desktop.LocateArgs { *; }
+-keep class app.chronoeon.desktop.AiModelsArgs { *; }
 
 # reqwest uses these via JNI for Android system certificate verification.
 -keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }

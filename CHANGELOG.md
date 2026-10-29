@@ -11,7 +11,6 @@
 - **个性化**：简体中文 / English、明暗主题，适配桌面和手机。
 
 下载下方对应平台的安装包。Windows 提供 exe / MSI，macOS 提供通用 DMG，Linux 提供 AppImage / deb / rpm，Android 提供 arm64 APK。
-Android 显示版本为 **0.1.0**，内部版本号按标签计算为 **1000**。从内部编号 3000004 的测试包安装会被视为降级；请先导出并核验数据备份，勿直接卸载或清除数据。
 
 ---
 
@@ -26,4 +25,3 @@ ChronoEon is a local-first app for schedules, tasks, journals, ideas, expenses a
 - **Personalization**: English / Simplified Chinese, light/dark themes and desktop/mobile layouts.
 
 Choose an installer below: Windows exe / MSI, universal macOS DMG, Linux AppImage / deb / rpm, or Android arm64 APK.
-Android version **0.1.0** maps to internal code **1000**. Android treats installation over test code 3000004 as a downgrade; export and verify a backup first. Do not uninstall or clear storage without protecting your data.

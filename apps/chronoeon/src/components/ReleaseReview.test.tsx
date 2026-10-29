@@ -14,7 +14,7 @@ import { checkForAppUpdate, installAppUpdate, openUpdatePage } from "../platform
 import { t } from "../i18n";
 
 vi.mock("../platform/attachments", () => ({ resolveAttachmentUrl: vi.fn(), releaseAttachment: vi.fn() }));
-vi.mock("../platform/desktop", () => ({ isTauri: () => true, readAppVersion: async () => "3.0.2" }));
+vi.mock("../platform/desktop", () => ({ isTauri: () => true, readAppVersion: async () => "0.1.0" }));
 vi.mock("../platform/update", () => ({ checkForAppUpdate: vi.fn(), downloadAppUpdate: vi.fn(async () => "/tmp/update.apk"), installAppUpdate: vi.fn(), openUpdatePage: vi.fn() }));
 const settings = createDefaultSettings("en");
 const today = "2026-10-23";
@@ -91,7 +91,7 @@ it.each([false, true])("keeps blank categories open and ignores IME Enter before
 });
 
 it("keeps update failures retryable and disables a pending page handoff", async () => {
-  vi.mocked(checkForAppUpdate).mockResolvedValue({ version: "3.0.3", url: "", size: 0, name: "", pageUrl: "https://example.com/release" });
+  vi.mocked(checkForAppUpdate).mockResolvedValue({ version: "0.1.1", url: "", size: 0, name: "", pageUrl: "https://example.com/release" });
   let reject!: (error: Error) => void;
   vi.mocked(openUpdatePage).mockImplementation(() => new Promise((_, fail) => { reject = fail; }));
   await act(async () => root.render(<SidebarUpdate locale="zh" collapsed={false} />));
@@ -136,7 +136,7 @@ it("shows a ready photo while another remains pending without re-reading it on r
 });
 
 it.each([false, true])("allows another update check after handing off (installer asset: %s)", async hasAsset => {
-  vi.mocked(checkForAppUpdate).mockResolvedValue({ version: "3.0.3", url: hasAsset ? "https://example.com/app.apk" : "", size: 1, name: "app.apk", pageUrl: "https://example.com/release" });
+  vi.mocked(checkForAppUpdate).mockResolvedValue({ version: "0.1.1", url: hasAsset ? "https://example.com/app.apk" : "", size: 1, name: "app.apk", pageUrl: "https://example.com/release" });
   vi.mocked(openUpdatePage).mockResolvedValue(); vi.mocked(installAppUpdate).mockResolvedValue();
   await act(async () => root.render(<SidebarUpdate locale="en" collapsed={false} />));
   await act(async () => document.querySelector<HTMLButtonElement>(".sidebar-utility")!.click());

@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DEFAULT_AI_PROVIDER_PREFERENCES, readAIProviderCredentials, type AIProviderPreferences } from "../ai/provider";
 import { AISettingsPanel } from "./AISettingsPanel";
+import * as providerApi from "../ai/provider";
 
 let host: HTMLDivElement, root: Root;
 beforeEach(() => {
@@ -14,7 +15,7 @@ afterEach(() => { act(() => root.unmount()); host.remove(); vi.restoreAllMocks()
 const provider = { id: "first", name: "First", preset: "compatible" as const, kind: "openai-compatible" as const, baseUrl: "https://example.test/v1", model: "model" };
 function button(text: string) { return [...host.querySelectorAll<HTMLButtonElement>("button")].find(value => value.textContent === text)!; }
 function type(label: string, text: string) {
-  const input = [...host.querySelectorAll("label")].find(value => value.textContent === label)!.querySelector("input")!;
+  const input = [...host.querySelectorAll("label")].find(value => value.querySelector("span")?.textContent === label)!.querySelector("input")!;
   act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text); input.dispatchEvent(new Event("input", { bubbles: true })); });
 }
 
@@ -43,6 +44,21 @@ it("saves credentials separately and explains automatic image routing", async ()
   expect(host.textContent).toContain("Text parses automatically on device");
 });
 
+it("selects fetched models from a dropdown instead of a separate list", async () => {
+  vi.spyOn(providerApi, "fetchAIModels").mockResolvedValue([{ id: "first-model" }, { id: "second-model" }]);
+  act(() => root.render(<AISettingsPanel locale="en" preferences={DEFAULT_AI_PROVIDER_PREFERENCES} onChange={vi.fn()} onTest={vi.fn()} />));
+  act(() => button("Add").click());
+  type("API URL", "https://example.test/v1");
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Load models"]')!.click());
+  const select = host.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="Model"]')!;
+  expect(select.textContent).toContain("first-model");
+  act(() => select.click());
+  const second = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent === "second-model")!;
+  act(() => second.click());
+  expect(select.textContent).toContain("second-model");
+  expect(host.querySelector(".ai-model-list")).toBeNull();
+});
+
 it("does not replace an active provider until its replacement passes the test", async () => {
   const onChange = vi.fn();
   const onTest = vi.fn().mockRejectedValueOnce(new Error("Connection failed")).mockResolvedValueOnce(undefined);
@@ -59,9 +75,9 @@ it("pastes the API key without storing clipboard text in provider preferences", 
  Object.defineProperty(navigator, "clipboard", {configurable:true,value:{readText:vi.fn(async()=>"  debug-secret  ")}});
  act(() => root.render(<AISettingsPanel locale="en" preferences={DEFAULT_AI_PROVIDER_PREFERENCES} onChange={vi.fn()} onTest={vi.fn()} />));
  act(() => button("Add").click());
- await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Paste"]')!.click());
- const key = host.querySelector<HTMLInputElement>('input[type="password"]')!;
- expect(key.value).toBe("debug-secret");
- expect(key.type).toBe("password");
+ await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Paste API key"]')!.click());
+ const key = host.querySelector<HTMLInputElement>('[aria-label="API key"]')!;
+ expect(key.value).toBe("  debug-secret  ");
+ expect(key.type).toBe("text");
  expect(localStorage.getItem("chronoeon.ai.providers") ?? "").not.toContain("debug-secret");
 });

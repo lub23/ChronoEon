@@ -16,6 +16,19 @@ pub fn ensure_tls_ready() -> Result<(), String> {
     Ok(())
 }
 
+/// Preserve connection/TLS causes without attaching URL queries or request headers.
+pub fn ai_request_error(error: reqwest::Error) -> String {
+    let error = error.without_url();
+    let mut message = format!("AI request failed: {error}");
+    let mut source = std::error::Error::source(&error);
+    for _ in 0..8 {
+        let Some(cause) = source else { break };
+        message.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
+    message
+}
+
 #[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "system" fn Java_app_chronoeon_desktop_DevicePlugin_initializeTls<'local>(
@@ -40,5 +53,22 @@ mod tests {
     fn missing_android_tls_is_an_error_not_a_panic_or_insecure_client() {
         assert!(require_ready(false).is_err());
         assert!(require_ready(true).is_ok());
+    }
+
+    #[test]
+    fn request_failure_keeps_connection_cause_and_removes_url_queries() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let error = tauri::async_runtime::block_on(async {
+            reqwest::Client::builder().no_proxy().build().unwrap()
+                .get(format!("http://{address}/?key=private-test-value"))
+                .send().await.unwrap_err()
+        });
+        let cause = std::error::Error::source(&error).unwrap().to_string();
+        let message = ai_request_error(error);
+        assert!(message.contains(&cause));
+        assert!(!message.contains("private-test-value"));
+        assert!(!message.contains("http://"));
     }
 }

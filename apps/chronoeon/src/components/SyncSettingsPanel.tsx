@@ -7,6 +7,7 @@ import type { useSyncService } from "../sync/useSyncService";
 import { formatBytes, syncConfigured, type SyncConfig } from "../sync/types";
 import { localeTag, t, type MessageKey } from "../i18n";
 import { Icon } from "./Icon";
+import { SecretInput } from "./SecretInput";
 
 interface Props { locale: Locale; config: SyncConfig; onChange: (config: SyncConfig) => void; service: ReturnType<typeof useSyncService>; entries: Entry[] }
 const errors: Record<string, MessageKey> = {
@@ -56,7 +57,7 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
         <label className="settings-field ai-settings-field"><span><strong>{t("webdavUser", locale)}</strong></span>
           <input value={config.webdavUsername} autoComplete="username" onChange={(event) => set({ webdavUsername: event.target.value })} /></label>
         <label className="settings-field ai-settings-field"><span><strong>{t("webdavPass", locale)}</strong></span>
-          <input type="password" value={config.webdavPassword} autoComplete="current-password" onChange={(event) => set({ webdavPassword: event.target.value })} /></label>
+          <SecretInput locale={locale} ariaLabel={t("webdavPass", locale)} value={config.webdavPassword} autoComplete="current-password" onChange={webdavPassword => set({ webdavPassword })} /></label>
     </div>
     <div className="ai-settings-actions sync-actions">
       <button type="button" className="secondary-button" disabled={service.busy || rebuilding || !service.available || !syncConfigured(config)} onClick={() => void service.run()}>
