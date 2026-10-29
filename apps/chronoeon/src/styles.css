@@ -4890,3 +4890,15 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
 .secret-visibility { border: 0; background: transparent; color: var(--ink-soft); padding: 4px; font-size: 12px; }
 .ai-model-controls .glass-select { flex: 1; min-width: 0; }
 .ai-header-row > .secret-field { min-width: 0; }
+.secret-field { container-type: inline-size; }
+@container (max-width: 240px) {
+  .secret-input-controls { flex-wrap: wrap; justify-content: flex-end; }
+  .secret-input-controls input { flex: 1 0 100%; width: 100%; }
+}
+@media (max-width: 640px) {
+  .secret-input-controls button { min-height: 44px; min-width: 36px; }
+  .ai-provider-form .ai-header-row { grid-template-columns: minmax(0, 1fr) 28px; }
+  .ai-header-row > input { grid-column: 1; grid-row: 1; }
+  .ai-header-row > .secret-field { grid-column: 1 / -1; grid-row: 2; }
+  .ai-header-row > button { grid-column: 2; grid-row: 1; }
+}

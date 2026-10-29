@@ -23,6 +23,8 @@
 -keep class app.chronoeon.desktop.DevicePlugin { *; }
 -keep class app.chronoeon.desktop.LocateArgs { *; }
 -keep class app.chronoeon.desktop.AiModelsArgs { *; }
+# Retain the system transport entry for standalone on-device integration checks.
+-keep class app.chronoeon.desktop.AiModelsClient { *; }
 
 # reqwest uses these via JNI for Android system certificate verification.
 -keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }
