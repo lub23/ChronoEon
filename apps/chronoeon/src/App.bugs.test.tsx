@@ -460,6 +460,7 @@ describe("app: create flow (browser demo)", () => {
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", ctrlKey: true, bubbles: true, cancelable: true }));
     });
+    await act(async () => { await import("./components/SettingsDialog"); });
     await flush();
     expect(host.querySelector(".settings-backdrop"), "settings must open").toBeTruthy();
 
