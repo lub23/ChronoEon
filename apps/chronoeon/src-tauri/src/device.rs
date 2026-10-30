@@ -40,25 +40,38 @@ pub async fn ai_models(app: AppHandle, endpoint: String, headers: std::collectio
 #[cfg(target_os = "android")]
 pub async fn ai_completion(app: AppHandle, endpoint: &str, headers: &std::collections::HashMap<String, String>, timeout_ms: u64,
     body: Value, progress: tauri::ipc::Channel<Value>) -> Result<Value, String> {
-    let completion = std::sync::Arc::new(std::sync::Mutex::new(Ok(crate::ai_stream::Completion::default())));
-    let state = completion.clone();
+    // Native channel callbacks run under Tauri's channel registry lock. Queue
+    // events and deliver WebView progress outside that lock to avoid re-entry
+    // stalls. Weak ownership releases request data when a call ends.
+    let (sender, receiver) = std::sync::mpsc::channel::<Option<String>>();
+    let sender = std::sync::Arc::new(sender);
+    let weak_sender = std::sync::Arc::downgrade(&sender);
+    let worker = tauri::async_runtime::spawn_blocking(move || -> Result<crate::ai_stream::Completion, String> {
+        let mut completion = crate::ai_stream::Completion::default();
+        let mut last_emit = std::time::Instant::now() - std::time::Duration::from_millis(32);
+        while let Ok(Some(data)) = receiver.recv() {
+            completion.push(&data)?;
+            if last_emit.elapsed() >= std::time::Duration::from_millis(32) || data == "[DONE]" {
+                progress.send(completion.progress()).map_err(|_| "AI stream consumer disconnected".to_string())?;
+                last_emit = std::time::Instant::now();
+            }
+        }
+        Ok(completion)
+    });
     let events = tauri::ipc::Channel::<Value>::new(move |event| {
-        let event: Value = match event {
-            tauri::ipc::InvokeResponseBody::Json(text) => serde_json::from_str(&text)?,
-            _ => return Ok(()),
-        };
-        let mut state = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Ok(value) = state.as_mut() {
-            let result = event["data"].as_str().ok_or("Invalid AI stream event".to_string())
-                .and_then(|data| value.push(data)).and_then(|_| progress.send(value.progress()).map_err(|_| "AI stream consumer disconnected".to_string()));
-            if let Err(error) = result { *state = Err(error); }
+        let Some(sender) = weak_sender.upgrade() else { return Ok(()); };
+        if let tauri::ipc::InvokeResponseBody::Json(text) = event {
+            let event: Value = serde_json::from_str(&text)?;
+            if let Some(data) = event["data"].as_str() { let _ = sender.send(Some(data.to_owned())); }
         }
         Ok(())
     });
-    let mut result = call(app, "aiCompletion", serde_json::json!({"endpoint":endpoint,"headers":headers,"timeoutMs":timeout_ms,"body":body.to_string(),"onEvent":events})).await?;
+    let result = call(app, "aiCompletion", serde_json::json!({"endpoint":endpoint,"headers":headers,"timeoutMs":timeout_ms,"body":body.to_string(),"onEvent":events})).await;
+    let _ = sender.send(None);
+    let completion = worker.await.map_err(|error| error.to_string());
+    let mut result = result?;
     if result["streaming"].as_bool() == Some(true) {
-        let state = std::mem::replace(&mut *completion.lock().map_err(|_| "AI stream state poisoned")?, Ok(crate::ai_stream::Completion::default()));
-        result["payload"] = state?.finish()?;
+        result["payload"] = completion??.finish()?;
     }
     Ok(result)
 }
