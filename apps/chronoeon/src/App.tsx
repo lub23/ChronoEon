@@ -1,6 +1,6 @@
 import type { EntryReplacement, ItemReplacement } from "./domain/bulkReplace";
 import { isMobilePlatform } from "./hooks/useTouchDevice";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { addDays, addMonths, differenceInCalendarDays, format, parseISO } from "date-fns";
@@ -46,9 +46,10 @@ import { IdeasView } from "./components/IdeasView";
 import { useSqliteItems } from "./hooks/useSqliteItems";
 import { billCategoryForValue, draftToItem, validateItemDraft, type Item, type ItemDraft } from "@chronoeon/domain";
 import type { SqliteItemStore } from "@chronoeon/storage";
-import { StatsView, type InsightsTab } from "./components/StatsView";
+import { type InsightsTab } from "./components/StatsView";
+const StatsView = lazy(() => import("./components/StatsView").then(module => ({ default: module.StatsView })));
 import { MonthView } from "./components/MonthView";
-import { PhotoWallView } from "./components/PhotoWallView";
+const PhotoWallView = lazy(() => import("./components/PhotoWallView").then(module => ({ default: module.PhotoWallView })));
 import { EntryContextMenu, type EntryMenuTarget } from "./components/EntryContextMenu";
 import { TimerPill, TimerWidget } from "./components/TimerWidget";
 import { DayView } from "./components/DayView";
@@ -60,9 +61,10 @@ import { TreeCanopy } from "./components/TreeCanopy";
 import { GlassDatePicker } from "./components/GlassDateTimePicker";
 import { ViewDock } from "./components/ViewDock";
 import { WindowControls, WindowResizeHandles } from "./components/WindowControls";
-import { ChatDialog } from "./components/ChatDialog";
+const ChatDialog = lazy(() => import("./components/ChatDialog").then(module => ({ default: module.ChatDialog })));
 import { FilterPanel } from "./components/FilterPanel";
-import { SettingsDialog, type AccentTheme, type AppPreferences, type SettingsSection } from "./components/SettingsDialog";
+import { type AccentTheme, type AppPreferences, type SettingsSection } from "./components/SettingsDialog";
+const SettingsDialog = lazy(() => import("./components/SettingsDialog").then(module => ({ default: module.SettingsDialog })));
 import { useConfirmDialog } from "./components/ConfirmDialog";
 import { ReminderDialog } from "./components/ReminderDialog";
 import { ImagePreview } from "./components/ImagePreview";
@@ -969,7 +971,7 @@ function App() {
     // The list shares the day's photo wall and keeps its own paging, so 仅照片
     // still walks the whole archive instead of stopping at one window.
     if (view === "agenda") return photosOnly
-      ? <PhotoWallView entries={searchedEntries} selectedDate={selectedDate} days={visibleDays} paged locale={locale} settings={settings} onSelectDate={setSelectedDate} />
+      ? <Suspense fallback={<div className="panel" role="status">{t("loading", locale)}</div>}><PhotoWallView entries={searchedEntries} selectedDate={selectedDate} days={visibleDays} paged locale={locale} settings={settings} onSelectDate={setSelectedDate} /></Suspense>
       : <AgendaView entries={itemEntries} selectedDate={selectedDate} locale={locale} settings={settings} filter={filter} search={deferredSearch} lunar={lunar} onSelectDate={setSelectedDate} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onEdit={entry => viewActions.current.openComposer(entry)} onNew={(date) => (date ? viewActions.current.openComposerAt({ date, allDay: true }) : viewActions.current.openComposer())} onEntryMenu={(...args) => viewActions.current.openEntryMenu(...args)} />;
     if (view === "month") return <MonthView entries={searchedEntries} selectedDate={selectedDate} locale={locale} settings={settings} filter={filter} search={deferredSearch} weekStartsOn={settings.firstDay} showWeekNumbers={settings.showWeekNumbers} lunar={lunar} showPhotos={dayPhotos || photosOnly} photosOnly={photosOnly} onSelectDate={setSelectedDate} onOpenAgenda={() => viewActions.current.selectView("day")} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onEdit={entry => viewActions.current.openComposer(entry)} onEntryMenu={(...args) => viewActions.current.openEntryMenu(...args)} onNewAt={(date) => viewActions.current.openComposerAt({ date, allDay: true })} onReschedule={(...args) => viewActions.current.handleReschedule(...args)} />;
     if (view === "day" || view === "week") {
@@ -1000,7 +1002,7 @@ function App() {
       );
     }
     if (view === "ideas") return <IdeasView entries={itemEntries} locale={locale} settings={settings} search={deferredSearch} today={todayKey} onEdit={entry => viewActions.current.openComposer(entry)} onNew={() => viewActions.current.openComposerAt({ kind: "idea", date: todayKey, start: format(new Date(), "HH:mm") })} />;
-    return <StatsView tab={pageTab ?? "bills"} onTabChange={setInsightsTab} items={searchedItems} allEntries={entries} onAddItem={() => openItemComposer()} onEditItem={item => openItemComposer(item)} onOpenBill={entry => viewActions.current.openComposer(entry)} onEditEntry={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={deferredSearch} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} />;
+    return <Suspense fallback={<div className="panel" role="status">{t("loading", locale)}</div>}><StatsView tab={pageTab ?? "bills"} onTabChange={setInsightsTab} items={searchedItems} allEntries={entries} onAddItem={() => openItemComposer()} onEditItem={item => openItemComposer(item)} onOpenBill={entry => viewActions.current.openComposer(entry)} onEditEntry={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={deferredSearch} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} /></Suspense>;
   }
     // Keep JSX identity for the outgoing page when a neighbor mounts and when
     // that neighbor is promoted. Never rerender both heavy surfaces on lock.
@@ -1076,7 +1078,7 @@ function App() {
     notify(t(delivered ? "testNotificationSent" : "testNotificationBlocked", locale), delivered ? "normal" : "warning");
   }, [locale, notify]);
 
-  const settingsDialog = settingsOpen ? <SettingsDialog
+  const settingsDialog = settingsOpen ? <Suspense fallback={null}><SettingsDialog
     locale={locale}
     theme={theme}
     settings={settings}
@@ -1117,7 +1119,7 @@ function App() {
       setHistoryPreview(record);
     }}
     isTauri={isTauri()}
-  /> : null;
+  /></Suspense> : null;
 
   const reminderDialog = reminderNotice?.length ? (
     <ReminderDialog
@@ -1144,7 +1146,7 @@ function App() {
     />
   ) : null;
 
-  const chatDialog = chatOpen ? <ChatDialog
+  const chatDialog = chatOpen ? <Suspense fallback={null}><ChatDialog
       refreshVersion={chatSyncVersion}
     locale={locale}
     entries={entries}
@@ -1181,7 +1183,7 @@ function App() {
     }}
     onOpenSettings={() => { setSettingsInitialSection("ai"); setSettingsOpen(true); }}
     onClose={() => { setChatOpen(false); setChatArchivedOnly(false); }}
-  /> : null;
+  /></Suspense> : null;
 
   const filterControl = <button ref={filterTriggerRef} type="button"
     className={"icon-button topbar-filter-trigger"

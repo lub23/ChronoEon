@@ -680,13 +680,7 @@ async fn inspect_attachments(app: tauri::AppHandle, hashes: Vec<String>) -> Resu
     }).await.map_err(|error| error.to_string())?
 }
 
-async fn send_ai_request(
-    client: &reqwest::Client,
-    endpoint: &str,
-    request: &AiChatRequest,
-    headers: &reqwest::header::HeaderMap,
-    include_schema: bool,
-) -> Result<reqwest::Response, String> {
+fn ai_request_body(request: &AiChatRequest, include_schema: bool) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": request.model.trim(),
         "messages": request.messages,
@@ -710,6 +704,18 @@ async fn send_ai_request(
     if request.disable_reasoning.unwrap_or(false) {
         body["chat_template_kwargs"] = serde_json::json!({ "enable_thinking": false });
     }
+    body
+}
+
+#[cfg(not(target_os = "android"))]
+async fn send_ai_request(
+    client: &reqwest::Client,
+    endpoint: &str,
+    request: &AiChatRequest,
+    headers: &reqwest::header::HeaderMap,
+    include_schema: bool,
+) -> Result<reqwest::Response, String> {
+    let body = ai_request_body(request, include_schema);
     let builder = client
         .post(endpoint)
         .headers(headers.clone())
@@ -735,12 +741,30 @@ async fn ai_chat_completion(app: tauri::AppHandle, request: AiChatRequest, on_pr
     }
     let endpoint = format!("{base}/chat/completions");
     let timeout = Duration::from_millis(request.timeout_ms.unwrap_or(45_000).clamp(2_000, 180_000));
+    let headers = ai_credentials::resolve(app.clone(), request.provider_id.as_deref(), request.credentials.clone()).await?;
+    #[cfg(target_os = "android")]
+    let (payload, schema_fallback) = {
+        let headers = headers.iter().map(|(name, value)| Ok((name.to_string(), value.to_str().map_err(|_| "Invalid AI header")?.to_string())))
+            .collect::<Result<std::collections::HashMap<String, String>, String>>()?;
+        let wants_schema = request.response_schema.is_some();
+        let mut result = device::ai_completion(app.clone(), &endpoint, &headers, timeout.as_millis() as u64,
+            ai_request_body(&request, wants_schema), on_progress.clone()).await?;
+        let schema_fallback = wants_schema && matches!(result["status"].as_u64(), Some(400 | 404 | 415 | 422));
+        if schema_fallback {
+            result = device::ai_completion(app, &endpoint, &headers, timeout.as_millis() as u64,
+                ai_request_body(&request, false), on_progress).await?;
+        }
+        let status = result["status"].as_u64().ok_or("Invalid AI HTTP status")?;
+        if !(200..300).contains(&status) { return Err(format!("AI endpoint returned HTTP {status}")); }
+        (result["payload"].take(), schema_fallback)
+    };
+    #[cfg(not(target_os = "android"))]
+    let (payload, schema_fallback) = {
     network::ensure_tls_ready()?;
     let builder = reqwest::Client::builder().connect_timeout(timeout.min(Duration::from_secs(15)));
     let builder = if request.stream.unwrap_or(false) { builder.read_timeout(timeout) } else { builder.timeout(timeout) };
     let client = builder.build()
         .map_err(|error| format!("Could not create AI client: {error}"))?;
-    let headers = ai_credentials::resolve(app, request.provider_id.as_deref(), request.credentials.clone()).await?;
     let wants_schema = request.response_schema.is_some();
     let mut schema_fallback = false;
     let mut response = send_ai_request(&client, &endpoint, &request, &headers, wants_schema).await?;
@@ -761,6 +785,8 @@ async fn ai_chat_completion(app: tauri::AppHandle, request: AiChatRequest, on_pr
             return Err(format!("AI endpoint returned {status}: {safe}"));
         }
         serde_json::from_slice(&bytes).map_err(|error| format!("AI endpoint returned invalid JSON: {error}"))?
+    };
+        (payload, schema_fallback)
     };
     let message = payload.pointer("/choices/0/message").cloned().unwrap_or_default();
     let tool_calls = message.get("tool_calls").filter(|value| value.as_array().is_some_and(|items| !items.is_empty())).cloned();

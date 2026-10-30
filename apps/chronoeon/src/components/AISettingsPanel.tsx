@@ -1,8 +1,8 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { createEntryId, type AIProviderConfig, type Locale } from "@chronoeon/domain";
 import {
   AI_PROVIDER_PRESETS, DEFAULT_AI_PROVIDER, deleteAIProviderCredentials, fetchAIModels,
-  normalizeAIBaseUrl, readAIProviderCredentials, saveAIProviderCredentials,
+  normalizeAICustomHeaders, normalizeAIBaseUrl, readAIProviderCredentials, saveAIProviderCredentials,
   type AIProviderCredentials, type AIProviderPreferences, type AIProviderPreset, type AIProviderProfile,
 } from "../ai/provider";
 import { isTauri } from "../platform/desktop";
@@ -20,6 +20,7 @@ interface Props {
 }
 
 export function AISettingsPanel({ locale, preferences, onChange, onTest }: Props) {
+  const headerSuggestions = useId();
   const [draft, setDraft] = useState<AIProviderProfile | null>(null);
   const [credentials, setCredentials] = useState<AIProviderCredentials>({ apiKey: "", headers: [] });
   const [models, setModels] = useState<string[]>([]);
@@ -47,8 +48,13 @@ export function AISettingsPanel({ locale, preferences, onChange, onTest }: Props
   });
   const save = () => void run("save", async () => {
     if (!draft) return;
-    const profile = { ...draft, name: draft.name.trim(), model: draft.model.trim(), baseUrl: normalizeAIBaseUrl(draft.baseUrl) };
-    if (!profile.name || !profile.model) throw new Error(t("aiProviderNameRequired", locale));
+    if (!draft.name.trim() || !draft.model.trim() || !draft.baseUrl.trim()) throw new Error(t("aiProviderNameRequired", locale));
+    const normalizedHeaders = normalizeAICustomHeaders(credentials.headers);
+    if (normalizedHeaders.length !== credentials.headers.length) throw new Error(t("aiHeadersInvalid", locale));
+    let baseUrl: string;
+    try { baseUrl = normalizeAIBaseUrl(draft.baseUrl); }
+    catch { throw new Error(t("aiEndpointInvalid", locale)); }
+    const profile = { ...draft, name: draft.name.trim(), model: draft.model.trim(), baseUrl };
     await saveAIProviderCredentials(profile.id, credentials);
     const current = latest.current;
     const providers = current.providers.some(value => value.id === profile.id)
@@ -70,6 +76,35 @@ export function AISettingsPanel({ locale, preferences, onChange, onTest }: Props
     if (draft?.id === profile.id) setDraft(null);
   });
 
+  const editor = draft && <form className="ai-provider-form" onSubmit={event => { event.preventDefault(); save(); }}>
+      <fieldset disabled={Boolean(busy)}>
+        <label className="settings-field"><span>{t("aiProviderType", locale)}</span>
+          <GlassSelect value={draft.preset} ariaLabel={t("aiProviderTypeLabel", locale)}
+            options={Object.entries(AI_PROVIDER_PRESETS).map(([value, preset]) => ({ value, label: value === "local" ? t("aiProviderLocalCustom", locale) : preset.name }))}
+            onChange={value => { const preset = AI_PROVIDER_PRESETS[value as AIProviderPreset]; patch({ preset: value as AIProviderPreset, kind: preset.kind, name: draft.name || preset.name, baseUrl: draft.baseUrl || preset.baseUrl }); }} />
+        </label>
+        <label className="settings-field"><span>{t("aiProviderName", locale)}<span className="required-mark" aria-hidden="true"> *</span></span><input required value={draft.name} onChange={event => patch({ name: event.target.value })} /></label>
+        <label className="settings-field"><span>{t("aiProviderUrl", locale)}<span className="required-mark" aria-hidden="true"> *</span></span><input required type="url" spellCheck={false} value={draft.baseUrl} onChange={event => patch({ baseUrl: event.target.value })} placeholder="https://example.com/v1" /></label>
+        <label className="settings-field"><span>{t("aiProviderKey", locale)}</span><SecretInput locale={locale} ariaLabel={t("aiProviderKey", locale)} value={credentials.apiKey} onChange={apiKey => setCredentials(current => ({ ...current, apiKey }))} /></label>
+        <datalist id={headerSuggestions}>{["Authorization", "Content-Type", "Accept", "X-API-Key", "api-key", "OpenAI-Organization", "OpenAI-Project", "HTTP-Referer", "X-Title"].map(name => <option key={name} value={name} />)}</datalist>
+        <div className="ai-provider-headers">
+          <header><strong>{t("aiProviderHeaders", locale)}</strong><button type="button" className="icon-button" title={t("aiAddHeader", locale)} aria-label={t("aiAddHeader", locale)} disabled={credentials.headers.length >= 10} onClick={() => setCredentials(current => ({ ...current, headers: [...current.headers, { name: "", value: "" }] }))}><Icon name="plus" size={14} /></button></header>
+          {credentials.headers.map((header, index) => <div key={index} className="ai-header-row">
+            <input list={headerSuggestions} required value={header.name} placeholder="X-Header" aria-label={t("aiHeaderName", locale)} spellCheck={false} onChange={event => setCredentials(current => ({ ...current, headers: current.headers.map((row, i) => i === index ? { ...row, name: event.target.value } : row) }))} />
+            <SecretInput locale={locale} ariaLabel={t("aiHeaderValue", locale)} value={header.value} onChange={value => setCredentials(current => ({ ...current, headers: current.headers.map((row, i) => i === index ? { ...row, value } : row) }))} />
+            <button type="button" className="icon-button" title={t("delete", locale)} aria-label={t("delete", locale)} onClick={() => setCredentials(current => ({ ...current, headers: current.headers.filter((_, i) => i !== index) }))}><Icon name="close" size={14} /></button>
+          </div>)}
+        </div>
+        <label className="settings-field"><span>{t("aiModel", locale)}<span className="required-mark" aria-hidden="true"> *</span></span><div className="ai-model-controls">
+          {models.length ? <GlassSelect value={draft.model} ariaLabel={t("aiModel", locale)} options={[...new Set([draft.model, ...models].filter(Boolean))].map(value => ({ value, label: value }))} onChange={model => setDraft({ ...draft, model })} />
+            : <input required value={draft.model} onChange={event => setDraft({ ...draft, model: event.target.value })} spellCheck={false} />}
+          <button type="button" className="icon-button" title={t("aiProviderLoadModels", locale)} aria-label={t("aiProviderLoadModels", locale)} disabled={!draft.baseUrl.trim()} onClick={() => void run("models", async () => { const values = [...new Set((await fetchAIModels(draft, undefined, credentials)).map(model => model.id))]; setModels(values); if (values.length && !values.includes(draft.model)) setDraft(current => current ? { ...current, model: values[0] } : null); })}><Icon name="refresh" size={14} /></button>
+        </div></label>
+
+        <footer><button type="button" className="secondary-button" onClick={() => setDraft(null)}>{t("cancel", locale)}</button><button type="submit" className="primary-action"><Icon name="check" size={14} />{t("save", locale)}</button></footer>
+      </fieldset>
+    </form>;
+
   return <>
     <header className="settings-section-heading ai-provider-heading">
       <h3>{t("aiProvidersHeading", locale)}</h3>
@@ -80,6 +115,7 @@ export function AISettingsPanel({ locale, preferences, onChange, onTest }: Props
       : t("aiProviderBrowserSession", locale)}</p>
     <ul className="ai-provider-list">
       {preferences.providers.map(profile => <li key={profile.id}>
+        <div className="ai-provider-row">
         <button type="button" className="icon-button ai-provider-activate" disabled={Boolean(busy) || Boolean(draft)}
           aria-label={`${t("aiProviderActivate", locale)} ${profile.name}`} aria-pressed={preferences.activeProviderId === profile.id}
           title={preferences.activeProviderId === profile.id ? t("aiProviderActive", locale) : t("aiProviderTestActivate", locale)}
@@ -87,36 +123,13 @@ export function AISettingsPanel({ locale, preferences, onChange, onTest }: Props
         <div className="ai-provider-copy"><strong>{profile.name}</strong><small>{profile.model}</small><small>{profile.baseUrl}</small></div>
         <button type="button" className="icon-button" disabled={Boolean(busy)} aria-label={`${t("edit", locale)} ${profile.name}`} title={t("edit", locale)} onClick={() => edit(profile)}><Icon name="edit" size={14} /></button>
         <button type="button" className="icon-button" disabled={Boolean(busy)} aria-label={`${t("delete", locale)} ${profile.name}`} title={t("delete", locale)} onClick={() => remove(profile)}><Icon name="trash" size={14} /></button>
+        </div>
+        {draft?.id === profile.id && editor}
       </li>)}
     </ul>
     {!preferences.providers.length && !draft && <p className="settings-footnote">{t("aiProviderEmpty", locale)}</p>}
-    {draft && <form className="ai-provider-form" onSubmit={event => { event.preventDefault(); save(); }}>
-      <fieldset disabled={Boolean(busy)}>
-        <label className="settings-field"><span>{t("aiProviderType", locale)}</span>
-          <GlassSelect value={draft.preset} ariaLabel={t("aiProviderTypeLabel", locale)}
-            options={Object.entries(AI_PROVIDER_PRESETS).map(([value, preset]) => ({ value, label: value === "local" ? t("aiProviderLocalCustom", locale) : preset.name }))}
-            onChange={value => { const preset = AI_PROVIDER_PRESETS[value as AIProviderPreset]; patch({ ...preset, preset: value as AIProviderPreset }); }} />
-        </label>
-        <label className="settings-field"><span>{t("aiProviderName", locale)}</span><input required value={draft.name} onChange={event => patch({ name: event.target.value })} /></label>
-        <label className="settings-field"><span>{t("aiProviderUrl", locale)}</span><input required type="url" spellCheck={false} value={draft.baseUrl} onChange={event => patch({ baseUrl: event.target.value })} placeholder="https://example.com/v1" /></label>
-        <label className="settings-field"><span>{t("aiProviderKey", locale)}</span><SecretInput locale={locale} ariaLabel={t("aiProviderKey", locale)} value={credentials.apiKey} onChange={apiKey => setCredentials(current => ({ ...current, apiKey }))} /></label>
-        <div className="ai-provider-headers">
-          <header><strong>{t("aiProviderHeaders", locale)}</strong><button type="button" className="icon-button" title={t("aiAddHeader", locale)} aria-label={t("aiAddHeader", locale)} disabled={credentials.headers.length >= 10} onClick={() => setCredentials(current => ({ ...current, headers: [...current.headers, { name: "", value: "" }] }))}><Icon name="plus" size={14} /></button></header>
-          {credentials.headers.map((header, index) => <div key={index} className="ai-header-row">
-            <input value={header.name} placeholder="X-Header" aria-label={t("aiHeaderName", locale)} spellCheck={false} onChange={event => setCredentials(current => ({ ...current, headers: current.headers.map((row, i) => i === index ? { ...row, name: event.target.value } : row) }))} />
-            <SecretInput locale={locale} ariaLabel={t("aiHeaderValue", locale)} value={header.value} onChange={value => setCredentials(current => ({ ...current, headers: current.headers.map((row, i) => i === index ? { ...row, value } : row) }))} />
-            <button type="button" className="icon-button" title={t("delete", locale)} aria-label={t("delete", locale)} onClick={() => setCredentials(current => ({ ...current, headers: current.headers.filter((_, i) => i !== index) }))}><Icon name="close" size={14} /></button>
-          </div>)}
-        </div>
-        <label className="settings-field"><span>{t("aiModel", locale)}</span><div className="ai-model-controls">
-          {models.length ? <GlassSelect value={draft.model} ariaLabel={t("aiModel", locale)} options={[...new Set([draft.model, ...models].filter(Boolean))].map(value => ({ value, label: value }))} onChange={model => setDraft({ ...draft, model })} />
-            : <input required value={draft.model} onChange={event => setDraft({ ...draft, model: event.target.value })} spellCheck={false} />}
-          <button type="button" className="icon-button" title={t("aiProviderLoadModels", locale)} aria-label={t("aiProviderLoadModels", locale)} disabled={!draft.baseUrl.trim()} onClick={() => void run("models", async () => { const values = [...new Set((await fetchAIModels(draft, undefined, credentials)).map(model => model.id))]; setModels(values); if (values.length && !values.includes(draft.model)) setDraft(current => current ? { ...current, model: values[0] } : null); })}><Icon name="refresh" size={14} /></button>
-        </div></label>
+    {draft && !preferences.providers.some(profile => profile.id === draft.id) && editor}
 
-        <footer><button type="button" className="secondary-button" onClick={() => setDraft(null)}>{t("cancel", locale)}</button><button type="submit" className="primary-action"><Icon name="check" size={14} />{t("save", locale)}</button></footer>
-      </fieldset>
-    </form>}
     {busy && <p role="status" className="settings-footnote">{t("aiProviderWorking", locale)}</p>}
     {result && <p role={result.ok ? "status" : "alert"} className={`settings-footnote ${result.ok ? "is-success" : "is-error"}`}>{result.text}</p>}
     <div className="ai-parsing-settings">

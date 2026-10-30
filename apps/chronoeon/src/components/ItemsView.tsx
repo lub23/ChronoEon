@@ -1,3 +1,4 @@
+import { FadeText } from "./FadeText";
 import { itemMatchesSearch } from "../domain/search";
 import { Fragment, useMemo } from "react";
 import "./items.css";
@@ -153,9 +154,10 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
         <footer className="item-card-footer">
           <div className="item-card-secondary">
             {item.disposal && <p className="item-history-line">{t(disposalLabels[item.disposal], locale)} · {item.disposedOn}{item.disposal === "sold" && ` · ${itemMoney(item.saleAmount ?? 0, item.currency, settings, locale)}`}</p>}
+            <FadeText className="item-note" title={item.notes}>{item.notes || "\u00a0"}</FadeText>
             {(item.purchaseEntryId || item.saleEntryId) && <div className="item-bill-links">{[item.purchaseEntryId, item.saleEntryId].filter(Boolean).map(id => {
               const entry = bills.get(id!);
-              return <button key={id} type="button" className="item-bill-link" disabled={!entry || !onOpenBill} onClick={() => entry && onOpenBill?.(entry)}><Icon name="coins" size={12} />{entry ? `${entry.date} · ${entry.title}` : t("itemBillMissing", locale)}</button>;
+              return <button key={id} type="button" className="item-bill-link" disabled={!entry || !onOpenBill} onClick={() => entry && onOpenBill?.(entry)}><Icon name="coins" size={12} /><FadeText>{entry ? `${entry.date} · ${entry.title}` : t("itemBillMissing", locale)}</FadeText></button>;
             })}</div>}
           </div>
           <span className="item-calendar-seal" title={calendarName} aria-label={calendarName}>{signatureInitial(item)}</span>

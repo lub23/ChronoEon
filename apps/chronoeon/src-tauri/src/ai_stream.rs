@@ -3,9 +3,9 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 
 #[derive(Default)]
-struct Completion { content: String, reasoning: String, model: Option<String>, usage: Value, complete: bool }
+pub(crate) struct Completion { content: String, reasoning: String, model: Option<String>, usage: Value, complete: bool }
 impl Completion {
-    fn push(&mut self, data: &str) -> Result<(), String> {
+    pub(crate) fn push(&mut self, data: &str) -> Result<(), String> {
         if data == "[DONE]" { self.complete = true; return Ok(()); }
         let chunk: Value = serde_json::from_str(data).map_err(|error| format!("Invalid AI stream JSON: {error}"))?;
         if chunk.get("error").is_some() { return Err("AI stream provider error".into()); }
@@ -19,7 +19,9 @@ impl Completion {
         if choice["finish_reason"].is_string() { self.complete = true; }
         Ok(())
     }
-    fn finish(self) -> Result<Value, String> {
+    #[cfg(target_os = "android")]
+    pub(crate) fn progress(&self) -> Value { json!({"content": self.content, "reasoning": self.reasoning}) }
+    pub(crate) fn finish(self) -> Result<Value, String> {
         if !self.complete { return Err("AI request failed: stream ended before completion".into()); }
         Ok(json!({"model":self.model,"usage":self.usage,"choices":[{"message":{"content":self.content,"reasoning_content":self.reasoning}}]}))
     }

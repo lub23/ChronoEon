@@ -90,9 +90,9 @@ jobs:
         env:
           CHRONOEON_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           CHRONOEON_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          CHRONOEON_APK_OUTPUT: ${{ github.workspace }}/.build/android/ChronoEon-0.1.0-arm64.apk
+          CHRONOEON_APK_OUTPUT: ${{ github.workspace }}/.build/android/ChronoEon-0.1.1-arm64.apk
       - uses: actions/upload-artifact@v4
         with:
           name: chronoeon-android
-          path: .build/android/ChronoEon-0.1.0-arm64.apk
+          path: .build/android/ChronoEon-0.1.1-arm64.apk
           if-no-files-found: error

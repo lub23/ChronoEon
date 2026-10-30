@@ -1,7 +1,7 @@
 import type { SVGProps } from "react";
 
 export type IconName =
-  | "device" | "shirt" | "home" | "bike" | "box"
+  | "eye" | "eye-off" | "device" | "shirt" | "home" | "bike" | "box"
   | "agenda" | "month" | "week" | "day" | "idea" | "insights" | "plus" | "minus" | "search" | "folder"
   | "sun" | "moon" | "languages" | "chevron-left" | "chevron-right" | "calendar"
   | "check" | "clock" | "wallet" | "sparkle" | "more" | "pin" | "expand"
@@ -13,6 +13,8 @@ export type IconName =
   | "bell" | "keyboard" | "chart" | "coins" | "chevron-down" | "chevron-up" | "camera";
 
 const paths: Record<IconName, React.ReactNode> = {
+  eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></>,
+  "eye-off": <><path d="m3 3 18 18M10.5 5.1 12 5c6.5 0 10 7 10 7a20 20 0 0 1-3.3 4.2M6.2 6.2A21 21 0 0 0 2 12s3.5 7 10 7a12 12 0 0 0 5.8-1.8M10 10a3 3 0 0 0 4 4"/></>,
   device: <><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M10 18h4"/></>,
   shirt: <path d="m8 3-6 4 3 5 3-2v11h8V10l3 2 3-5-6-4a4 4 0 0 1-8 0Z"/>,
   home: <><path d="m3 10 9-7 9 7M5 9v12h14V9M9 21v-8h6v8"/></>,

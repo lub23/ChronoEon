@@ -78,6 +78,7 @@ it("preserves local history across snapshot rebuilds and previews without closin
   const stored = (await mobile.session.store.list())[0];
   await act(async () => { await mobile.session.store.delete(stored.id); });
   await act(async () => { host.querySelector<HTMLButtonElement>('.sidebar-utility[aria-label="设置"]')!.click(); });
+  await act(async () => { await import("./components/SettingsDialog"); });
   const data = [...host.querySelectorAll<HTMLButtonElement>(".settings-nav button")].find((button) => button.textContent?.includes("数据"))!;
   await act(async () => { data.click(); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });

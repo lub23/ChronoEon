@@ -170,3 +170,12 @@ it.each(["北京", "微信"])("finds assets by their location or payment method:
  act(()=>root.render(<ItemsView items={[camera]} entries={[]} locale="zh" settings={settings} today={today} search={search} onEdit={vi.fn()} />));
  expect(host.textContent).toContain("Camera");expect(host.querySelectorAll(".item-card")).toHaveLength(1);
 });
+
+it("reserves a note line before linked bills, including items without either", () => {
+  act(() => root.render(<ItemsView items={[item({ id: "noted", notes: "A long personal note", purchaseEntryId: "bill-id" }), item({ id: "empty", notes: "" })]} entries={[bill()]} locale="en" settings={settings} today={today} />));
+  const cards = host.querySelectorAll(".item-card-secondary");
+  expect(cards).toHaveLength(2);
+  expect(host.querySelectorAll(".item-note")).toHaveLength(2);
+  const noted = [...cards].find(card => card.textContent?.includes("A long personal note"))!;
+  expect(noted.querySelector(".item-note")?.nextElementSibling?.className).toBe("item-bill-links");
+});

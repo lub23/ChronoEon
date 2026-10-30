@@ -15,7 +15,7 @@ afterEach(() => { act(() => root.unmount()); host.remove(); vi.restoreAllMocks()
 const provider = { id: "first", name: "First", preset: "compatible" as const, kind: "openai-compatible" as const, baseUrl: "https://example.test/v1", model: "model" };
 function button(text: string) { return [...host.querySelectorAll<HTMLButtonElement>("button")].find(value => value.textContent === text)!; }
 function type(label: string, text: string) {
-  const input = [...host.querySelectorAll("label")].find(value => value.querySelector("span")?.textContent === label)!.querySelector("input")!;
+  const input = [...host.querySelectorAll("label")].find(value => value.querySelector("span")?.textContent?.replace(/ \*$/, "") === label)!.querySelector("input")!;
   act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text); input.dispatchEvent(new Event("input", { bubbles: true })); });
 }
 
@@ -71,13 +71,38 @@ it("does not replace an active provider until its replacement passes the test", 
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ activeProviderId: "second" }));
 });
 
-it("pastes the API key without storing clipboard text in provider preferences", async () => {
- Object.defineProperty(navigator, "clipboard", {configurable:true,value:{readText:vi.fn(async()=>"  debug-secret  ")}});
+it("keeps credential text in a native masked field without clipboard buttons", () => {
  act(() => root.render(<AISettingsPanel locale="en" preferences={DEFAULT_AI_PROVIDER_PREFERENCES} onChange={vi.fn()} onTest={vi.fn()} />));
  act(() => button("Add").click());
- await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Paste API key"]')!.click());
+ type("API key", "  debug-secret  ");
  const key = host.querySelector<HTMLInputElement>('[aria-label="API key"]')!;
  expect(key.value).toBe("  debug-secret  ");
- expect(key.type).toBe("text");
+ expect(key.type).toBe("password");
+ expect(host.querySelector('[aria-label="Paste API key"]')).toBeNull();
  expect(localStorage.getItem("chronoeon.ai.providers") ?? "").not.toContain("debug-secret");
+});
+
+it("expands the editor directly inside the selected provider row and preserves common fields on type changes", async () => {
+ const preferences = { ...DEFAULT_AI_PROVIDER_PREFERENCES, providers: [provider, { ...provider, id: "second", name: "Second" }] };
+ act(() => root.render(<AISettingsPanel locale="en" preferences={preferences} onChange={vi.fn()} onTest={vi.fn()} />));
+ await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Edit First"]')!.click());
+ const rows = host.querySelectorAll(".ai-provider-list > li");
+ expect(rows[0].querySelector("form")).not.toBeNull(); expect(rows[1].querySelector("form")).toBeNull();
+ type("Name", "My service"); type("API key", "secret");
+ act(() => host.querySelector<HTMLButtonElement>('[aria-label="Provider type"]')!.click());
+ act(() => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(row => row.textContent === "DeepSeek")!.click());
+ const values = [...host.querySelectorAll("input")].map(input => input.value);
+ expect(values).toEqual(expect.arrayContaining(["My service", "https://example.test/v1", "model", "secret"]));
+});
+
+it("rejects blank required fields and incomplete headers without saving", async () => {
+ const onChange = vi.fn();
+ act(() => root.render(<AISettingsPanel locale="en" preferences={DEFAULT_AI_PROVIDER_PREFERENCES} onChange={onChange} onTest={vi.fn()} />));
+ act(() => button("Add").click());
+ const submit = async () => act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+ await submit(); expect(host.querySelector('[role="alert"]')?.textContent).toContain("Enter a name");
+ type("Name", "Work"); type("API URL", "https://example.test/v1"); type("Model", "model");
+ act(() => host.querySelector<HTMLButtonElement>('[aria-label="Add header"]')!.click());
+ await submit(); expect(host.querySelector('[role="alert"]')?.textContent).toContain("header name"); expect(onChange).not.toHaveBeenCalled();
+ expect(host.querySelector('datalist option[value="Authorization"]')).not.toBeNull();
 });

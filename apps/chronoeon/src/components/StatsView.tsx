@@ -552,7 +552,7 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
               {sortedDetailEntries.map(entry => (
                 <button key={`${entry.id}:${entry.date}`} type="button" role="row" className="stats-detail-row"
                   onClick={() => { setDetail(null); if (onEditEntry) onEditEntry(entry); else onOpenDate?.(entry.date); }}>
-                  <span role="cell">{entry.date} {formatEntryTime(entry, locale)}</span>
+                  <span role="cell">{entry.date} {detail.duration ? (entry.start ?? t("allDay", locale)) : formatEntryTime(entry, locale)}</span>
                   <span role="cell">{titleFor(entry, locale)}</span>
                   {detail.duration ? <span role="cell">{formatMinutes(entryDurationMinutes(entry))}</span> : typeof entry.amount === "number"
                     ? <span role="cell" className={entry.amount >= 0 ? "is-income" : "is-expense"}>{money(symbol, Math.abs(entry.amount))}</span>

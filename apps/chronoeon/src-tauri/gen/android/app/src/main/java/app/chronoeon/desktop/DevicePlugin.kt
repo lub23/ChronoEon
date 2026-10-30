@@ -34,6 +34,9 @@ class CredentialArgs { var action: String = ""; var id: String = ""; var value: 
 @InvokeArg
 class AiModelsArgs { var endpoint: String = ""; var timeoutMs: Int = 15000; var headers: java.util.HashMap<String, String> = java.util.HashMap() }
 
+@InvokeArg
+class AiCompletionArgs { var endpoint: String = ""; var timeoutMs: Int = 90000; var headers: java.util.HashMap<String, String> = java.util.HashMap(); var body: String = ""; var onEvent: app.tauri.plugin.Channel? = null }
+
 @TauriPlugin(permissions = [
     Permission(alias = "location", strings = [Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION])
 ])
@@ -58,6 +61,20 @@ class DevicePlugin(private val activity: Activity) : Plugin(activity) {
             val chain = generateSequence(error as Throwable) { it.cause }.take(8).joinToString(" -> ") { it.javaClass.simpleName }
             val status = error.message?.takeIf { it.matches(Regex("AI endpoint returned HTTP [0-9]{3}")) }
             invoke.reject(status ?: "AI request failed: $chain")
+        }
+    }
+    private val aiWorker = java.util.concurrent.Executors.newFixedThreadPool(2)
+    @Command
+    fun aiCompletion(invoke: Invoke) = aiWorker.execute {
+        try {
+            val args = invoke.parseArgs(AiCompletionArgs::class.java)
+            val result = AiHttpClient.complete(args.endpoint, args.headers, args.timeoutMs.coerceIn(2000, 180000), args.body) { data ->
+                args.onEvent?.send(JSObject().apply { put("data", data) })
+            }
+            invoke.resolve(JSObject(result.toString()))
+        } catch (error: Exception) {
+            val chain = generateSequence(error as Throwable) { it.cause }.take(8).joinToString(" -> ") { it.javaClass.simpleName }
+            invoke.reject("AI request failed: $chain")
         }
     }
     private fun granted(permission: String) = ContextCompat.checkSelfPermission(activity, permission) == PackageManager.PERMISSION_GRANTED

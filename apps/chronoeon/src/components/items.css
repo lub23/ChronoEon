@@ -34,14 +34,16 @@
 .item-facts dt { color: var(--ink-faint); font-size: 10px; margin-bottom: 3px; }
 .item-facts dd { color: var(--ink); margin: 0; font: 12px var(--font-num); overflow-wrap: anywhere; }
 .item-card-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; padding: 0 12px 11px; }
-.item-card-secondary { min-width: 0; }
+.item-card-secondary { min-width: 0; flex: 1; min-height: 32px; }
+.item-note { display: block; font-size: 11px; line-height: 16px; height: 16px; color: var(--ink-faint); font-style: italic; }
+.item-bill-links { min-height: 16px; }
 .item-history-line { color: var(--ink-soft); font-size: 11px; margin: 0 0 7px; }
-.item-bill-links { display: flex; flex-direction: column; gap: 5px; }
-.item-bill-link { display: flex; align-items: center; gap: 5px; padding: 2px 0; text-align: left; font-size: 11px; color: var(--ink-soft); background: transparent; overflow-wrap: anywhere; }
+.item-bill-links { display: flex; flex-direction: row; gap: 8px; height: 16px; overflow: hidden; }
+.item-bill-link { display: flex; align-items: center; gap: 5px; padding: 2px 0; text-align: left; font-size: 11px; line-height: 16px; min-width: 0; white-space: nowrap; color: var(--ink-soft); background: transparent; }
 .item-bill-link svg { flex: 0 0 auto; }
 .item-bill-link:hover:not(:disabled) { color: var(--accent); }
 .item-calendar-seal {
-  display: inline-grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center;
+  display: inline-grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center;
   border: 1.6px solid var(--item-calendar); border-radius: 5px;
   background: color-mix(in srgb, var(--item-calendar) 14%, transparent);
   color: var(--item-calendar); font: 600 13px/1 var(--font-serif); transform: rotate(-6deg);

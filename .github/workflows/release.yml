@@ -78,6 +78,10 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: npm run verify:windows
 
+      - name: Test native commands
+        run: cargo test --lib --locked -- --test-threads=1
+        working-directory: apps/chronoeon/src-tauri
+
       - name: Read product release description
         id: release-notes
         shell: bash
@@ -106,15 +110,25 @@ jobs:
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: "ChronoEon ${{ inputs.tag || github.ref_name }}"
           releaseBody: ${{ steps.release-notes.outputs.body }}
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Attach portable Windows executable
+        if: matrix.platform == 'windows-latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          draft: true
+          files: apps/chronoeon/src-tauri/target/release/chronoeon-app.exe
+          fail_on_unmatched_files: true
 
       - name: Upload bundles as workflow artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
+            apps/chronoeon/src-tauri/target/release/chronoeon-app.exe
             apps/chronoeon/src-tauri/target/release/bundle/nsis/*
             apps/chronoeon/src-tauri/target/release/bundle/msi/*
             apps/chronoeon/src-tauri/target/release/bundle/appimage/*.AppImage*
@@ -186,6 +200,10 @@ jobs:
         env:
           CHRONOEON_APK_OUTPUT: ${{ github.workspace }}/.build/android/chronoeon-arm64.apk
 
+      - name: Test Android transport and background services
+        run: ./gradlew app:testArm64ReleaseUnitTest --no-daemon
+        working-directory: apps/chronoeon/src-tauri/gen/android
+
       - name: Upload the APK
         uses: actions/upload-artifact@v4
         with:
@@ -197,6 +215,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          draft: false
+          draft: true
           files: .build/android/chronoeon-arm64.apk
           fail_on_unmatched_files: true

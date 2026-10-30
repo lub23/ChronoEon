@@ -364,7 +364,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .language-button:hover { border-color: var(--accent); color: var(--accent-dark); }
 .top-action { margin-left: -2px; }
 
-.content-scroll { flex: 1; overflow: auto; contain: layout paint; }
+.content-scroll { flex: 1; overflow: auto; }
 .content-inner { width: min(1260px, 100%); margin: 0 auto; padding: 43px 47px 82px; }
 .view-stage { display: flex; min-width: 0; flex-direction: column; }
 /* Only the active view and its incoming neighbor are mounted during motion. */
@@ -4705,11 +4705,9 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
   .view-pager.is-swiping > .view-page { backface-visibility: hidden; }
 }
 @media (hover: none) and (pointer: coarse) {
-  /* Touch pages live on their own compositor layer permanently. Promoting a
-     layer when a swipe starts and dropping it when the page lands forced a
-     re-rasterization at both ends of every gesture, which showed as a flash. */
-  .view-pager > .view-page { will-change: transform; backface-visibility: hidden; }
-  .view-pager:not(.is-swiping) > .view-page[data-position="current"] { transform: translate3d(0, 0, 0); }
+  /* Release large GPU surfaces at rest so WebView can paint ordinary updates. */
+  .view-pager.is-swiping > .view-page { will-change: transform; }
+  .view-pager:not(.is-swiping) > .view-page[data-position="current"] { transform: none; }
   .view-pager.is-swiping .view-page *:not(.day-photo-frame) { transition: none !important; }
 }
 @media (hover: none) and (pointer: coarse) {
@@ -4883,22 +4881,20 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
 .bulk-preview-row del, .bulk-preview-row ins { white-space: pre-wrap; max-height: 100px; overflow: auto; }
 .bulk-preview-row ins { text-decoration: none; color: var(--accent); }
 
-.secret-field { min-width: 0; width: 100%; }
-.secret-input-controls { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.secret-input-controls input { flex: 1; min-width: 0; width: 0; user-select: text; -webkit-user-select: text; }
-.secret-input-controls button { flex-shrink: 0; min-height: 36px; }
-.secret-visibility { border: 0; background: transparent; color: var(--ink-soft); padding: 4px; font-size: 12px; }
-.ai-model-controls .glass-select { flex: 1; min-width: 0; }
-.ai-header-row > .secret-field { min-width: 0; }
-.secret-field { container-type: inline-size; }
-@container (max-width: 240px) {
-  .secret-input-controls { flex-wrap: wrap; justify-content: flex-end; }
-  .secret-input-controls input { flex: 1 0 100%; width: 100%; }
-}
-@media (max-width: 640px) {
-  .secret-input-controls button { min-height: 44px; min-width: 36px; }
-  .ai-provider-form .ai-header-row { grid-template-columns: minmax(0, 1fr) 28px; }
-  .ai-header-row > input { grid-column: 1; grid-row: 1; }
-  .ai-header-row > .secret-field { grid-column: 1 / -1; grid-row: 2; }
-  .ai-header-row > button { grid-column: 2; grid-row: 1; }
+/* Credentials keep one native editable field, with an inset visibility control. */
+.secret-field { position: relative; min-width: 0; width: 100%; }
+.secret-field input { box-sizing: border-box; width: 100%; min-width: 0; padding-right: 38px !important; user-select: text; -webkit-user-select: text; letter-spacing: normal; font-family: var(--font-sans); }
+.secret-field .secret-visibility { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 34px; min-height: 0; padding: 0; border: 0; box-shadow: none; background: transparent; color: var(--ink-soft); }
+.required-mark { color: var(--accent-dark); }
+.ai-provider-list > li { display: block; }
+.ai-provider-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ai-provider-list .ai-provider-form { margin-top: 10px; border-bottom: 0; }
+.sync-actions { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.sync-actions > button { flex: 1 1 0; min-width: 0; white-space: nowrap; padding-inline: 8px; }
+.sync-actions > [role="status"] { flex-basis: 100%; }
+@media (max-width: 480px) {
+  .ai-settings-card .ai-settings-field { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 10px; }
+  .ai-settings-card .ai-settings-field > span { min-width: 0; }
+  .ai-settings-card .ai-settings-field input { width: 100%; min-width: 0; }
+  .sync-actions > button { font-size: 11px; gap: 4px; }
 }

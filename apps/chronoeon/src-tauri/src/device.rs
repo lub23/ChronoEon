@@ -38,6 +38,32 @@ pub async fn ai_models(app: AppHandle, endpoint: String, headers: std::collectio
 }
 
 #[cfg(target_os = "android")]
+pub async fn ai_completion(app: AppHandle, endpoint: &str, headers: &std::collections::HashMap<String, String>, timeout_ms: u64,
+    body: Value, progress: tauri::ipc::Channel<Value>) -> Result<Value, String> {
+    let completion = std::sync::Arc::new(std::sync::Mutex::new(Ok(crate::ai_stream::Completion::default())));
+    let state = completion.clone();
+    let events = tauri::ipc::Channel::<Value>::new(move |event| {
+        let event: Value = match event {
+            tauri::ipc::InvokeResponseBody::Json(text) => serde_json::from_str(&text)?,
+            _ => return Ok(()),
+        };
+        let mut state = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Ok(value) = state.as_mut() {
+            let result = event["data"].as_str().ok_or("Invalid AI stream event".to_string())
+                .and_then(|data| value.push(data)).and_then(|_| progress.send(value.progress()).map_err(|_| "AI stream consumer disconnected".to_string()));
+            if let Err(error) = result { *state = Err(error); }
+        }
+        Ok(())
+    });
+    let mut result = call(app, "aiCompletion", serde_json::json!({"endpoint":endpoint,"headers":headers,"timeoutMs":timeout_ms,"body":body.to_string(),"onEvent":events})).await?;
+    if result["streaming"].as_bool() == Some(true) {
+        let state = std::mem::replace(&mut *completion.lock().map_err(|_| "AI stream state poisoned")?, Ok(crate::ai_stream::Completion::default()));
+        result["payload"] = state?.finish()?;
+    }
+    Ok(result)
+}
+
+#[cfg(target_os = "android")]
 pub async fn credentials(app: AppHandle, action: &str, id: &str, value: Option<String>) -> Result<Value, String> {
     call(app, "credentials", serde_json::json!({ "action": action, "id": id, "value": value })).await
 }

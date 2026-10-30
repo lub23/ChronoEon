@@ -363,4 +363,6 @@ it("opens schedule category duration details with entries and minute totals", ()
  expect(dialog.textContent).toContain("Task duration");
  expect(dialog.querySelectorAll(".stats-detail-row")).toHaveLength(1);
  expect(dialog.querySelector(".stats-detail-total")?.textContent).toContain("1h");
+ expect(dialog.querySelector(".stats-detail-row [role=cell]")?.textContent).toBe("2026-09-01 09:30");
+ expect(dialog.querySelector(".stats-detail-row [role=cell]")?.textContent).not.toContain("10:30");
 });

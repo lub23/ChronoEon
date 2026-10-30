@@ -361,6 +361,7 @@ describe("app: create flow (browser demo)", () => {
     act(() => { root.render(<App />); });
     await flush(150);
     await act(async () => { document.querySelector<HTMLButtonElement>(".view-dock-quicknote")!.click(); });
+    await act(async () => { await import("./components/ChatDialog"); });
     const input = document.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
     await act(async () => { setInputValue(input, "明天 14:00 在图书馆看书"); });
     await act(async () => { document.querySelector<HTMLButtonElement>(".chat-send")!.click(); });

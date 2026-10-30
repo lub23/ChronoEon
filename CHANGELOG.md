@@ -1,3 +1,19 @@
+# ChronoEon 0.1.1 / 时元 0.1.1
+
+- Edit AI providers inline; preserve common fields when changing type, mark required fields and validate before saving.
+- Use native password fields with inset visibility icons and editable common request-header suggestions; simplify mobile sync settings.
+- Show schedule start times in category details and reserve a fading note/bill footer on item cards.
+- Route Android AI completion and streaming through system HTTPS, matching model discovery while retaining certificate checks.
+- Load settings, chat and statistics on demand; show a startup surface and release idle mobile compositing layers.
+
+- AI 服务商在对应行展开；切换类型保留通用字段，标识必填项并在保存时校验。
+- 密码默认隐藏，框内眼睛切换，支持原生复制粘贴；请求头支持常用字段建议，精简移动端同步布局。
+- 日程分类明细仅显示起始时间；物品卡片预留备注和账单两行，长文字渐隐。
+- Android 测试、聊天及流式回复统一使用系统 HTTPS，与模型获取保持一致并保留证书校验。
+- 设置、聊天与统计按需加载，增加启动占位并释放移动端静止页面的合成层。
+
+---
+
 # ChronoEon · 时元 v0.1.0
 
 时元是一款本地优先的日程、任务、日记、灵感、收支与物品管理应用，支持 Windows、macOS、Linux 和 Android。
