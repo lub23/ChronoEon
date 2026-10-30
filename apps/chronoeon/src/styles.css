@@ -4883,7 +4883,7 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
 
 /* Credentials keep one native editable field, with an inset visibility control. */
 .secret-field { position: relative; min-width: 0; width: 100%; }
-.secret-field input { box-sizing: border-box; width: 100%; min-width: 0; padding-right: 38px !important; user-select: text; -webkit-user-select: text; letter-spacing: normal; font-family: var(--font-sans); }
+.secret-field input { box-sizing: border-box; width: 100%; min-width: 0; padding-right: 38px !important; user-select: text; -webkit-user-select: text; letter-spacing: normal; font-family: var(--font-mono); }
 .secret-field .secret-visibility { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 34px; min-height: 0; padding: 0; border: 0; box-shadow: none; background: transparent; color: var(--ink-soft); }
 .required-mark { color: var(--accent-dark); }
 .ai-provider-list > li { display: block; }
