@@ -107,45 +107,122 @@ function extractDuration(text: CaptureText): { minutes: number; days: number } {
   return { minutes: Math.round(minutes), days };
 }
 
-export function extractTime(
-  text: CaptureText,
-  now: Date,
-  historicalDuration = 60,
-): { date: string; start?: string; end?: string; endDate?: string; allDay: boolean } {
-  let date = extractDate(text, now);
+/** "现在" anchors a time to the moment of writing; "刚才" ends there instead. */
+const NOW_WORDS = "现在|此刻|这会儿|这会|马上|立刻|立即|\\bright now\\b|\\bnow\\b";
+const JUST_WORDS = "刚才|刚刚|\\bjust now\\b";
+const NOW_PATTERN = new RegExp("(?:从\\s*|\\bfrom\\s+)?(" + JUST_WORDS + "|" + NOW_WORDS + ")(?:\\s*(?:起|开始)|\\s+on\\b)?", "gi");
+const RANGE_GAP = /^\s*(?:到|至|[-–—~～]|to|until|till)\s*$/i;
+
+/** Everyday meals carry a time of day even when none is written. A learned
+ *  habit (the user's own lunch hour) takes precedence over these defaults. */
+const ROUTINES: Array<{ pattern: RegExp; start: number; minutes: number }> = [
+  { pattern: /早饭|早餐|早点|\bbreakfast\b/i, start: 8 * 60, minutes: 30 },
+  { pattern: /午饭|午餐|\blunch\b/i, start: 12 * 60, minutes: 45 },
+  { pattern: /下午茶|\bafternoon tea\b/i, start: 15 * 60, minutes: 30 },
+  { pattern: /晚饭|晚餐|\bdinner\b|\bsupper\b/i, start: 18 * 60 + 30, minutes: 45 },
+  { pattern: /夜宵|宵夜|\blate[- ]night snack\b/i, start: 22 * 60, minutes: 30 },
+];
+
+/** The current clock rounded to five minutes: "现在" at 12:17 is 12:15, not 12:30. */
+function nowMinutes(now: Date): number {
+  return Math.round((now.getHours() * 60 + now.getMinutes()) / 5) * 5;
+}
+
+interface TimePoint { index: number; length: number; minutes: number; clock?: string; period?: string; past?: boolean }
+
+export interface TimeSpans {
+  date: string;
+  /** Minutes after midnight when the text names a start (clock, period or "now"). */
+  start?: number;
+  /** Explicit range end. */
+  end?: number;
+  /** "刚才": the entry ends now and starts one duration earlier. */
+  endOnly?: number;
+  duration: { minutes: number; days: number };
+}
+
+/** Phase one: consume every date/time word so the remaining title can be
+ *  matched against history before the clock values are finalised. */
+export function extractTimeSpans(text: CaptureText, now: Date): TimeSpans {
+  const date = extractDate(text, now);
   const input = remainingText(text);
   const pattern = new RegExp("(?<![\\d:])(?:at\\s+)?(?:((?:" + PERIOD + "))\\s*)?(" + CLOCK + ")(?![\\d:])", "gi");
-  // Clock minutes (三点二十分) belong to the clock, not to a duration.
-  // Conversely 一点五小时 is a decimal duration, not the clock 01:05.
-  const matches = [...input.matchAll(pattern)].filter((match) => !/^(?:个)?(?:小时|钟头)/.test(input.slice(match.index + match[0].length)));
-  let start: number | undefined, end: number | undefined;
-  const first = matches[0];
-  if (first) {
-    start = clockMinutes(first[2], first[1] ?? "");
-    if (start !== undefined) {
-      consumeMatch(text, first, "time");
-      const second = matches[1];
-      if (second && /^\s*(?:到|至|[-–—~～]|to|until)\s*$/i.test(input.slice(first.index + first[0].length, second.index))) {
-        const meridiem = /([ap]m)$/i.exec(first[2])?.[1].toLowerCase();
-        end = clockMinutes(second[2], second[1] ?? first[1] ?? (meridiem === "pm" ? "afternoon" : ""));
-        if (end !== undefined) {
-          consumeMatch(text, second, "time");
-          consume(text, first.index + first[0].length, second.index - first.index - first[0].length, "time");
-        }
+  const points: TimePoint[] = [];
+  for (const match of input.matchAll(pattern)) {
+    // Clock minutes (三点二十分) belong to the clock, not to a duration.
+    // Conversely 一点五小时 is a decimal duration, not the clock 01:05.
+    if (/^(?:个)?(?:小时|钟头)/.test(input.slice(match.index + match[0].length))) continue;
+    const minutes = clockMinutes(match[2], match[1] ?? "");
+    if (minutes !== undefined) points.push({ index: match.index, length: match[0].length, minutes, clock: match[2], period: match[1] ?? "" });
+  }
+  for (const match of input.matchAll(NOW_PATTERN)) {
+    points.push({ index: match.index, length: match[0].length, minutes: nowMinutes(now), past: new RegExp("^(?:" + JUST_WORDS + ")$", "i").test(match[1]) });
+  }
+  points.sort((left, right) => left.index - right.index);
+  const result: TimeSpans = { date, duration: { minutes: 0, days: 0 } };
+  const [first, second] = points;
+  if (first && second && RANGE_GAP.test(input.slice(first.index + first.length, second.index))) {
+    let start = first.minutes;
+    let end = second.minutes;
+    if (second.clock) {
+      // A bare end inherits the start's half of the day: 下午3点到5点 ends at 17:00.
+      const meridiem = /([ap]m)$/i.exec(first.clock ?? "")?.[1]?.toLowerCase();
+      const inherited = second.period || first.period || (meridiem === "pm" ? "afternoon" : "");
+      end = clockMinutes(second.clock, inherited) ?? end;
+      // Without any period, speech uses the 12-hour clock, and an end that has
+      // already passed means its next reading: "10点到2点" ends at 14:00, and
+      // "现在到十二点半" written at 14:00 ends at half past midnight.
+      if (end < start && !inherited && !/[ap]m$/i.test(second.clock)) {
+        const next = Math.floor(end / 60) <= 12 ? end + 720 : end + 1440;
+        end = next > start ? next : end + 1440;
       }
     }
+    // "两点到现在" written at 16:05 means 14:00, not a fourteen-hour afternoon.
+    if (first.clock && !first.period && !/[ap]m$/i.test(first.clock) && end - start > 720 && start + 720 < end) start += 720;
+    const from = /(?:从|\bfrom)\s*$/i.exec(input.slice(0, first.index));
+    const begin = from ? from.index : first.index;
+    consume(text, begin, second.index + second.length - begin, "time");
+    result.start = start;
+    result.end = end;
+  } else if (first) {
+    consume(text, first.index, first.length, "time");
+    if (first.past) result.endOnly = first.minutes;
+    else result.start = first.minutes;
   }
-  const duration = extractDuration(text);
-  if (start === undefined) {
+  result.duration = extractDuration(text);
+  if (result.start === undefined && result.endOnly === undefined) {
     const period = new RegExp("(?:" + PERIOD + ")(?!茶)", "i").exec(remainingText(text));
-    if (period) { start = periodMinutes(period[0]); consumeMatch(text, period, "time"); }
-    else if (duration.minutes) {
+    if (period) { result.start = periodMinutes(period[0]); consumeMatch(text, period, "time"); }
+  }
+  return result;
+}
+
+/** Phase two: turn the consumed spans into a draft time, filling what the text
+ *  left open from the user's habits (learned start/duration) or a daily routine. */
+export function resolveTime(
+  text: CaptureText,
+  spans: TimeSpans,
+  now: Date,
+  defaults: { duration?: number; start?: number } = {},
+): { date: string; start?: string; end?: string; endDate?: string; allDay: boolean } {
+  let { date, start, end } = spans;
+  const { duration } = spans;
+  const routine = ROUTINES.find((candidate) => candidate.pattern.test(remainingText(text)));
+  const span = duration.minutes + duration.days * 1440 || defaults.duration || routine?.minutes || 60;
+  if (start === undefined && spans.endOnly !== undefined) {
+    end = spans.endOnly;
+    start = end - span;
+    if (start < 0) { date = addIsoDays(date, -1); start += 1440; end += 1440; }
+  }
+  if (start === undefined) {
+    if (duration.minutes) {
       start = Math.ceil((now.getHours() * 60 + now.getMinutes() + (now.getSeconds() || now.getMilliseconds() ? 1 / 60 : 0)) / 15) * 15;
-      if (start >= 1440) { date = addIsoDays(date, 1); start -= 1440; }
-    }
+    } else if (defaults.start !== undefined) start = defaults.start;
+    else if (routine) start = routine.start;
   }
   if (start === undefined) return { date, start: undefined, end: undefined, allDay: true, endDate: duration.days > 1 ? addIsoDays(date, duration.days - 1) : undefined };
-  end ??= start + (duration.minutes + duration.days * 1440 || historicalDuration);
+  if (start >= 1440) { date = addIsoDays(date, 1); start -= 1440; if (end !== undefined) end -= 1440; }
+  end ??= start + span;
   if (end < start) end += 1440;
   const clock = (minutes: number) => pad(Math.floor(minutes / 60) % 24) + ":" + pad(minutes % 60);
   return { date, start: clock(start), end: clock(end), endDate: end >= 1440 ? addIsoDays(date, Math.floor(end / 1440)) : undefined, allDay: false };

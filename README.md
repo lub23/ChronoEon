@@ -5,8 +5,9 @@
 
 A local-first home for **schedules, tasks, ideas and expenses**, for Windows,
 Linux, macOS and Android. SQLite is the authoritative store.
+时元是一款本地优先的日程、任务、日记、灵感、收支与物品管理应用。
 
-**v0.1.0 — first stable release / 首个正式版本。** [Download / 下载](https://github.com/lub23/ChronoEon/releases/tag/v0.1.0)
+**v0.1.2** · [Download / 下载](https://github.com/lub23/ChronoEon/releases/tag/v0.1.2)
 
 日常使用请打开构建或安装后的 ChronoEon；`tauri:dev` 用于开发。Windows 原生 dev 与 exe 共用 `%LOCALAPPDATA%\app.chronoeon.desktop\chronoeon.db`，本机设置也保存于该 SQLite 数据库；浏览器演示的数据独立。
 Use the built application for daily work. Native dev and packaged builds share SQLite records and device settings; the browser demo is separate.
@@ -22,6 +23,14 @@ Use the built application for daily work. Native dev and packaged builds share S
 
 The product code is `apps/chronoeon/` (`app.chronoeon.desktop`). `packages/*`
 holds the UI-independent rules: `domain`, `storage`, `ports`.
+
+## What is new in 0.1.2 / 本版更新
+
+- Ask streams its answer and tool steps in one process card. Relative periods such as “last month” resolve on the device; elapsed time stops when the answer completes and excludes saving and connection shutdown. / 随心问流式展示检索与回答过程，在本机确定“上个月”等日期；回复完成即停止计时，不计入保存及等待连接关闭的时间。
+- Capture understands current-time ranges and meal times, learns common record habits and shows notes in draft summaries. Review all AI drafts before saving. / 随心记完善“现在到…”、跨日范围和用餐时间，参考历史记录习惯，草稿摘要显示备注；AI 草稿须确认后保存。
+- Paste up to four images into a conversation. Stored images use compressed WebP; native compression and WebDAV transfers are faster. / 对话支持粘贴最多四张图片，复用压缩后的 WebP，优化原生压缩与 WebDAV 传输。
+- Mobile conversation drawers support swipes; idea/item groups, filters, category details and transitions are clearer. Four additional accent colors follow light/dark themes. / 手机对话侧栏支持滑动，优化灵感/物品分组、筛选、分类明细和过渡，新增胭脂、琥珀、靛青、黛墨主题色。
+- Local Windows and APK builds work from ordinary PowerShell with installed toolchains discovered automatically. / 保留本地手动构建与调试命令，普通 PowerShell 自动加载已安装的 Windows / Android 工具链。
 
 ## Run the browser demo
 
@@ -50,10 +59,14 @@ npm run verify:windows # Windows metadata / native cross-check
 ## Desktop shell
 
 The Tauri 2 shell lives in `apps/chronoeon/src-tauri`:
+See the [official prerequisites / 官方环境要求](https://v2.tauri.app/start/prerequisites/)
+for platform toolchain installation.
 
 ```bash
 npm run tauri:dev      # dev server + native window on the fixed port 1420
 npm run tauri:build    # packaged desktop installers
+npm run windows:build # Windows: automatically load MSVC, then build EXE + NSIS + MSI
+npm run windows:build -- --debug # native debug build + installers
 ```
 
 Dev mode always uses port `1420` because `devUrl` and Vite must agree. If a
@@ -71,14 +84,34 @@ libayatana-appindicator3-dev` plus build tools). Windows needs Node 24+, the
 stable Rust toolchain and WebView2. The repository `.npmrc` overrides a
 machine-level `npm global` setting that otherwise breaks the workspace scripts;
 if this checkout was copied from another OS, run `npm run doctor:windows`
-before `npm run tauri:build`.
+before building. Install Visual Studio C++ Build Tools (MSVC x64/x86 and Windows SDK).
+`npm run windows:build` discovers the installation with `vswhere` and loads its
+x64 environment, so it works from ordinary PowerShell without a Native Tools prompt.
+
+Windows 手动构建：安装 Node.js 24+、stable Rust、WebView2、Visual Studio C++ Build Tools
+（MSVC x64/x86 和 Windows SDK），在仓库根目录运行：
+
+```powershell
+npm install
+npm run windows:build
+# Portable EXE / 直接运行：apps/chronoeon/src-tauri/target/release/chronoeon-app.exe
+# NSIS installer / 安装包：apps/chronoeon/src-tauri/target/release/bundle/nsis/*.exe
+# MSI installer / 安装包：apps/chronoeon/src-tauri/target/release/bundle/msi/*.msi
+npm run tauri:dev # native development with hot reload / 原生窗口热更新调试
+```
+
+Close the executable running from `target/release` (or `target/debug`) before
+rebuilding; Windows locks running EXE files and Cargo otherwise reports
+“Access is denied”. / 重建前先关闭从构建目录运行的旧程序，否则 Windows 文件占用会导致“拒绝访问”。
+
+For native debugging, use `npm run windows:build -- --debug`; outputs are under
+`target/debug` instead of `target/release`. / 原生调试构建加 `--debug`，输出在 `target/debug`。
 
 ## Android APK
 
 ```bash
 npm install
-npm run android:apk     # → .build/android/chronoeon-arm64-YYYYMMDD.apk
-# v0.1.0 local verified output: .build/android/ChronoEon-0.1.0-arm64.apk
+npm run android:apk     # → .build/android/ChronoEon-<version>-arm64.apk
 ```
 
 That command builds the frontend, the `aarch64-linux-android` Rust library,
@@ -87,21 +120,37 @@ the Gradle release variant, then aligns and signs the APK. What it needs:
 | Requirement            | Notes                                                                                                                                                                                       |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | JDK 17                 | `JAVA_HOME`                                                                                                                                                                                 |
-| Windows host toolchain | MSVC C++ Build Tools + Windows SDK; use the x64 Native Tools prompt so `link.exe` is the MSVC linker, not Git/coreutils                                                                     |
+| Windows host toolchain | MSVC C++ Build Tools + Windows SDK; automatically loaded with `vswhere` / 自动加载，无需专用终端 |
 | Android SDK + NDK      | `ANDROID_HOME` / `ANDROID_SDK_ROOT`; the newest NDK under it is picked automatically, or set `NDK_HOME`                                                                                     |
 | Rust + target          | `rustup target add aarch64-linux-android`                                                                                                                                                   |
-| `perl`                 | only for a **Rust** rebuild: the HTTPS transport vendors OpenSSL, whose Configure step is a Perl script. Install Strawberry Perl, or set `CHRONOEON_SKIP_CARGO=1` to repackage the library already built |
+| Perl + make | OpenSSL compilation needs Perl and make. On Windows the script discovers Git for Windows' Perl and uses the NDK's make; otherwise install Perl and make on PATH. / Windows 自动使用 Git Perl 与 NDK make；也可用 `CHRONOEON_PERL` 指定 Perl bin 目录。 |
+
+Windows 默认 SDK 路径为 `D:\Android\Sdk`；其他位置请设置 `ANDROID_HOME`，JDK 17 设置
+`JAVA_HOME`。脚本会完整编译当前前端和 Rust、签名并验证 APK；同版本重建覆盖同一路径。
+Windows defaults to `D:\Android\Sdk`; set `ANDROID_HOME` for another location and
+`JAVA_HOME` for JDK 17. Each build compiles the current frontend and Rust, signs
+and verifies the APK, and overwrites the same version's output.
+
+```powershell
+rustup target add aarch64-linux-android
+npm run android:apk
+adb install -r .build/android/ChronoEon-0.1.2-arm64.apk
+adb logcat # inspect device logs / 查看真机日志
+```
 
 Signing uses `CHRONOEON_KEYSTORE` (+ `CHRONOEON_KEYSTORE_PASSWORD`,
 `CHRONOEON_KEY_ALIAS`). Without them the script creates and uses a debug key, so
 the result still installs on a phone; keep a release keystore outside the repository or in CI secrets for anything you
 distribute, and never commit it.
 
-`npm run tauri android build --apk --target aarch64` then builds the
-same APK. It needs **Windows Developer Mode** (Tauri symlinks the Rust library
-into the Gradle jniLibs folder) and npm ≤ 10, because Gradle's rust task
-re-enters `npm run … --release --target`, which npm 11+ rejects as unknown
-config flags. `npm run android:apk` avoids both traps.
+Use `npm run android:apk` for the manual APK build. It copies the native library
+and invokes Gradle directly, avoiding Windows symlink permissions and Gradle's
+nested npm argument forwarding. / 本地 APK 使用此命令，无需开启 Windows 开发者模式。
+
+Build outputs stay ignored by Git. Keep the current APK and Windows `bundle`
+outputs for installation; old downloaded installers and duplicate APKs can be
+deleted. Preserve signing keys and `.build/data-safety` backups.
+构建产物不提交 Git；旧下载包、重复 APK 可删除，签名密钥及 `.build/data-safety` 备份须保留。
 
 ## Every platform from GitHub
 
@@ -111,12 +160,12 @@ uploads:
 
 | Job     | Output                                 |
 | ------- | -------------------------------------- |
-| Windows | NSIS installer + MSI                   |
+| Windows | portable EXE + NSIS installer + MSI                   |
 | Linux   | AppImage + deb                         |
 | macOS   | universal (arm64 + x86_64) dmg         |
 | Android | signed arm64 APK (`chronoeon-android`) |
 
-Installers are attached to the published release and retained as workflow artifacts. `ANDROID_KEYSTORE_BASE64` (+ password/alias) secrets
+Installers are attached to a draft GitHub Release and retained as workflow artifacts. Publish the draft after all four jobs pass. / 四个平台构建通过后发布 Release 草稿。 `ANDROID_KEYSTORE_BASE64` (+ password/alias) secrets
 switch the APK from the debug key to yours.
 
 ## Data and sync
@@ -127,6 +176,8 @@ switch the APK from the debug key to yours.
   targets — live in the settings document, which the desktop app stores in its
   `sync_settings` row and applies on boot. The browser demo keeps the same
   document in local storage.
+- Cross-device sync uses WebDAV over HTTPS; Git synchronization is no longer supported.
+  / 跨设备同步使用 HTTPS WebDAV，已移除 Git 同步。 See [sync recovery / 同步排障](SYNC_RECOVERY.md).
 - WebDAV uploads after 15 seconds without edits and checks peers every five minutes.
   / WebDAV 停止编辑 15 秒后上传，每 5 分钟检查其他设备。
 - Android timing runs in a separate native process; reminders use system alarms.
@@ -144,7 +195,7 @@ switch the APK from the debug key to yours.
 apps/chronoeon/        PRIMARY APP — React/Vite UI + Tauri 2 shell (+ Android)
   src/                 product UI and local-first bridges
   src-tauri/           Rust commands, capabilities, Android project
-  scripts/             build-android.mjs, icon sync, verification helpers
+  scripts/             Android / Windows build scripts, icon sync, verification helpers
 packages/              domain rules, SQLite storage, ports
 .github/workflows/     release.yml (all platforms), windows.yml
 ```
@@ -160,7 +211,7 @@ If ChronoEon is useful to you, you can buy me a coffee with WeChat.
 
 ![WeChat payment QR code](./WechatPay.png)
 
-## v0.1.0 everyday workflows / 日常操作
+## Everyday workflows / 日常操作
 
 - Search → Batch replace → select a field and replacement → preview and tick changes → apply. Entry and item edits commit together; Data → Operation history can restore the whole batch. Literal replacement is case-sensitive. / 搜索后点击“批量替换”，选择字段与替换文字，预览并勾选后确认；条目与物品统一提交，可在“设置 → 数据 → 操作历史”恢复整批修改。按字面匹配，区分英文大小写。
 - Filters keep a draft until **Apply filters** (or an explicit Search submission). Cancel, Escape or tapping outside discards uncommitted selections. / 筛选选项先保留草稿，点击“确认筛选”或主动提交搜索后生效；取消、Esc 或点击外部放弃未提交选择。

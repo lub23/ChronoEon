@@ -25,7 +25,8 @@ import { registerModalDismiss, useFocusTrap } from "./modalLayer";
 
 export type SettingsSection = "general" | "calendar" | "catalogs" | "ai" | "data";
 
-export type AccentTheme = "terracotta" | "jade" | "ocean" | "violet";
+export const ACCENT_THEMES = ["terracotta", "jade", "ocean", "violet", "rose", "amber", "indigo", "graphite"] as const;
+export type AccentTheme = typeof ACCENT_THEMES[number];
 
 export interface AppPreferences {
   lunar: LunarPreference;
@@ -353,7 +354,7 @@ export function SettingsDialog({
                 <div className="settings-option"><div className="settings-option-copy"><strong>{t("languageSetting", locale)}</strong><small>{t("languageSettingDetail", locale)}</small></div><Segmented value={locale} onChange={(value) => onLocaleChange(value as Locale)} options={[{ value: "zh", label: t("simplifiedChinese", locale) }, { value: "en", label: t("english", locale) }]} /></div>
                 <div className="settings-option"><div className="settings-option-copy"><strong>{t("appearance", locale)}</strong><small>{t("appearanceDetail", locale)}</small></div><Segmented value={theme} onChange={(value) => onThemeChange(value as ThemeMode)} options={[{ value: "light", label: t("lightOption", locale) }, { value: "dark", label: t("darkOption", locale) }]} /></div>
                 <Toggle checked={preferences.lowEndMode} onChange={(value) => onPreferencesChange({ lowEndMode: value })} label={t("lowEndMode", locale)} detail={t("lowEndModeDetail", locale)} />
-                <div className="settings-option settings-accent-option"><div className="settings-option-copy"><strong>{t("accentTheme", locale)}</strong><small>{t("accentThemeDetail", locale)}</small></div><div className="accent-theme-options" role="radiogroup" aria-label={t("accentTheme", locale)}>{(["terracotta", "jade", "ocean", "violet"] as AccentTheme[]).map((accent) => <button key={accent} type="button" role="radio" aria-checked={preferences.accentTheme === accent} className={preferences.accentTheme === accent ? `accent-swatch accent-swatch--${accent} is-active` : `accent-swatch accent-swatch--${accent}`} onClick={() => onPreferencesChange({ accentTheme: accent })}><i />{t(`accent${accent[0].toUpperCase()}${accent.slice(1)}` as MessageKey, locale)}</button>)}</div></div>
+                <div className="settings-option settings-accent-option"><div className="settings-option-copy"><strong>{t("accentTheme", locale)}</strong><small>{t("accentThemeDetail", locale)}</small></div><div className="accent-theme-options" role="radiogroup" aria-label={t("accentTheme", locale)}>{ACCENT_THEMES.map((accent) => <button key={accent} type="button" role="radio" aria-checked={preferences.accentTheme === accent} className={preferences.accentTheme === accent ? `accent-swatch accent-swatch--${accent} is-active` : `accent-swatch accent-swatch--${accent}`} onClick={() => onPreferencesChange({ accentTheme: accent })}><i />{t(`accent${accent[0].toUpperCase()}${accent.slice(1)}` as MessageKey, locale)}</button>)}</div></div>
               </div>
 
               <SectionHeading title={t("remindersSetting", locale)} detail={t("remindersSettingDetail", locale)} />

@@ -165,6 +165,26 @@ export interface AttachmentContext {
   capture?: boolean;
 }
 
+/** Photos compress concurrently, so one slow decode never holds up the batch. */
+async function storePhotos<T>(
+  sources: readonly T[],
+  nameOf: (source: T) => string,
+  store: (source: T) => Promise<AttachmentPick>,
+): Promise<{ picked: AttachmentPick[]; skipped: string[] }> {
+  const results = await Promise.all(sources.map(async (source): Promise<{ pick?: AttachmentPick; skipped?: string }> => {
+    try {
+      return { pick: await store(source) };
+    } catch (error) {
+      console.warn("Could not store photo", error);
+      return { skipped: nameOf(source) };
+    }
+  }));
+  return {
+    picked: results.flatMap((result) => result.pick ? [result.pick] : []),
+    skipped: results.flatMap((result) => result.skipped ? [result.skipped] : []),
+  };
+}
+
 /**
  * Offer an image picker and return references suitable for `entry.images`.
  * Decode failures are skipped instead of failing the whole batch.
@@ -173,57 +193,33 @@ export async function pickEntryAttachments(
   context: AttachmentContext,
   multiple = true,
 ): Promise<{ picked: AttachmentPick[]; skipped: string[] }> {
-  const picked: AttachmentPick[] = [];
-  const skipped: string[] = [];
-
   if (isTauri() && isMobilePlatform()) {
     // Mobile scoped storage is easiest to enter through the WebView picker;
     // the Rust pipeline still owns compression and local persistence.
     const files = await pickImageFiles(multiple, context.capture === true);
-    for (const file of files) {
-      try {
-        const compressed = await compressPickedFile(file);
-        const displayUrl = await resolveAttachmentUrl(attachmentReference(compressed.sha256)) ?? "";
-        picked.push({ reference: attachmentReference(compressed.sha256), displayUrl, name: file.name, persisted: true });
-      } catch (error) {
-        console.warn("Could not store photo", error);
-        skipped.push(file.name);
-      }
-    }
-    return { picked, skipped };
+    return storePhotos(files, (file) => file.name, async (file) => {
+      const reference = attachmentReference((await compressPickedFile(file)).sha256);
+      return { reference, displayUrl: await resolveAttachmentUrl(reference) ?? "", name: file.name, persisted: true };
+    });
   }
 
   if (isTauri()) {
     // Native path picker → Rust compress pipeline → local attachment path.
     const paths = await pickPhotoPaths(multiple);
-    for (const path of paths) {
-      const name = path.split(/[\\/]/).pop() ?? "photo";
-      try {
-        const compressed = await compressPickedPhoto(path, name);
-        const displayUrl = await resolveAttachmentUrl(attachmentReference(compressed.sha256)) ?? "";
-        picked.push({ reference: attachmentReference(compressed.sha256), displayUrl, name, persisted: true });
-      } catch (error) {
-        console.warn("Could not store photo", error);
-        skipped.push(name);
-      }
-    }
-    return { picked, skipped };
+    const nameOf = (path: string) => path.split(/[\\/]/).pop() ?? "photo";
+    return storePhotos(paths, nameOf, async (path) => {
+      const reference = attachmentReference((await compressPickedPhoto(path, nameOf(path))).sha256);
+      return { reference, displayUrl: await resolveAttachmentUrl(reference) ?? "", name: nameOf(path), persisted: true };
+    });
   }
 
   // Browser demo: session-only blobs.
   const files = await pickImageFiles(multiple, context.capture === true);
-  for (const file of files) {
-    try {
-      const buffer = await compressDemoFile(file);
-      const displayUrl = URL.createObjectURL(buffer);
-      sessionUrls.set(displayUrl, displayUrl);
-      picked.push({ reference: displayUrl, displayUrl, name: file.name, persisted: false });
-    } catch (error) {
-      console.warn("Could not compress photo", error);
-      skipped.push(file.name);
-    }
-  }
-  return { picked, skipped };
+  return storePhotos(files, (file) => file.name, async (file) => {
+    const displayUrl = URL.createObjectURL(await compressDemoFile(file));
+    sessionUrls.set(displayUrl, displayUrl);
+    return { reference: displayUrl, displayUrl, name: file.name, persisted: false };
+  });
 }
 
 /**
@@ -308,15 +304,19 @@ export async function attachmentDataUrl(reference: string): Promise<string | nul
 
 /** Long edge of the copy that is sent to a model; enough to read a receipt. */
 const MODEL_IMAGE_MAX_EDGE = 1280;
-const MODEL_IMAGE_QUALITY = 0.78;
+const MODEL_IMAGE_QUALITY = 0.74;
+/** Data URLs up to this length travel to the model untouched. */
+const MODEL_IMAGE_MAX_CHARS = 420 * 1024;
 
 /**
- * Downscaled copy of a stored photo for the model payload. The stored original
- * is never modified, so the entry keeps its full-quality photo.
+ * The model's copy of a photo. A stored attachment is already the bounded WebP
+ * that sync carries (≤1280 px, ≤100 KB), so those bytes go out as they are;
+ * only an oversized session blob is decoded and downscaled first.
  */
 export async function attachmentModelImage(reference: string): Promise<string | null> {
   const raw = await attachmentDataUrl(reference);
   if (!raw) return null;
+  if (raw.startsWith("data:image/webp") || raw.length <= MODEL_IMAGE_MAX_CHARS) return raw;
   try {
     const bitmap = await createImageBitmap(await (await fetch(raw)).blob());
     const scale = Math.min(1, MODEL_IMAGE_MAX_EDGE / Math.max(bitmap.width, bitmap.height));

@@ -5,6 +5,39 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AiHttpClientTest {
+    @Test fun doneCompletesBeforeTheServerClosesTheConnection() {
+        ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
+            val release = java.util.concurrent.CountDownLatch(1)
+            val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+            val worker = Thread {
+                server.accept().use { socket ->
+                    val reader = socket.getInputStream().bufferedReader()
+                    var size = 0
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        if (line.isEmpty()) break
+                        if (line.startsWith("Content-Length:", true)) size = line.substringAfter(':').trim().toInt()
+                    }
+                    repeat(size) { reader.read() }
+                    val output = socket.getOutputStream()
+                    output.write(("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n" +
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"Done\"},\"finish_reason\":\"stop\"}]}\n\n" +
+                        "data: {\"choices\":[],\"usage\":{\"completion_tokens\":1}}\n\ndata: [DONE]\n\n").toByteArray())
+                    output.flush()
+                    release.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                }
+            }.apply { isDaemon = true; start() }
+            try {
+                val events = mutableListOf<String>()
+                val result = executor.submit<org.json.JSONObject> {
+                    AiHttpClient.complete("http://127.0.0.1:${server.localPort}/", emptyMap(), 4000, "{}") { events.add(it) }
+                }.get(2, java.util.concurrent.TimeUnit.SECONDS)
+                assertTrue(result.getBoolean("streaming"))
+                assertEquals("[DONE]", events.last())
+                assertTrue(events[1].contains("completion_tokens"))
+            } finally { release.countDown(); worker.join(5000); executor.shutdownNow() }
+        }
+    }
     private fun response(status: Int, type: String, payload: String, chunked: Boolean = false, verify: (org.json.JSONObject, List<String>, String) -> Unit) {
         ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
             var request = ""

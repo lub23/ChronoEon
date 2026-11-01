@@ -5,6 +5,45 @@ use std::{collections::{HashMap, HashSet}, io::Read, sync::{Mutex, OnceLock}, ti
 // Disposable manifest cache: authorization is still checked on every GET.
 type CachedIndexes = HashMap<String, (String, Vec<u8>)>;
 static INDEX_CACHE: OnceLock<Mutex<CachedIndexes>> = OnceLock::new();
+/// Objects in flight at once. Enough to hide per-request latency on a first
+/// sync; small enough that shared WebDAV hosts never see a burst.
+const TRANSFER_PARALLELISM: usize = 4;
+
+/// Request essentials that upload/download threads can share. Lock and
+/// collection bookkeeping stay on the single-owner backend.
+struct Transfer { client: Client, base: Url, username: String, password: String, lock_token: Option<String> }
+impl Transfer {
+    fn request(&self, method: Method, path: &str) -> Result<RequestBuilder, String> {
+        let url = self.base.join(path).map_err(|_| "SYNC_INVALID_REMOTE")?;
+        let request = self.client.request(method, url);
+        let request = if self.username.is_empty() { request } else { request.basic_auth(&self.username, Some(&self.password)) };
+        Ok(match &self.lock_token { Some(token) => request.header("If", format!("({token})")), None => request })
+    }
+    /// Ok(true) when the server already holds an object at that path.
+    fn put(&self, object: &EncodedObject) -> Result<bool, String> {
+        let response = WebDAVBackend::send(self.request(Method::PUT, &object.path)?.header(IF_NONE_MATCH, "*").header("Content-Type", "application/octet-stream").body(object.bytes.clone()))?;
+        if response.status().as_u16() == 412 { return Ok(true); }
+        if !response.status().is_success() { return Err(format!("SYNC_WEBDAV_PUT: HTTP {}", response.status().as_u16())); }
+        Ok(false)
+    }
+    fn get(&self, path: &str) -> Result<Vec<u8>, String> {
+        let response = WebDAVBackend::send(self.request(Method::GET, path)?)?;
+        if !response.status().is_success() { return Err(format!("SYNC_WEBDAV_GET: HTTP {}", response.status().as_u16())); }
+        WebDAVBackend::read(response)
+    }
+}
+/// One transfer per item, a few at a time, results in the caller's order.
+fn in_parallel<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> Result<R, String> + Sync) -> Result<Vec<R>, String> {
+    let mut results = Vec::with_capacity(items.len());
+    for batch in items.chunks(TRANSFER_PARALLELISM) {
+        let outcomes: Vec<Result<R, String>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = batch.iter().map(|item| scope.spawn(|| work(item))).collect();
+            handles.into_iter().map(|handle| handle.join().unwrap_or_else(|_| Err("SYNC_TRANSFER_PANIC".into()))).collect()
+        });
+        for outcome in outcomes { results.push(outcome?); }
+    }
+    Ok(results)
+}
 
 pub struct WebDAVBackend { client: Client, base: Url, username: String, password: String, collections: HashSet<String>, lock_token: Option<String>, locked_at: Instant }
 impl WebDAVBackend {
@@ -35,6 +74,9 @@ impl WebDAVBackend {
                 .ok_or("SYNC_STORAGE_SIZE_FAILED")?;
         }
         Ok(total)
+    }
+    fn transfer(&self) -> Transfer {
+        Transfer { client: self.client.clone(), base: self.base.clone(), username: self.username.clone(), password: self.password.clone(), lock_token: self.lock_token.clone() }
     }
     fn plain_request(&self, method: Method, path: &str) -> Result<RequestBuilder, String> {
         let url = self.base.join(path).map_err(|_| "SYNC_INVALID_REMOTE")?;
@@ -97,12 +139,14 @@ impl WebDAVBackend {
         else { Err("SYNC_WEBDAV_UNLOCK".into()) }
     }
     fn publish_objects(&mut self, expected: Option<&str>, manifest: &[u8], objects: &[EncodedObject], deletes: &[String], locked: bool) -> Result<PublishResult,String> {
-        for object in objects {
+        for object in objects { self.parents(&object.path)?; }
+        for batch in objects.chunks(TRANSFER_PARALLELISM) {
             self.refresh_lock()?;
-            self.parents(&object.path)?;
-            let response = Self::send(self.request(Method::PUT, &object.path)?.header(IF_NONE_MATCH,"*").header("Content-Type","application/octet-stream").body(object.bytes.clone()))?;
-            if response.status().as_u16() == 412 { super::validate_object(&object.path, &self.read_object(&object.path)?, &object.hash)?; }
-            else if !response.status().is_success() { return Err(format!("SYNC_WEBDAV_PUT: HTTP {}", response.status().as_u16())); }
+            let transfer = self.transfer();
+            let existed = in_parallel(batch, |object| transfer.put(object))?;
+            for (object, present) in batch.iter().zip(existed) {
+                if present { super::validate_object(&object.path, &self.read_object(&object.path)?, &object.hash)?; }
+            }
         }
         self.refresh_lock()?;
         if let Some(tag) = expected {
@@ -249,6 +293,10 @@ impl SyncBackend for WebDAVBackend {
         if !response.status().is_success() { return Err(format!("SYNC_WEBDAV_GET: HTTP {}", response.status().as_u16())); }
         Self::read(response)
     }
+    fn read_objects(&mut self, paths: &[String]) -> Result<Vec<Vec<u8>>, String> {
+        let transfer = self.transfer();
+        in_parallel(paths, |path| transfer.get(path))
+    }
     fn publish(&mut self, expected: Option<&str>, manifest: &[u8], objects: &[EncodedObject], deletes: &[String]) -> Result<PublishResult, String> {
         self.verify_cas()?;
         let locked = self.acquire_lock()?;
@@ -277,6 +325,8 @@ mod tests {
                 let mut collection_created = false;
                 while !shutdown.load(Ordering::Relaxed) {
                     let Ok((mut stream,_)) = listener.accept() else { thread::sleep(Duration::from_millis(2)); continue; };
+                    // Windows accepted sockets inherit the listener's nonblocking mode.
+                    stream.set_nonblocking(false).unwrap();
                     stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
                     let mut reader = BufReader::new(stream.try_clone().unwrap()); let mut line = String::new(); reader.read_line(&mut line).unwrap();
                     let request: Vec<_> = line.split_whitespace().map(str::to_string).collect(); if request.len()<2 { continue; }

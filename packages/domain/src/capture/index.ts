@@ -14,10 +14,11 @@ import { extractKind } from "./kind";
 import { extractMoney } from "./money";
 import { extractPlace } from "./place";
 import { captureTitle, type CaptureSpan, type CaptureText } from "./text";
-import { extractTime } from "./time";
+import { extractTimeSpans, resolveTime } from "./time";
 import { CaptureDecisionIndex, type CaptureFieldDecisions } from "./decision";
 
 export { CaptureDecisionIndex, type CaptureFieldDecisions } from "./decision";
+export { buildCaptureHabits, describeCaptureHabits, type CaptureHabits, type CaptureHabitTitle, type CaptureHabitCount } from "./habits";
 
 export interface CaptureHistoryItem {
   id?: string;
@@ -30,6 +31,10 @@ export interface CaptureHistoryItem {
   start?: string;
   end?: string;
   date: string;
+  amount?: number;
+  currency?: string;
+  payment?: string;
+  tags?: string[];
 }
 export interface CaptureOptions {
   now: Date;
@@ -83,10 +88,13 @@ export function parseCapture(input: string, { now, locale, settings, history = [
   history = history.filter(item => !item.calendar || item.calendar === settings.defaultCalendarID);
   const explicit = extractExplicit(text);
   const schedule = extractScheduleFields(text, explicit.issues);
+  // Time words leave the title before history is consulted, so "现在到十二点半
+  // 午饭" still finds the user's own lunch records and their usual length.
+  const timeSpans = extractTimeSpans(text, now);
   const provisionalTitle = captureTitle(text);
   const provisionalIndex = decisionIndex ?? new CaptureDecisionIndex(history);
   const provisionalDecisions = provisionalIndex.decide(provisionalTitle, { calendar: settings.defaultCalendarID });
-  const time = extractTime(text, now, provisionalDecisions.defaultDuration);
+  const time = resolveTime(text, timeSpans, now, { duration: provisionalDecisions.defaultDuration, start: provisionalDecisions.defaultStart });
   const money = extractMoney(text, settings);
   const location = extractPlace(text, history);
   const note = extractNote(text);

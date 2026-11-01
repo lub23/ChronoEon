@@ -516,3 +516,119 @@ export function collectTags(entries: Entry[], limit = 24): Array<{ tag: string; 
     .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag))
     .slice(0, limit);
 }
+
+/* -------------------------------------------------------------------------
+   Calendar periods named in a question, resolved on the device. The model is
+   given civil dates and copies them; it never counts months across a year end.
+   ------------------------------------------------------------------------- */
+
+export interface ResolvedPeriod { phrase: string; range: StatsRange }
+
+function monthRange(year: number, month: number): StatsRange {
+  const first = new Date(year, month - 1, 1);
+  const y = first.getFullYear();
+  const m = first.getMonth() + 1;
+  const prefix = `${y}-${String(m).padStart(2, "0")}`;
+  return { start: `${prefix}-01`, end: `${prefix}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}` };
+}
+function monthsBack(today: string, back: number): StatsRange {
+  const [year, month] = today.split("-").map(Number);
+  return monthRange(year, month - back);
+}
+function weeksBack(today: string, back: number): StatsRange {
+  const start = addIsoDays(startOfWeekIso(today, 1), -7 * back);
+  return { start, end: addIsoDays(start, 6) };
+}
+function yearOf(year: number): StatsRange {
+  return { start: `${year}-01-01`, end: `${year}-12-31` };
+}
+function quartersBack(today: string, back: number): StatsRange {
+  const [year, month] = today.split("-").map(Number);
+  const first = month - ((month - 1) % 3) - back * 3;
+  return { start: monthRange(year, first).start, end: monthRange(year, first + 2).end };
+}
+function recentMonth(today: string, month: number): StatsRange {
+  const [year, current] = today.split("-").map(Number);
+  return monthRange(month > current ? year - 1 : year, month);
+}
+const CJK_DIGITS: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+function smallNumber(raw: string): number {
+  if (/^\d+$/.test(raw)) return Number(raw);
+  if (raw === "十") return 10;
+  const tens = raw.indexOf("十");
+  if (tens < 0) return CJK_DIGITS[raw] ?? Number.NaN;
+  const high = tens === 0 ? 1 : CJK_DIGITS[raw.slice(0, tens)] ?? Number.NaN;
+  const low = tens === raw.length - 1 ? 0 : CJK_DIGITS[raw.slice(tens + 1)] ?? Number.NaN;
+  return high * 10 + low;
+}
+const COUNT = /(\d{1,3}|[一二两三四五六七八九十]{1,3})/.source;
+const MONTH_NAMES = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const COUNTED_PERIOD = new RegExp(
+  `(?:最近|近|过去|这)${COUNT}\\s*(天|日|周|个?星期|个?礼拜|个?月|年)(?:来|内|里|以来)?|(?:last|past|previous|recent)\\s+${COUNT}\\s*(days?|weeks?|months?|years?)`,
+  "i",
+);
+type PeriodRule = [RegExp, (today: string, match: RegExpMatchArray) => StatsRange | null];
+const PERIOD_RULES: PeriodRule[] = [
+  [/前天|the day before yesterday/i, (today) => ({ start: addIsoDays(today, -2), end: addIsoDays(today, -2) })],
+  [/昨天|昨日|yesterday/i, (today) => ({ start: addIsoDays(today, -1), end: addIsoDays(today, -1) })],
+  [/今天|今日|today/i, (today) => ({ start: today, end: today })],
+  [/上上个?月|two months ago|the month before last/i, (today) => monthsBack(today, 2)],
+  [/上个?月|上一个月|last month|previous month/i, (today) => monthsBack(today, 1)],
+  [/这个?月|本月|当月|this month|current month/i, (today) => monthsBack(today, 0)],
+  [/上上个?(?:周|星期|礼拜)|two weeks ago/i, (today) => weeksBack(today, 2)],
+  [/上个?(?:周|星期|礼拜)|last week|previous week/i, (today) => weeksBack(today, 1)],
+  [/这个?(?:周|星期|礼拜)|本周|这一周|this week|current week/i, (today) => weeksBack(today, 0)],
+  [/上个?季度|上季|last quarter|previous quarter/i, (today) => quartersBack(today, 1)],
+  [/这个?季度|本季度|本季|this quarter/i, (today) => quartersBack(today, 0)],
+  [/前年|two years ago|the year before last/i, (today) => yearOf(Number(today.slice(0, 4)) - 2)],
+  [/去年|上一年|last year|previous year/i, (today) => yearOf(Number(today.slice(0, 4)) - 1)],
+  [/今年|本年|这一年|this year|current year/i, (today) => yearOf(Number(today.slice(0, 4)))],
+  [COUNTED_PERIOD, (today, match) => {
+    const amount = smallNumber(match[1] ?? match[3] ?? "");
+    const unit = (match[2] ?? match[4] ?? "").toLowerCase();
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const days = /天|日|day/.test(unit) ? amount : /周|星期|礼拜|week/.test(unit) ? amount * 7
+      : /月|month/.test(unit) ? amount * 30 : /年|year/.test(unit) ? amount * 365 : Number.NaN;
+    if (!Number.isFinite(days)) return null;
+    return { start: addIsoDays(today, -(Math.min(3650, Math.round(days)) - 1)), end: today };
+  }],
+  // A bare month name is its most recent occurrence, never one still ahead.
+  [/(?<![\d年])(1[0-2]|[1-9])月(?:份)?(?!\s*\d{1,2}\s*[日号])/, (today, match) => recentMonth(today, Number(match[1]))],
+  [/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b(?!\s*\d{1,2}(?:st|nd|rd|th)?\b)(?!\s*,?\s*\d{4})/i,
+    (today, match) => recentMonth(today, MONTH_NAMES.indexOf(match[1].slice(0, 3).toLowerCase()) + 1)],
+  // "may" is also a verb; only the capitalised month counts.
+  [/\bMay\b(?!\s*\d{1,2}(?:st|nd|rd|th)?\b)(?!\s*,?\s*\d{4})/, (today) => recentMonth(today, 5)],
+];
+
+/** Every calendar period the text names, in reading order. Overlapping
+ *  phrases ("上上个月" against "上个月") keep the longer, earlier match. */
+export function resolveRelativePeriods(text: string, today: string): ResolvedPeriod[] {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today) || !text.trim()) return [];
+  const found: Array<ResolvedPeriod & { from: number; to: number }> = [];
+  for (const [pattern, resolve] of PERIOD_RULES) {
+    const global = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+    for (const match of text.matchAll(global)) {
+      const from = match.index ?? 0;
+      const to = from + match[0].length;
+      if (found.some((other) => from < other.to && to > other.from)) continue;
+      const range = resolve(today, match);
+      if (range) found.push({ phrase: match[0], range, from, to });
+    }
+  }
+  return found.sort((a, b) => a.from - b.from).map(({ phrase, range }) => ({ phrase, range }));
+}
+
+/** Prompt text with the civil dates of the usual periods plus the ones this
+ *  question names, so the model copies dates instead of computing them. */
+export function advisorDateHints(today: string, resolved: readonly ResolvedPeriod[] = []): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) return "";
+  const year = Number(today.slice(0, 4));
+  const span = (range: StatsRange) => `${range.start}..${range.end}`;
+  const standard = [
+    `this week/本周 ${span(weeksBack(today, 0))}`, `last week/上周 ${span(weeksBack(today, 1))}`,
+    `this month/本月 ${span(monthsBack(today, 0))}`, `last month/上个月 ${span(monthsBack(today, 1))}`,
+    `this year/今年 ${span(yearOf(year))}`, `last year/去年 ${span(yearOf(year - 1))}`,
+  ];
+  const named = resolved.map((period) => `"${period.phrase}" = ${span(period.range)}`);
+  return ` Calendar periods resolved from the current local date (copy these exact dates into start_date/end_date; never compute dates yourself): ${standard.join("; ")}.${named.length ? ` The question's own period: ${named.join("; ")}.` : ""}`;
+}

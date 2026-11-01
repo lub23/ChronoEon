@@ -2,23 +2,41 @@ import { useState } from "react";
 import type { Entry, Item, Locale } from "@chronoeon/domain";
 import { t, type MessageKey } from "../i18n";
 import { REPLACE_FIELDS, replacementPreview, applyReplacements, itemReplacementPreview, applyItemReplacements, type ReplaceRecords, type ReplacementRow, type ReplaceField } from "../domain/bulkReplace";
+import { GlassSelect } from "./GlassSelect";
 import { Icon } from "./Icon";
 const labels: Record<ReplaceField, MessageKey> = { title: "title", titleZh: "bulkTitleZh", location: "searchFieldLocation", note: "searchFieldNote", category: "searchFieldCategory", payment: "searchFieldPayment", tags: "searchFieldTag" };
 
-export function BulkReplacePanel({ entries, items, search, locale, onReplace }: { entries: Entry[]; items: Item[]; search: string; locale: Locale; onReplace: ReplaceRecords }) {
-  const [open, setOpen] = useState(false), [replacement, setReplacement] = useState("");
+interface BulkReplacePanelProps {
+  entries: Entry[];
+  items: Item[];
+  search: string;
+  locale: Locale;
+  onReplace: ReplaceRecords;
+  /** The filter panel folds its other sections while the form is open. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function BulkReplacePanel({ entries, items, search, locale, onReplace, open, onOpenChange }: BulkReplacePanelProps) {
+  const [replacement, setReplacement] = useState("");
   const [field, setField] = useState<ReplaceField | "all">("all");
   const [review, setReview] = useState<ReplacementRow[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [limit, setLimit] = useState(30), [busy, setBusy] = useState(false), [message, setMessage] = useState<MessageKey | null>(null);
   if (!search.trim()) return null;
   const rows = review ?? [];
-  return <section className="bulk-replace">
-    <button type="button" className="secondary-button" disabled={busy} aria-expanded={open} onClick={() => { setOpen(!open); setReview(null); setMessage(null); }}><Icon name="edit" size={13} />{t("bulkReplace", locale)}</button>
+  const fieldOptions = [{ value: "all", label: t("bulkAllFields", locale) }, ...REPLACE_FIELDS.map(key => ({ value: key, label: t(labels[key], locale) }))];
+  return <section className={open ? "bulk-replace is-open" : "bulk-replace"}>
+    <button type="button" className={open ? "bulk-replace-toggle is-active" : "bulk-replace-toggle"} disabled={busy} aria-expanded={open}
+      onClick={() => { onOpenChange(!open); setReview(null); setMessage(null); }}>
+      <Icon name="edit" size={13} /><span>{t("bulkReplace", locale)}</span><Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
+    </button>
     {open && <div className="bulk-replace-form">
       <p>{t("bulkPreview", locale)}</p>
       <label>{t("filterSearch", locale)}<input value={search} readOnly /></label>
-      <label>{t("bulkField", locale)}<select value={field} disabled={busy} onChange={event => { setField(event.target.value as ReplaceField | "all"); setReview(null); }}><option value="all">{t("bulkAllFields", locale)}</option>{REPLACE_FIELDS.map(key => <option key={key} value={key}>{t(labels[key], locale)}</option>)}</select></label>
+      <div className="bulk-replace-field"><span>{t("bulkField", locale)}</span>
+        <GlassSelect value={field} options={fieldOptions} disabled={busy} ariaLabel={t("bulkField", locale)}
+          onChange={value => { setField(value as ReplaceField | "all"); setReview(null); }} /></div>
       <label>{t("bulkReplacement", locale)}<input value={replacement} disabled={busy} onChange={event => { setReplacement(event.target.value); setReview(null); setMessage(null); }} /></label>
       <button className="secondary-button" type="button" disabled={busy} onClick={() => { const rows = [...replacementPreview(entries, search.trim(), replacement, field), ...itemReplacementPreview(items, search.trim(), replacement, field)]; setReview(rows); setSelected(new Set(rows.map(row => row.key))); setLimit(30); setMessage(null); }}>{t("bulkShowPreview", locale)}</button>
       {review && <>

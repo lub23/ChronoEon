@@ -44,6 +44,10 @@ export function FilterPanel({ locale, kind: appliedKind, filter: appliedFilter, 
   const [query, setQuery] = useState(search);
   const [filter, onChangeDraft] = useState(appliedFilter);
   const [kind, onKindDraft] = useState(appliedKind);
+  // While a batch replace is being prepared, the calendar/type/category
+  // sections fold away so the panel stays short and the task stays in view.
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  const replacing = Boolean(onReplace) && replaceOpen && Boolean(search.trim());
   const apply = (close: boolean) => {
     onChange(filter); onKindChange(kind); onSearch(query.trim());
     if (close) onClose();
@@ -126,9 +130,12 @@ export function FilterPanel({ locale, kind: appliedKind, filter: appliedFilter, 
             onChange={event => setQuery(event.target.value)} placeholder={t("filterSearchHint", locale)} aria-label={t("filterSearch", locale)} /></label>
           <button type="submit" className="filter-search-submit">{t("filterSearch", locale)}</button>
         </form>
-        {onReplace && <BulkReplacePanel key={search} entries={entries} items={items} search={search} locale={locale} onReplace={onReplace} />}
+        {onReplace && <BulkReplacePanel key={search} entries={entries} items={items} search={search} locale={locale} onReplace={onReplace} open={replaceOpen} onOpenChange={setReplaceOpen} />}
         <SearchResults items={items} onOpenItem={item => { onClose(); onOpenItem?.(item); }} entries={entries} search={search} settings={settings} locale={locale} onOpen={entry => { onClose(); onOpenEntry(entry); }} />
       </div>
+      {replacing ? <button type="button" className="filter-folded" onClick={() => setReplaceOpen(false)}>
+        <Icon name="filter" size={12} /><span>{t("filterFoldedWhileReplacing", locale)}</span><small>{t("filterUnfold", locale)}</small>
+      </button> : <>
       <div className="filter-section">
         <p className="filter-label">{t("filterCalendars", locale)}</p>
         {!calendarIds.length && <p className="filter-empty">{t("filterNoOptions", locale)}</p>}
@@ -163,6 +170,7 @@ export function FilterPanel({ locale, kind: appliedKind, filter: appliedFilter, 
           </section>}
         </div>
       </div>
+      </>}
       <footer className="filter-panel-actions">
         <button type="button" className="secondary-button" onClick={onClose}>{t("cancel", locale)}</button>
         <button type="button" className="primary-action filter-apply" onClick={() => apply(true)}><Icon name="check" size={14} />{t("filterApply", locale)}</button>

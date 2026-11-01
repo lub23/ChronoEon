@@ -37,7 +37,12 @@ object AiHttpClient {
                         while (true) {
                             val line = reader.readLine() ?: break
                             if (line.isEmpty()) {
-                                if (data.isNotEmpty()) { onEvent(data.toString()); data.setLength(0) }
+                                if (data.isNotEmpty()) {
+                                    val event = data.toString()
+                                    onEvent(event)
+                                    data.setLength(0)
+                                    if (event == "[DONE]") break
+                                }
                             } else if (line.startsWith("data:")) {
                                 if (data.isNotEmpty()) data.append('\n')
                                 data.append(line.substring(5).removePrefix(" "))

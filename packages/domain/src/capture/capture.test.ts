@@ -160,10 +160,10 @@ describe("parseCapture · dates, durations and conservative extraction", () => {
     ["Meeting in 3 days", { date: "2026-09-12", title: "Meeting" }],
     ["Read for 1 hour 30 minutes", { start: "09:00", end: "10:30", title: "Read" }],
     ["Design review day after tomorrow", { date: "2026-09-11", title: "Design review" }],
-    ["下午茶", { allDay: true, title: "下午茶" }],
+    ["下午茶", { start: "15:00", end: "15:30", allDay: false, title: "下午茶" }],
     ["Room 204 review", { kind: "event", allDay: true, title: "Room 204 review" }],
     ["2026-02-30 review", { date: "2026-09-09", title: "2026-02-30 review" }],
-    ["现在想一个问题", { location: undefined, title: "现在想一个问题" }],
+    ["现在想一个问题", { location: undefined, title: "想一个问题", start: "09:00" }],
     ["重要会议", { kind: "event", title: "重要会议" }],
     ["Lunch €12.50", { kind: "bill", amount: -12.5, currency: "EUR", title: "Lunch" }],
     ["薪资两万三千元", { kind: "bill", amount: 23000, category: "income/Salary", title: "薪资" }],
@@ -206,4 +206,43 @@ it.each([
   ["健身一点五小时", { start: "09:00", end: "10:30", title: "健身" }],
 ] as const)("keeps clock minutes separate from duration: %s", (input, expected) => {
   expect(draft(input)).toMatchObject(expected);
+});
+
+describe("parseCapture · now, ranges and daily routine", () => {
+  // 12:17 rounds to 12:15; "now" is the moment of writing, not the next slot.
+  const noon = new Date(2026, 8, 9, 12, 17);
+  it.each([
+    ["现在到十二点半 午饭 @双清园", { start: "12:15", end: "12:30", allDay: false, title: "午饭", location: "双清园", kind: "event" }],
+    ["从现在到1点 写报告", { start: "12:15", end: "13:00", title: "写报告" }],
+    ["现在开会一小时", { start: "12:15", end: "13:15", title: "开会" }],
+    ["刚才吃了午饭", { start: "11:30", end: "12:15", title: "吃了午饭" }],
+    ["now until 12:30 lunch", { start: "12:15", end: "12:30", title: "lunch" }],
+    ["10点到2点 复习", { start: "10:00", end: "14:00", title: "复习" }],
+    ["午饭", { start: "12:00", end: "12:45", allDay: false, title: "午饭" }],
+    ["晚饭 @家", { start: "18:30", end: "19:15", location: "家", title: "晚饭" }],
+    ["明天早饭", { date: "2026-09-10", start: "08:00", end: "08:30", title: "早饭" }],
+  ] as const)("%s", (input, expected) => expect(draft(input, { now: noon })).toMatchObject(expected));
+
+  it("ends a retrospective range at the present and reads a bare start on the 12-hour clock", () => {
+    expect(draft("两点到现在 写报告", { now: new Date(2026, 8, 9, 16, 5) })).toMatchObject({ start: "14:00", end: "16:05", title: "写报告" });
+  });
+
+  it("reads an end that has already passed as its next occurrence, even past midnight", () => {
+    expect(draft("现在到十二点半 午饭", { now: new Date(2026, 8, 9, 14, 0) })).toMatchObject({ start: "14:00", end: "00:30", endDate: "2026-09-10" });
+    expect(draft("现在到1点 写代码", { now: new Date(2026, 8, 9, 20, 0) })).toMatchObject({ start: "20:00", end: "01:00", endDate: "2026-09-10" });
+    expect(draft("23:30到0:30 值班")).toMatchObject({ start: "23:30", end: "00:30", endDate: "2026-09-10", title: "值班" });
+  });
+
+  it("prefers the user's own lunch hour and length over the routine default", () => {
+    const history: CaptureHistoryItem[] = [
+      { kind: "event", title: "午饭", category: "alpha", date: "2026-09-01", start: "12:10", end: "12:50" },
+      { kind: "event", title: "午饭", category: "alpha", date: "2026-09-02", start: "12:00", end: "12:40" },
+      { kind: "event", title: "午饭", category: "alpha", date: "2026-09-03", start: "12:05", end: "12:45" },
+    ];
+    expect(draft("午饭", { history })).toMatchObject({ start: "12:05", end: "12:45", category: "alpha" });
+    // An explicit range always wins over the habit.
+    expect(draft("现在到十二点半 午饭", { history, now: noon })).toMatchObject({ start: "12:15", end: "12:30" });
+    // A learned length still applies when only the start is written.
+    expect(draft("12:30 午饭", { history })).toMatchObject({ start: "12:30", end: "13:10" });
+  });
 });

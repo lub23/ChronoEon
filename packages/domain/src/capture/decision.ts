@@ -24,6 +24,8 @@ export interface CaptureFieldDecisions {
   category: CaptureFieldDecision;
   location: CaptureFieldDecision;
   defaultDuration?: number;
+  /** Minutes after midnight the user usually starts a matching record. */
+  defaultStart?: number;
 }
 
 interface DecisionRecord {
@@ -79,6 +81,12 @@ function parseClock(value: string | undefined): number | undefined {
   return match ? Number(match[1]) * 60 + Number(match[2]) : undefined;
 }
 
+function median(values: readonly number[]): number | undefined {
+  if (!values.length) return undefined;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
 /**
  * A small in-memory frequency index. `sync` diffs the current history against
  * the records it already holds, so saving one new entry updates the affected
@@ -122,11 +130,14 @@ export class CaptureDecisionIndex {
     const scoped = records.filter((item) => !selectedKind || item.item.kind === selectedKind);
     const category = this.rank(scoped, (item) => item.category, options.availableCategories, title);
     const location = this.rank(scoped, (item) => item.location, undefined, title);
+    // Only near-identical titles teach a time: "午饭" must not inherit "午饭后散步".
+    const habitual = scoped.filter(record => (record.matchScore ?? 0) >= 0.9);
     return {
       kind: { options: kindCandidates, selected: chooseKind(kindCandidates) },
       category: { options: category, selected: significant(category)?.value },
       location: { options: location, selected: significant(location)?.value },
-      defaultDuration: this.duration(scoped.filter(record => (record.matchScore ?? 0) >= 0.9)),
+      defaultDuration: this.duration(habitual),
+      defaultStart: this.start(habitual),
     };
   }
 
@@ -172,16 +183,27 @@ export class CaptureDecisionIndex {
       .map((candidate) => ({ ...candidate, match: candidate.match * (candidate.count / (total || 1)) }));
   }
 
+  /** The median length of the matching records, to the nearest five minutes. */
   private duration(records: readonly DecisionRecord[]): number | undefined {
-    const counts = new Map<number, number>();
+    const lengths: number[] = [];
     for (const record of records) {
       const start = parseClock(record.item.start);
       const end = parseClock(record.item.end);
       if (start === undefined || end === undefined || end <= start) continue;
-      counts.set(end - start, (counts.get(end - start) ?? 0) + 1);
+      lengths.push(end - start);
     }
-    const top = [...counts.entries()].sort((left, right) => right[1] - left[1])[0];
-    return top ? (top[0] <= 30 ? 30 : 60) : undefined;
+    const middle = median(lengths);
+    return middle === undefined ? undefined : Math.max(5, Math.round(middle / 5) * 5);
+  }
+
+  /** The usual start, when the matching records agree on one: at least two timed
+   *  records, mostly timed, and most of them within 45 minutes of the median. */
+  private start(records: readonly DecisionRecord[]): number | undefined {
+    const starts = records.map((record) => parseClock(record.item.start)).filter((value): value is number => value !== undefined);
+    if (starts.length < 2 || starts.length * 2 < records.length) return undefined;
+    const middle = median(starts)!;
+    const near = starts.filter((value) => Math.abs(value - middle) <= 45).length;
+    return near / starts.length >= 0.6 ? Math.round(middle / 5) * 5 : undefined;
   }
 
   private add(id: string, item: CaptureHistoryItem, signature: string): void {

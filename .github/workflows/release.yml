@@ -1,6 +1,6 @@
 name: Release
 
-# Tag-driven release line. `v0.1.0` on main publishes a GitHub Release with
+# Tag-driven release line. A `v*` tag builds a draft GitHub Release with
 # Windows, macOS and Ubuntu installers plus the Android APK attached. Nothing
 # here runs on ordinary pushes.
 on:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build (e.g. v0.1.0)"
+        description: "Existing tag to build (e.g. v0.1.2)"
         required: true
 
 permissions:
@@ -88,7 +88,7 @@ jobs:
         run: |
           {
             echo "body<<CHRONOEON_RELEASE_DESCRIPTION"
-            cat CHANGELOG.md
+            sed '/^---$/q' CHANGELOG.md | sed '${/^---$/d;}'
             echo "CHRONOEON_RELEASE_DESCRIPTION"
           } >> "$GITHUB_OUTPUT"
 
@@ -138,7 +138,7 @@ jobs:
           if-no-files-found: error
 
   # The Android package is a separate arm64 APK. Everything it needs — Node,
-  # JDK 17, the Android SDK/NDK and perl for the vendored OpenSSL in `git2` — is
+  # JDK 17, the Android SDK/NDK and perl for vendored OpenSSL — is
   # already on the Ubuntu runner, so `npm run android:apk` builds and signs it in
   # one step. Without an `ANDROID_KEYSTORE_BASE64` secret it is signed with the
   # debug key, which still installs.

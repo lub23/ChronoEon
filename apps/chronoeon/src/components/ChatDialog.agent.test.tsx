@@ -84,6 +84,40 @@ function render(entries: Entry[], conversations = createMemoryConversationStore(
 }
 
 describe("AI advisor model tool workflow", () => {
+  it("stops the model clock before a slow database save and deferred rendering", async () => {
+    let now = 1000;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+    let release!: () => void;
+    const saving = new Promise<void>((resolve) => { release = resolve; });
+    const store = createMemoryConversationStore();
+    const append = store.appendMessage.bind(store);
+    store.appendMessage = async (id, input) => {
+      if (input.role === "assistant") { now = 15200; await saving; }
+      return append(id, input);
+    };
+    vi.mocked(requestAICompletion).mockImplementationOnce(async () => {
+      now = 2200;
+      return { content: "Fast answer." };
+    });
+    try {
+      render([], store);
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+      const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "你好");
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => {
+        host.querySelector<HTMLButtonElement>(".chat-send")!.click();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+      expect(host.querySelector(".chat-process summary small")?.textContent).toContain("1.2");
+      expect(host.querySelector(".chat-process.is-live")).toBeNull();
+      await act(async () => { release(); await new Promise((resolve) => setTimeout(resolve, 30)); });
+      expect(host.textContent).toContain("Fast answer.");
+      expect(host.querySelector(".chat-process summary small")?.textContent).toContain("1.2");
+    } finally { release(); clock.mockRestore(); }
+  });
   it("synthesizes a final answer from tool data without replaying tool protocol", async () => {
     render([
       { id: "food", kind: "event", title: "饮食记录", date: "2026-09-18", allDay: true, category: "personal", color: "#77787b", createdAt: "2026-09-18T12:00:00.000Z" },
@@ -100,7 +134,9 @@ describe("AI advisor model tool workflow", () => {
     expect(requests).toHaveLength(2);
     const first = vi.mocked(requestAICompletion).mock.calls[0];
     expect(first[4]?.tools?.map((tool) => tool.function.name)).toContain("search_entries");
-    expect(first[4]).toMatchObject({ maxTokens: 1024, disableReasoning: true });
+    // One streaming request decides and answers; nothing caps a direct reply.
+    expect(first[4]).toMatchObject({ stream: true, disableReasoning: true });
+    expect(first[4]?.maxTokens).toBeGreaterThanOrEqual(8192);
     expect(first[1].at(-1)?.content).toContain("饮食");
 
     const second = requests[1];
@@ -109,10 +145,12 @@ describe("AI advisor model tool workflow", () => {
     expect(second[0].content).not.toContain("旧记录");
     expect(second[0].content).toContain("Retrieval is complete");
 
-    const trace = host.querySelector(".chat-tool-trace")!;
-    expect(trace.textContent).toContain("检索条目");
-    expect(trace.textContent).toContain("饮食");
-    expect(trace.textContent).toContain("1 条记录");
+    const process = host.querySelector(".chat-process")!;
+    expect(process.textContent).toContain("需要查询本地记录");
+    expect(process.textContent).toContain("检索条目");
+    expect(process.textContent).toContain("饮食");
+    expect(process.textContent).toContain("1 条记录");
+    expect(process.querySelectorAll(".chat-process-step.is-active")).toHaveLength(0);
     expect(host.textContent).toContain("Tool answer.");
   });
 
@@ -140,8 +178,29 @@ describe("AI advisor model tool workflow", () => {
     expect(messages[0].content).not.toContain("旧早餐");
     expect(messages[0].content).toContain("\"duration_minutes\":20");
     expect(messages[0].content).toContain("kinds=event=1");
-    expect(host.querySelector(".chat-tool-trace")?.textContent).toContain("检索条目");
+    expect(host.querySelector(".chat-process")?.textContent).toContain("检索条目");
     expect(host.textContent).toContain("Planned answer.");
+  });
+
+  it("streams a direct answer from the single tool-enabled request", async () => {
+    vi.mocked(requestAICompletion).mockImplementationOnce(async (_provider, _messages, _schema, _signal, options) => {
+      options?.onProgress?.({ content: "直接", reasoning: "" });
+      return { content: "直接回答。" };
+    });
+    render([]);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    const textarea = host.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
+    act(() => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "你好"); textarea.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => { host.querySelector<HTMLButtonElement>(".chat-send")!.click(); await new Promise((resolve) => setTimeout(resolve, 30)); });
+
+    expect(requestAICompletion).toHaveBeenCalledTimes(1);
+    const options = vi.mocked(requestAICompletion).mock.calls[0][4];
+    expect(options).toMatchObject({ stream: true });
+    expect(options?.tools?.length).toBeGreaterThan(0);
+    expect(host.textContent).toContain("直接回答。");
+    const process = host.querySelector(".chat-process")!;
+    expect(process.textContent).toContain("无需查询，直接回答");
+    expect(process.querySelectorAll(".chat-process-step.is-done")).toHaveLength(2);
   });
 });
 
@@ -179,7 +238,7 @@ it("shows tool results and live answer text before saving the completed message"
  await act(async()=>{host.querySelector<HTMLButtonElement>(".chat-send")!.click();await new Promise(resolve=>setTimeout(resolve,30));});
  expect(host.querySelector(".is-busy")?.textContent).toContain("正在生成的回答");
  expect(host.querySelector(".is-busy")?.textContent).toContain("正在整理回答");
- expect(host.querySelector(".chat-tool-trace")).not.toBeNull();
+ expect(host.querySelector(".chat-process-step.is-done")).not.toBeNull();
  const conversation=(await store.listConversations())[0];
  expect((await store.listMessages(conversation.id)).map(message=>message.role)).toEqual(["user"]);
  await act(async()=>{finish({content:"完整回答"});await new Promise(resolve=>setTimeout(resolve,30));});

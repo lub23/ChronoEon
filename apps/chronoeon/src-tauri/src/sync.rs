@@ -24,6 +24,10 @@ pub struct PublishResult { conflict: bool }
 trait SyncBackend {
     fn fetch_index(&mut self) -> Result<BackendHead, String>;
     fn read_object(&mut self, path: &str) -> Result<Vec<u8>, String>;
+    /// Several objects, in the given order; backends may fetch them concurrently.
+    fn read_objects(&mut self, paths: &[String]) -> Result<Vec<Vec<u8>>, String> {
+        paths.iter().map(|path| self.read_object(path)).collect()
+    }
     fn publish(&mut self, expected: Option<&str>, manifest: &[u8], objects: &[EncodedObject], deletes: &[String]) -> Result<PublishResult, String>;
 }
 #[derive(Serialize, Deserialize)]
@@ -108,17 +112,18 @@ pub fn fetch_files(config: &TransportConfig, root: &Path, images: &Path, known: 
     let Some(bytes) = remote.bytes else { return Ok(FetchResult { head: remote.head, index: None, documents: vec![] }); };
     if bytes.len() > MAX_INDEX_BYTES { return Err("SYNC_INDEX_TOO_LARGE".into()); }
     let index: Value = serde_json::from_slice(&bytes).map_err(|_| "SYNC_INVALID_INDEX")?;
+    // Documents and photos new to this device download a few at a time; the
+    // manifest order is preserved for the engine.
+    let wanted: Vec<ObjectRef> = refs(&index)?.into_iter().filter(|object| known.get(&object.path) != Some(&object.hash)).collect();
+    let paths: Vec<String> = wanted.iter().map(|object| object.path.clone()).collect();
     let mut documents = Vec::new();
-    for object in refs(&index)? {
-        if known.get(&object.path) == Some(&object.hash) { continue; }
-        let bytes = backend.read_object(&object.path)?;
+    for (object, bytes) in wanted.into_iter().zip(backend.read_objects(&paths)?) {
         documents.push(Document { content: decode_document(&bytes, &object.hash)?, path: object.path, hash: object.hash });
     }
-    for hash in image_hashes(&index)? {
-        let path = images.join(format!("{hash}.webp"));
-        if attachments::read(images, &hash).is_ok() { continue; }
-        let bytes = backend.read_object(&format!("attachments/{hash}.webp"))?;
-        attachments::validate(&bytes, &hash)?; super::write_bytes_atomic(&path, &bytes)?;
+    let missing: Vec<String> = image_hashes(&index)?.into_iter().filter(|hash| attachments::read(images, hash).is_err()).collect();
+    let paths: Vec<String> = missing.iter().map(|hash| format!("attachments/{hash}.webp")).collect();
+    for (hash, bytes) in missing.into_iter().zip(backend.read_objects(&paths)?) {
+        attachments::validate(&bytes, &hash)?; super::write_bytes_atomic(&images.join(format!("{hash}.webp")), &bytes)?;
     }
     Ok(FetchResult { head: remote.head, index: Some(index), documents })
     };

@@ -179,8 +179,12 @@ describe("unified capture and ask dialog", () => {
 
     expect(host.querySelectorAll(".capture-review-card")).toHaveLength(3);
     expect(host.textContent).toContain("已解析，请核对");
-    expect(document.querySelector(".chat-kind-chip.is-event")).toBeTruthy();
-    expect(document.querySelector(".chat-kind-chip.is-bill")).toBeTruthy();
+    // The summary reads as plain text: no private kind markup leaks into the thread.
+    const summary = host.querySelector(".chat-message--assistant .chat-rich")!;
+    expect(summary.textContent).not.toContain("[[kind:");
+    expect(summary.textContent).toContain("事件");
+    expect(summary.textContent).toContain("账目");
+    expect(summary.textContent).toContain("任务");
   });
 
   it("switches between Capture and Ask without opening a second dialog", async () => {
@@ -367,12 +371,12 @@ describe("unified capture and ask dialog", () => {
 
     const entry = host.querySelector(".chat-conversation-open")!;
     // The title drops the old mode prefix.
-    expect(entry.querySelector("strong")?.textContent).toBe("买菜");
+    expect(entry.querySelector(".chat-conversation-title")?.textContent).toBe("买菜");
     // The history entry leads with the composer's symbol instead of a word.
     const badge = entry.querySelector(".chat-mode-badge.is-capture")!;
     expect(badge.getAttribute("title")).toBe("随心记");
     expect(badge.querySelector("svg")).toBeTruthy();
-    expect(entry.querySelector("strong")?.firstElementChild).toBe(badge);
+    expect(entry.firstElementChild).toBe(badge);
     expect(entry.querySelector("small")?.textContent).not.toContain("some-model");
     expect(entry.querySelector("small")?.textContent).toMatch(/\d{2}:\d{2}/);
   });
@@ -441,7 +445,9 @@ describe("unified capture and ask dialog", () => {
 
 it("only offers record context in ask mode", () => {
   render();
-  expect(document.querySelector('.chat-tool[aria-expanded]')).toBeNull();
+  // Capture has its own syntax helper; the record-context picker stays Ask-only.
+  expect(document.querySelector('.chat-tool[aria-label="本地上下文"]')).toBeNull();
+  expect(document.querySelector('.chat-tool[aria-label="快捷语法"]')).not.toBeNull();
 
 });
 

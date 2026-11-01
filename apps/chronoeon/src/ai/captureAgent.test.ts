@@ -7,8 +7,21 @@ const record = (title: string): Entry => ({ id: title, title, kind: "bill", cate
 describe("AI capture", () => {
   it("bounds and deduplicates representative habits without copying financial facts", () => {
     const examples = captureExamples([record("coffee"), record("coffee"), ...Array.from({length: 30}, (_,i) => record(`meal ${i}`))], "coffee");
-    expect(examples).toHaveLength(16); expect(examples[0].title).toBe("coffee");
+    // Ten query-matched examples are enough once the habit profile carries the
+    // global picture; the first one is the closest match.
+    expect(examples).toHaveLength(10); expect(examples[0].title).toBe("coffee");
     expect(examples[0]).not.toHaveProperty("amount"); expect(examples[0]).not.toHaveProperty("date");
+  });
+  it("tells the model what the user usually records and how to read 'now'", async () => {
+    const settings = createDefaultSettings();
+    vi.mocked(requestAICompletion).mockResolvedValue({ content: JSON.stringify({entries:[{ kind:"event",title:"午饭",date:"2026-10-26",allDay:false,start:"12:15",end:"12:30",endDate:null,category:"" }]}) });
+    const lunch = (date: string): Entry => ({ id: date, title: "午饭", kind: "event", category: "food", location: "双清园", date, start: "12:00", end: "12:40", color: "#2877B5", createdAt: `${date}T04:00:00Z` });
+    const entries = ["2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25"].map(lunch);
+    await parseAICapture({ provider: { id:"test",name:"Test",preset:"compatible",kind:"openai-compatible",baseUrl:"https://example.test/v1",model:"test" }, text:"现在到十二点半 午饭",images:[],entries,settings,locale:"zh",signal:new AbortController().signal });
+    const system = String(vi.mocked(requestAICompletion).mock.calls.at(-1)![1][0].content);
+    expect(system).toContain("午饭 → 事件/food · 12:00+40min · @双清园 (×6)");
+    expect(system).toContain('"现在"/"now" means the current clock time');
+    expect(system).toContain("Habits are defaults for fields the text leaves open");
   });
   it("sends image-only input and preliminary fields through the active provider with schema validation", async () => {
     const settings = createDefaultSettings();

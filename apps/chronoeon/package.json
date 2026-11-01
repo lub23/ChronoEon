@@ -1,6 +1,6 @@
 {
   "name": "@chronoeon/app",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "ChronoEon (时元) primary Tauri application for desktop and future mobile shells.",
   "type": "module",
@@ -15,6 +15,7 @@
     "tauri:build": "tauri build",
     "verify:windows": "node scripts/verify-windows.mjs",
     "android:apk": "node scripts/build-android.mjs",
+    "windows:build": "node scripts/build-windows.mjs",
     "icons:generate": "tauri icon public/app-icon.json --output src-tauri/icons && node scripts/sync-icons.mjs",
     "icons:sync": "node scripts/sync-icons.mjs",
     "test:sync-native": "node scripts/verify-sync.mjs"

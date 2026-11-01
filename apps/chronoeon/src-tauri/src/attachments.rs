@@ -41,8 +41,15 @@ fn decode(bytes: &[u8], file_name: Option<&str>) -> Result<(DynamicImage, bool),
     Ok((image, text_image))
 }
 fn encode(image: &DynamicImage, text_image: bool, max_bytes: usize, edges: &[u32]) -> Result<EncodedPhoto, String> {
+    // The expensive Lanczos pass runs once, from the original to the largest
+    // edge; every smaller candidate is derived from the previous result, which
+    // is a fraction of the work and visually identical at these sizes.
+    let mut previous: Option<DynamicImage> = None;
     for &edge in edges {
-        let scaled = if image.width().max(image.height()) > edge { image.resize(edge, edge, FilterType::Lanczos3) } else { image.clone() };
+        let scaled = match previous.take() {
+            None => if image.width().max(image.height()) > edge { image.resize(edge, edge, FilterType::Lanczos3) } else { image.clone() },
+            Some(smaller) => if smaller.width().max(smaller.height()) > edge { smaller.resize(edge, edge, FilterType::Triangle) } else { smaller },
+        };
         let (width, height) = scaled.dimensions();
         let rgba = scaled.to_rgba8(); let encoder = webp::Encoder::from_rgba(&rgba, width, height);
         // Screenshots/line art first try lossless at full resolution; photos do
@@ -51,11 +58,18 @@ fn encode(image: &DynamicImage, text_image: bool, max_bytes: usize, edges: &[u32
             let encoded = encoder.encode_lossless().to_vec();
             if encoded.len() <= max_bytes { return Ok(EncodedPhoto { bytes: encoded, width, height }); }
         }
-        let qualities: &[f32] = if text_image { &[90.,85.,80.,75.,70.,65.,60.,55.,50.] } else { &[80.,75.,70.,65.,60.,55.,50.] };
-        for quality in qualities {
-            let encoded = encoder.encode(*quality).to_vec();
+        // Output size tracks quality closely enough that each miss predicts the
+        // next attempt; two or three encodes replace a fixed nine-step ladder.
+        let floor: f32 = 50.0;
+        let mut quality: f32 = if text_image { 90.0 } else { 80.0 };
+        loop {
+            let encoded = encoder.encode(quality).to_vec();
             if encoded.len() <= max_bytes { return Ok(EncodedPhoto { bytes: encoded, width, height }); }
+            if quality <= floor { break; }
+            let ratio = (max_bytes as f32 / encoded.len() as f32).sqrt();
+            quality = (quality * ratio).min(quality - 5.0).max(floor).floor();
         }
+        previous = Some(scaled);
     }
     Err("PHOTO_CANNOT_MEET_SIZE_LIMIT".into())
 }

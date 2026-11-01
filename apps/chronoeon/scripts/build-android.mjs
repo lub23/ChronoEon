@@ -4,8 +4,8 @@
  *
  * Tauri's own `tauri android build` drives Gradle, and Gradle's rust task
  * re-enters npm with `--release --target`, which npm 11+ rejects as unknown
- * config flags. This script runs the same three steps directly and stops before
- * signing unless a keystore is given:
+ * config flags. This script runs the same three steps directly and signs with
+ * the supplied keystore or the local debug key:
  *
  *   1. build the frontend            (vite, embedded into the Rust library)
  *   2. build the Rust library        (cargo, aarch64-linux-android, custom protocol)
@@ -19,9 +19,6 @@
  *                                    signed with the debug key so it installs
  *   CHRONOEON_KEYSTORE_PASSWORD      store + key password   (default: android)
  *   CHRONOEON_KEY_ALIAS              key alias              (default: androiddebugkey)
- *   CHRONOEON_SKIP_CARGO=1           reuse the existing Rust library. Needed when
- *                                    `perl` is absent: Android vendors OpenSSL, whose
- *                                    Configure step is a Perl script.
  *
  * Usage: npm run android:apk
  */
@@ -30,6 +27,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync,
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { windowsToolchain, gitPerlDirectory } from "./windows-toolchain.mjs";
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriRoot = join(appRoot, "src-tauri");
 const androidRoot = join(tauriRoot, "gen", "android");
@@ -40,11 +38,6 @@ const androidLibrary = "chronoeon_lib";
 const kotlinOutputDir = join(projectRoot, "app", "src", "main", "java", ...androidIdentifier.split("."), "generated");
 const buildRoot = join(appRoot, "..", "..", ".build", "android");
 const distRoot = join(appRoot, "dist");
-const frontendRoots = [
-  join(appRoot, "index.html"),
-  join(appRoot, "src"),
-  join(appRoot, "public"),
-].filter(existsSync);
 
 const sdkRoot = process.env.ANDROID_HOME ?? process.env.ANDROID_SDK_ROOT ?? "D:\\Android\\Sdk";
 const javaHome = process.env.JAVA_HOME ?? "";
@@ -65,11 +58,11 @@ const clang = process.env[`CC_${target}`] ?? (process.platform === "win32" ? cla
 if (!existsSync(clang)) fail(`No NDK clang at ${clang}`);
 
 const env = {
-  ...process.env,
+  ...windowsToolchain(),
   ANDROID_HOME: sdkRoot,
   ANDROID_SDK_ROOT: sdkRoot,
   NDK_HOME: ndkRoot,
-  ...(javaHome ? { JAVA_HOME: javaHome, PATH: `${join(javaHome, "bin")}${delimiter()}${process.env.PATH ?? ""}` } : {}),
+  ...(javaHome ? { JAVA_HOME: javaHome } : {}),
   [`CC_${target}`]: clang,
   [`CXX_${target}`]: process.env[`CXX_${target}`] ?? clangBinary,
   [`AR_${target}`]: process.env[`AR_${target}`] ?? posixPath(join(toolchain, "llvm-ar" + exeSuffix)),
@@ -81,22 +74,19 @@ const env = {
   WRY_ANDROID_LIBRARY: androidLibrary,
   WRY_ANDROID_KOTLIN_FILES_OUT_DIR: kotlinOutputDir,
 };
-if (process.env.CHRONOEON_PERL) env.PATH = `${process.env.CHRONOEON_PERL}${delimiter()}${env.PATH}`;
+const perlDirectory = process.env.CHRONOEON_PERL || gitPerlDirectory();
+env.PATH = [javaHome && join(javaHome, "bin"),
+  process.platform === "win32" && join(ndkRoot, "prebuilt", "windows-x86_64", "bin"), env.PATH, perlDirectory]
+  .filter(Boolean).join(delimiter());
 
 mkdirSync(kotlinOutputDir, { recursive: true });
 writeTauriProperties();
 
 step("Frontend build", "npm", ["run", "build"], appRoot);
 const library = join(tauriRoot, "target", target, "release", `libchronoeon_lib.so`);
-if (process.env.CHRONOEON_SKIP_CARGO === "1") {
-  if (!existsSync(library) || statSync(library).mtimeMs < Math.max(...frontendRoots.map(newestMtime))) {
-    fail("`CHRONOEON_SKIP_CARGO=1` cannot reuse a Rust library older than frontendDist; " +
-      "Tauri release embeds the frontend in that library.");
-  }
-  console.log("\n▸ Rust library\n  skipped (CHRONOEON_SKIP_CARGO=1): reusing the built library");
-} else if (!process.env.CHRONOEON_PERL && !hasCommand("perl")) {
+if (!hasCommand("perl")) {
   fail("`perl` is not on PATH. The Rust library vendors OpenSSL, whose Configure step is a Perl script.\n"
-    + "  Install Strawberry Perl, set CHRONOEON_PERL to its bin folder, or set CHRONOEON_SKIP_CARGO=1 to repackage the existing library.");
+    + "  Install Perl or set CHRONOEON_PERL to its bin folder. / 请安装 Perl 或设置 CHRONOEON_PERL。");
 } else {
   // cargo does not track Android-only build-script environment. On a fresh
   // release checkout, tauri.settings.gradle is absent, so force Tauri to
@@ -106,7 +96,7 @@ if (process.env.CHRONOEON_SKIP_CARGO === "1") {
   }
   // The custom-protocol feature tells Tauri to load embedded assets. Without it,
   // a direct cargo release build still tries the development URL at runtime.
-  step("Rust library", "cargo", ["build", "--release", "--target", target, "--features", "custom-protocol"], tauriRoot);
+  step("Rust library", "cargo", ["build", "--locked", "--lib", "--release", "--target", target, "--features", "custom-protocol"], tauriRoot);
 }
 
 console.log("\n▸ Android assets");
@@ -141,11 +131,15 @@ if (!existsSync(keystore)) {
     "-storepass", password, "-keypass", password, "-dname", "CN=ChronoEon, OU=Local, O=ChronoEon, C=CN",
   ], androidRoot);
 }
-const output = process.env.CHRONOEON_APK_OUTPUT ?? join(buildRoot, `chronoeon-arm64-${stamp()}.apk`);
+const output = resolve(process.env.CHRONOEON_APK_OUTPUT ?? join(buildRoot, `ChronoEon-${tauriConfig.version}-arm64.apk`));
+mkdirSync(dirname(output), { recursive: true });
 run(join(buildTools, process.platform === "win32" ? "apksigner.bat" : "apksigner"), [
   "sign", "--ks", keystore, "--ks-pass", `pass:${password}`, "--key-pass", `pass:${password}`,
   "--ks-key-alias", alias, "--out", output, aligned,
 ], androidRoot);
+run(join(buildTools, process.platform === "win32" ? "apksigner.bat" : "apksigner"), ["verify", "--verbose", output], androidRoot);
+rmSync(aligned, { force: true });
+rmSync(`${output}.idsig`, { force: true });
 
 console.log(`\nAPK ready: ${output} (${(statSync(output).size / 1024 / 1024).toFixed(1)} MB)`);
 
@@ -164,31 +158,13 @@ function gradleWrapper() {
 }
 function newestDirectory(root) {
   if (!existsSync(root)) return "";
-  const versions = readdirSync(root).filter((name) => statSync(join(root, name)).isDirectory()).sort();
+  const versions = readdirSync(root).filter((name) => statSync(join(root, name)).isDirectory())
+    .sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
   return versions.length ? join(root, versions[versions.length - 1]) : "";
 }
 function hasCommand(name) {
-  const result = spawnSync(name, ["--version"], { stdio: "ignore", shell: process.platform === "win32" });
+  const result = spawnSync(name, ["--version"], { env, stdio: "ignore", shell: process.platform === "win32" });
   return result.status === 0;
-}
-function newestMtime(path) {
-  const stat = statSync(path);
-  if (!stat.isDirectory()) return stat.mtimeMs;
-  let newest = 0;
-  const pending = [path];
-  while (pending.length) {
-    const folder = pending.pop();
-    for (const entry of readdirSync(folder, { withFileTypes: true })) {
-      const path = join(folder, entry.name);
-      if (entry.isDirectory()) pending.push(path);
-      else newest = Math.max(newest, statSync(path).mtimeMs);
-    }
-  }
-  return newest;
-}
-function stamp() {
-  const now = new Date();
-  return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
 }
 function syncAndroidAssets() {
   if (!existsSync(join(distRoot, "index.html"))) fail("Missing frontend build output; run the frontend build first.");

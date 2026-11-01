@@ -1,6 +1,6 @@
 {
   "name": "chronoeon-workspace",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "ChronoEon (时元) — a calm, local-first calendar and entries app.",
   "workspaces": [
@@ -16,6 +16,7 @@
     "tauri:dev": "npm run tauri:dev --workspace @chronoeon/app",
     "tauri:build": "npm run tauri:build --workspace @chronoeon/app",
     "android:apk": "npm run android:apk --workspace @chronoeon/app",
+    "windows:build": "npm run windows:build --workspace @chronoeon/app --",
     "verify:windows": "npm run verify:windows --workspace @chronoeon/app",
     "check": "npm run check:shared && npm run build && npm run test:shared && npm run test:storage && npm run test:app",
     "test:shared": "npm run test --workspace @chronoeon/domain && npm run test --workspace @chronoeon/markdown",

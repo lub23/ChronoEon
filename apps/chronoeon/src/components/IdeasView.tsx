@@ -1,5 +1,5 @@
 import "./items.css";
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { format, formatDistanceToNow, parseISO } from "date-fns";
 import { enUS, zhCN } from "date-fns/locale";
 import { resolveEntryColors, type ChronoEonSettings } from "@chronoeon/domain";
@@ -75,6 +75,22 @@ export function IdeasView({ entries, locale, settings, search, today, onEdit, on
     return () => observer.disconnect();
   }, [ideas, locale, grouped, direction, sortField]);
 
+  // The sticky nav tracks the group under the reader, so the vine itself no
+  // longer carries a second label box per section.
+  const [activeGroup, setActiveGroup] = useState(0);
+  const groupCount = orderedGroups.length;
+  useEffect(() => {
+    if (!grouped || typeof IntersectionObserver === "undefined") return;
+    const sections = Array.from({ length: groupCount }, (_, index) => document.getElementById(`idea-group-${index}`))
+      .filter((node): node is HTMLElement => node instanceof HTMLElement);
+    const observer = new IntersectionObserver((records) => {
+      const topmost = records.filter((record) => record.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (topmost) setActiveGroup(Number(topmost.target.id.replace("idea-group-", "")));
+    }, { rootMargin: "-15% 0px -70% 0px" });
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, [grouped, groupCount, ideas]);
+
   const ideaCard = (entry: Entry, index: number) => {
     const colors = resolveEntryColors(entry, settings);
     const calendar = calendarDisplayName(calendarNameFor(entry, settings), locale);
@@ -133,11 +149,11 @@ export function IdeasView({ entries, locale, settings, search, today, onEdit, on
           <button type="button" className="primary-button items-add-button" aria-label={t("newEntry", locale)} onClick={onNew}><Icon name="plus" size={16} /></button>
         </div>
       </header>
-      {grouped && <nav className="idea-category-nav" aria-label={t("viewGrouped", locale)}>{orderedGroups.map(([label], index) => <button key={label} type="button" onClick={() => document.getElementById(`idea-group-${index}`)?.scrollIntoView({ block: "start" })}>{label}</button>)}</nav>}
+      {grouped && <nav className="idea-category-nav" aria-label={t("viewGrouped", locale)}>{orderedGroups.map(([label, group], index) => <button key={label} type="button" className={index === activeGroup ? "is-active" : undefined} aria-current={index === activeGroup || undefined} onClick={() => { setActiveGroup(index); document.getElementById(`idea-group-${index}`)?.scrollIntoView({ block: "start", behavior: "smooth" }); }}>{label}<small>{group.length}</small></button>)}</nav>}
 
       {ideas.length ? (
         <>
-          {grouped ? orderedGroups.map(([label, group], index) => <section className="idea-group" id={`idea-group-${index}`} key={label}><h3 className="idea-vine-label"><span>{label}</span><small>{group.length}</small></h3><div className="ideas-vine">{group.map(ideaCard)}</div></section>) : <div ref={board} className="ideas-vine ideas-masonry">{sorted.map(ideaCard)}</div>}
+          {grouped ? orderedGroups.map(([label, group], index) => <section className="idea-group" id={`idea-group-${index}`} key={label}><h3 className="idea-group-title">{label}</h3><div className="ideas-vine">{group.map(ideaCard)}</div></section>) : <div ref={board} className="ideas-vine ideas-masonry">{sorted.map(ideaCard)}</div>}
         </>
       ) : query ? (
         <div className="ideas-empty panel" role="status">

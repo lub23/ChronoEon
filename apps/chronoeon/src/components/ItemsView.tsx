@@ -134,7 +134,7 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
     {visible.length === 0 ? <p className="stats-card panel stats-empty" role="status">{search.trim()
       ? <>{t("itemsSearchEmpty", locale)} {t("itemsSearchHint", locale)}</>
       : t(history ? "itemsHistoryEmpty" : "itemsEmpty", locale)}</p> : <ul className="item-list">
-      {[...groups].sort(([a], [b]) => a.localeCompare(b, locale)).map(([label, group]) => <Fragment key={label}>{grouped && <li className="view-group-title">{label}</li>}{group.map(item => {
+      {[...groups].sort(([a], [b]) => a.localeCompare(b, locale)).map(([label, group]) => <Fragment key={label}>{grouped && <li className="view-group-title"><span>{label}</span><small>{group.length}</small></li>}{group.map(item => {
         const category = itemCategoryConfig(item.category, settings, item.calendarId);
         const calendarName = calendarNameFor(item);
         return <li key={item.id} className="item-card panel" style={{ "--item-category": category?.color ?? "var(--accent)", "--item-calendar": selectedCalendar(settings, item.calendarId).color } as React.CSSProperties}>

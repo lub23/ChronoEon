@@ -1,3 +1,23 @@
+# ChronoEon 0.1.2 / 时元 0.1.2
+
+- Fix Ask elapsed time: stop at stream completion, exclude local persistence, and use a monotonic clock. Browser, desktop and Android stop reading at `[DONE]` without waiting for HTTP EOF; trailing token usage is retained.
+- Show streamed reasoning, tool calls and expandable results in a collapsible process card. Resolve relative date ranges on the device before querying records.
+- Improve capture of current-time ranges, cross-midnight times and meals; use local record habits and include notes in draft summaries.
+- Improve mobile conversation drawers and image paste; reuse compressed WebP, speed up native image compression and transfer WebDAV objects with four concurrent requests.
+- Refine idea/item groups, category details, batch-replace filters and transitions; add four light/dark accent palettes.
+- Restore reproducible local Windows/APK commands with automatic installed-toolchain discovery, APK signature verification and one output per version.
+- Refresh build and recovery documentation; remove obsolete Git-sync, certificate-bundle and legacy Android-numbering claims. User-data schema and existing records are unchanged.
+
+- 修复随心问耗时：使用单调时钟，流式回复完成即停止计时，排除本地保存；浏览器、桌面和 Android 收到 `[DONE]` 即结束读取，不再等待 HTTP 连接关闭，并保留结束前的 token 用量。
+- 流式展示思考、工具调用与可展开结果，完成后折叠过程卡片；在本机计算相对日期范围，再检索记录。
+- 完善随心记当前时间范围、跨午夜及用餐时间解析，参考本地历史习惯，草稿摘要补充备注。
+- 优化手机对话侧栏与图片粘贴，复用压缩 WebP，加快原生图片压缩，WebDAV 对象以四并发传输。
+- 调整灵感/物品分组、分类明细、批量替换筛选与切换过渡，新增四组明暗主题色。
+- 保留 Windows/APK 本地手动构建与调试命令，自动发现已安装工具链，验证 APK 签名，同版本输出覆盖。
+- 更新构建和同步排障文档，删除过时 Git 同步、证书包与 Android 历史编号说明；用户数据结构和已有记录不变。
+
+---
+
 # ChronoEon 0.1.1 / 时元 0.1.1
 
 - Edit AI providers inline; preserve common fields when changing type, mark required fields and validate before saving.
@@ -23,10 +43,10 @@
 - **收支与物品**：收支分类、支付方式、统计与热力图；物品照片、金额、地点与备注管理。
 - **智能助手**：离线自然语言快速录入；可选自定义 AI 服务，识别文字和图片生成待确认草稿，随心问结合本地记录检索并流式回答。
 - **搜索与整理**：全局搜索、多条件筛选、跨条目及物品的批量替换预览、操作历史与恢复。
-- **数据与同步**：SQLite 本地存储，Git / WebDAV 跨设备同步、冲突保留、快照与回收站；条目 CSV 和设置 JSON 导入导出。
+- **数据与同步**：SQLite 本地存储，WebDAV 跨设备同步、冲突保留、快照与回收站；条目 CSV 和设置 JSON 导入导出。
 - **个性化**：简体中文 / English、明暗主题，适配桌面和手机。
 
-下载下方对应平台的安装包。Windows 提供 exe / MSI，macOS 提供通用 DMG，Linux 提供 AppImage / deb / rpm，Android 提供 arm64 APK。
+下载下方对应平台的安装包。Windows 提供 exe / MSI，macOS 提供通用 DMG，Linux 提供 AppImage / deb，Android 提供 arm64 APK。
 
 ---
 
@@ -37,7 +57,7 @@ ChronoEon is a local-first app for schedules, tasks, journals, ideas, expenses a
 - **Expenses and belongings**: income/expense categories, payment methods, statistics and heatmaps; item photos, costs, locations and notes.
 - **AI assistance**: offline natural-language capture; optional custom AI providers for text/image drafts and streamed answers grounded in local record searches. Review drafts before saving.
 - **Search and organization**: global search, filters, reviewed batch replacements across entries and items, recoverable operation history.
-- **Data and sync**: local SQLite storage; Git / WebDAV synchronization, preserved conflicts, snapshots and Recycle Bin; CSV entry and JSON settings import/export.
+- **Data and sync**: local SQLite storage; WebDAV synchronization, preserved conflicts, snapshots and Recycle Bin; CSV entry and JSON settings import/export.
 - **Personalization**: English / Simplified Chinese, light/dark themes and desktop/mobile layouts.
 
-Choose an installer below: Windows exe / MSI, universal macOS DMG, Linux AppImage / deb / rpm, or Android arm64 APK.
+Choose an installer below: Windows exe / MSI, universal macOS DMG, Linux AppImage / deb, or Android arm64 APK.
