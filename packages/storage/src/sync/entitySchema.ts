@@ -1,6 +1,6 @@
 import type { EntityKind } from "./protocol";
 
-export const ENTITY_TABLES: Record<Exclude<EntityKind, "settings">, { table: string; columns: string[] }> = {
+export const ENTITY_TABLES: Record<Exclude<EntityKind, "settings" | "place">, { table: string; columns: string[] }> = {
   entry: { table: "entries", columns: ["modality", "title", "title_zh", "note", "status", "done_at", "cancelled_at", "priority", "urgency", "location", "date", "start_time", "end_time", "end_date", "all_day", "amount", "currency", "category", "payment", "calendar", "color", "recurrence", "recurring_days", "recurring_end", "recurrence_exceptions", "recurrence_moves", "reminder", "created_at", "updated_at"] },
   asset: { table: "items", columns: ["name", "calendar", "category", "acquisition", "acquired_on", "acquired_at", "cost", "currency", "location", "payment", "purchase_entry_id", "disposal", "disposed_on", "disposed_at", "sale_amount", "sale_entry_id", "images_json", "notes", "tags_json", "created_at", "updated_at"] },
   attachment: { table: "attachments", columns: ["entry_id", "sha256", "kind", "width", "height", "bytes", "mime", "caption", "sort", "created_at"] },

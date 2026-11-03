@@ -19,8 +19,16 @@ const errors: Record<string, MessageKey> = {
   SYNC_FORBIDDEN: "syncForbidden", SYNC_UNAUTHORIZED: "syncUnauthorized",
 };
 function fieldLabel(conflict: SyncConflict, locale: Locale): string {
+  if (conflict.entity === "place" && conflict.field === "fix") return locale === "zh" ? "经纬度与定位状态" : "Coordinates and location status";
   const labels: Record<string, MessageKey> = { $exists: "syncExistence", title: "title", note: "note", status: "syncTodoStatus", content: "syncMessageContent" };
   return labels[conflict.field] ? t(labels[conflict.field], locale) : `${t("syncField", locale)}: ${conflict.field}`;
+}
+function conflictValue(conflict: SyncConflict, value: SyncConflict["versions"][number]["value"], locale: Locale): string {
+  if (conflict.entity === "place" && conflict.field === "fix" && Array.isArray(value)) {
+    const zh = locale === "zh";
+    return `${zh ? "经度" : "Longitude"}: ${value[0] ?? "—"}\n${zh ? "纬度" : "Latitude"}: ${value[1] ?? "—"}\n${value[2] === -1 ? (zh ? "已从地图排除" : "Excluded from map") : `${zh ? "可信度" : "Confidence"}: ${value[2] ?? "—"}`}`;
+  }
+  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
 export function SyncSettingsPanel({ locale, config, onChange, service, entries }: Props) {
   const [notice, setNotice] = useState("");
@@ -149,12 +157,12 @@ export function SyncSettingsPanel({ locale, config, onChange, service, entries }
       <h4>{t("syncConflicts", locale)}</h4><p>{t("syncConflictHelp", locale)}</p>
       {service.conflicts.map((conflict) => {
         const key = `${conflict.entity}/${conflict.id}/${conflict.field}`;
-        const title = entries.find((entry) => entry.id === conflict.id)?.title ?? `${conflict.entity} · ${conflict.id.slice(0, 8)}`;
+        const title = conflict.entity === "place" ? conflict.id : entries.find((entry) => entry.id === conflict.id)?.title ?? `${conflict.entity} · ${conflict.id.slice(0, 8)}`;
         return <article className="sync-conflict" key={key}>
           <strong>{title} · {fieldLabel(conflict, locale)}</strong>
           <div>{conflict.versions.map((version) => <section key={version.operationId}>
             <small>{new Date(version.timestamp).toLocaleString(localeTag[locale])} · {version.deviceId.slice(0, 8)}</small>
-            <pre>{conflict.field === "$exists" ? t(version.value ? "syncKeepItem" : "syncDeleteItem", locale) : typeof version.value === "string" ? version.value : JSON.stringify(version.value, null, 2)}</pre>
+            <pre>{conflict.field === "$exists" ? t(version.value ? "syncKeepItem" : "syncDeleteItem", locale) : conflictValue(conflict, version.value, locale)}</pre>
             <button type="button" className="secondary-button" disabled={service.busy || Boolean(resolving)} onClick={async () => {
               setResolving(key); setNotice("");
               try { await service.resolve(conflict, version.operationId); }

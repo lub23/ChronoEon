@@ -16,6 +16,8 @@ export interface GeocodeQueue {
   loaded: boolean;
   pending: number;
   busy: boolean;
+  /** Refresh saved fixes after applying a remote sync or another window's writes. */
+  reload: () => Promise<void>;
   /** Keep the coordinates but take the address off the map. */
   exclude: (address: string) => Promise<void>;
   /** Forget the cached answer so the next tick asks the geocoder again. */
@@ -25,7 +27,7 @@ export interface GeocodeQueue {
 }
 
 /**
- * Background geocoder for every stored location. The cache table is the only
+ * Background geocoder for every stored location. The synchronized SQLite table is the only
  * state; this hook just finds addresses the cache does not know and asks for
  * them one at a time, spaced for the configured service's free rate limit, as
  * records change.
@@ -39,6 +41,15 @@ export function useGeocodeQueue(store: GeocodeStore | null, entries: readonly En
   const edits = useRef(new Map<string, number>());
   const configured = geocodeConfigured(config);
   const spacing = geocodeSpacingMs(config.provider);
+  const reload = useCallback(async () => {
+    if (!store) return;
+    const list = await store.all();
+    // A remote/manual fix supersedes any lookup still waiting on the network.
+    for (const key of new Set([...edits.current.keys(), ...list.map(row => row.address)])) edits.current.set(key, (edits.current.get(key) ?? 0) + 1);
+    failures.current.clear();
+    setRows(new Map(list.map(row => [row.address, row])));
+    setLoaded(true);
+  }, [store]);
 
   useEffect(() => {
     if (!store) return;
@@ -84,8 +95,11 @@ export function useGeocodeQueue(store: GeocodeStore | null, entries: readonly En
         const result = await geocodeAddress(config, address);
         if (!result || cancelled || revision !== (edits.current.get(address) ?? 0)) return;
         const row: GeocodeRow = { address, lng: result.ok ? result.lng : null, lat: result.ok ? result.lat : null, score: result.score, level: result.level, updatedAt: new Date().toISOString() };
-        await store.put(row);
-        if (!cancelled) setRows((current) => new Map(current).set(address, row));
+        const saved = await store.put(row, rows.get(address)?.updatedAt ?? null);
+        if (!cancelled) {
+          if (saved) setRows((current) => new Map(current).set(address, row));
+          else await reload();
+        }
       } catch (error) {
         console.warn("Geocoding failed", address, error);
         failures.current.set(address, Date.now());
@@ -95,7 +109,7 @@ export function useGeocodeQueue(store: GeocodeStore | null, entries: readonly En
       }
     }, wait);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [configured, config, missing, spacing, store]);
+  }, [configured, config, missing, spacing, store, reload, rows]);
 
   const places = useMemo(() => {
     const result = new Map<string, GeoPlace>();
@@ -140,5 +154,5 @@ export function useGeocodeQueue(store: GeocodeStore | null, entries: readonly En
     setRows((previous) => { const next = new Map(previous); next.delete(key); return next; });
   }, [store]);
 
-  return { places, precise, loaded, pending: configured ? missing.length : 0, busy, exclude, retry, cache };
+  return { places, precise, loaded, pending: configured ? missing.length : 0, busy, reload, exclude, retry, cache };
 }

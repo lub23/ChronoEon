@@ -1,7 +1,8 @@
 import { merge } from "node-diff3";
+import { normalizeAddress } from "@chronoeon/domain";
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-export type EntityKind = "entry" | "asset" | "attachment" | "conversation" | "message" | "settings";
+export type EntityKind = "entry" | "asset" | "attachment" | "conversation" | "message" | "settings" | "place";
 export type Clock = Record<string, number>;
 export type EntityData = Record<string, Json>;
 export interface SyncOperation {
@@ -32,7 +33,10 @@ export interface SyncConflict {
 }
 export const SETTINGS_ID = "00000000-0000-5000-8000-000000000001";
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const KINDS = new Set(["entry", "asset", "attachment", "conversation", "message", "settings"]);
+const KINDS = new Set(["entry", "asset", "attachment", "conversation", "message", "settings", "place"]);
+function validEntityId(entity: EntityKind, id: unknown): id is string {
+  return typeof id === "string" && (entity === "place" ? Boolean(id) && normalizeAddress(id) === id : UUID.test(id));
+}
 const EXISTS = "$exists";
 const TAG = "$tag:";
 export function stableJson(value: unknown): string {
@@ -137,7 +141,7 @@ function validClock(value: unknown): value is Clock {
 }
 export function validateOperation(value: unknown): asserts value is SyncOperation {
   const op = value as SyncOperation;
-  if (!op || op.version !== 1 || !UUID.test(op.operationId) || !UUID.test(op.id) || !UUID.test(op.deviceId)
+  if (!op || op.version !== 1 || !UUID.test(op.operationId) || !validEntityId(op.entity, op.id) || !UUID.test(op.deviceId)
     || !KINDS.has(op.entity) || !["create", "update", "delete", "attachment.add", "attachment.remove"].includes(op.op)
     || !Number.isSafeInteger(op.revision) || op.revision < 1 || !Number.isSafeInteger(op.sequence) || op.sequence < 1
     || !Number.isFinite(Date.parse(op.timestamp)) || !validClock(op.context)
@@ -148,7 +152,7 @@ export function validateOperation(value: unknown): asserts value is SyncOperatio
 }
 export function validateState(value: unknown): asserts value is EntityState {
   const state = value as EntityState;
-  if (!state || !UUID.test(state.id) || !KINDS.has(state.entity) || !validClock(state.clock)
+  if (!state || !validEntityId(state.entity, state.id) || !KINDS.has(state.entity) || !validClock(state.clock)
     || !Number.isSafeInteger(state.revision) || state.revision < 1 || !state.fields || !state.fields[EXISTS]) throw new Error("Invalid snapshot entity");
   for (const [field, versions] of Object.entries(state.fields)) {
     if (["__proto__", "constructor", "prototype"].includes(field) || !Array.isArray(versions) || !versions.length) throw new Error("Invalid snapshot field");

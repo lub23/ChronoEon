@@ -400,7 +400,7 @@ function App() {
         updateSettings(mergeSharedSettings(settings, payload.settings as Partial<ChronoEonSettings>));
       }
     },
-    onApplied: async () => { await sqliteEntries.reload(); await sqliteItems.reload(); setChatSyncVersion((value) => value + 1); },
+    onApplied: async () => { await sqliteEntries.reload(); await sqliteItems.reload(); await geocodes.reload(); setChatSyncVersion((value) => value + 1); },
     onMaintenance: async active => { ledgerBusyRef.current = active; if (active) await writeQueue.current; },
     onConflicts: (count) => notify(`${t("syncConflictNotice", locale)} (${count})`, "warning"),
   });
@@ -994,6 +994,7 @@ function App() {
     onSaved: (count) => {
       sqliteStoreRef.current?.notifyRebuilt();
       void sqliteItems.reload();
+      void geocodes.reload();
       if (count > 0) notify(`${count} ${t("smartCaptureCreated", locale)}`);
       void syncService.run();
     },

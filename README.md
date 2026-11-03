@@ -179,6 +179,8 @@ switch the APK from the debug key to yours.
   document in local storage.
 - Cross-device sync uses WebDAV over HTTPS; Git synchronization is no longer supported.
   / 跨设备同步使用 HTTPS WebDAV，已移除 Git 同步。 See [sync recovery / 同步排障](SYNC_RECOVERY.md).
+- Saved place coordinates (WGS84), manual corrections and map exclusions sync through the same journal and snapshots. Existing coordinates join sync on upgrade; geocoding credentials remain device-local. Upgrade every device to 0.1.3 before using place sync.
+  / 已保存的 WGS84 地点坐标、手动修正与地图排除状态随日志和快照同步；升级后自动纳入已有坐标，地图服务凭据仍仅限本机。使用地点同步前请将所有设备升级至 0.1.3。
 - WebDAV uploads after 15 seconds without edits and checks peers every five minutes.
   / WebDAV 停止编辑 15 秒后上传，每 5 分钟检查其他设备。
 - Android timing runs in a separate native process; reminders use system alarms.

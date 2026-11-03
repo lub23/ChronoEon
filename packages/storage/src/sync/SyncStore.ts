@@ -271,7 +271,7 @@ export class SyncStore {
       const children = await this.db.select<{entity: EntityKind; id: string}>("SELECT entity,id FROM sync_links WHERE parent_entity=? AND parent_id=?", [parent.entity,parent.id]);
       for (const child of children) if (!affected.has(`${child.entity}/${child.id}`)) { affected.set(`${child.entity}/${child.id}`,child); pending.push(child); }
     }
-    const order: EntityKind[] = ["entry", "asset", "conversation", "attachment", "message", "settings"];
+    const order: EntityKind[] = ["entry", "asset", "conversation", "attachment", "message", "settings", "place"];
     const keys = [...affected.values()].sort((a,b) => order.indexOf(a.entity)-order.indexOf(b.entity) || a.id.localeCompare(b.id));
     await this.db.execute("UPDATE sync_control SET applying=1 WHERE id=1");
     for (const key of keys) {
@@ -280,6 +280,18 @@ export class SyncStore {
       const { data } = materialize(state);
       if (state.entity === "settings") {
         if (data) await this.db.execute("INSERT INTO sync_settings(id,payload_json) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json", [state.id, JSON.stringify(data)]);
+        continue;
+      }
+      if (state.entity === "place") {
+        if (!data) { await this.db.execute("DELETE FROM location_geocodes WHERE address=?", [state.id]); continue; }
+        const fix = data.fix;
+        if (Object.keys(data).some(key => key !== "fix" && key !== "updated_at") || !Array.isArray(fix) || fix.length !== 4
+          || !((fix[0] === null && fix[1] === null) || (typeof fix[0] === "number" && Number.isFinite(fix[0]) && Math.abs(fix[0]) <= 180 && typeof fix[1] === "number" && Number.isFinite(fix[1]) && Math.abs(fix[1]) <= 90))
+          || !(fix[2] === null || (typeof fix[2] === "number" && Number.isFinite(fix[2]))) || !(fix[3] === null || typeof fix[3] === "string")
+          || typeof data.updated_at !== "string" || !Number.isFinite(Date.parse(data.updated_at))) throw new Error("Invalid place fix");
+        await this.db.execute(`INSERT INTO location_geocodes(address,lng,lat,score,level,updated_at) VALUES (?,?,?,?,?,?)
+          ON CONFLICT(address) DO UPDATE SET lng=excluded.lng,lat=excluded.lat,score=excluded.score,level=excluded.level,updated_at=excluded.updated_at`,
+          [state.id, ...fix as SqlParam[], data.updated_at]);
         continue;
       }
       const spec = ENTITY_TABLES[state.entity];

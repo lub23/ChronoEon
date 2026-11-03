@@ -10,7 +10,7 @@ describe("migrations", () => {
     await ensureMigrated(backend);
     const version = await backend.select<{ user_version: number }>("PRAGMA user_version");
     expect(version[0].user_version).toBe(SCHEMA_VERSION);
-    expect(SCHEMA_VERSION).toBe(18);
+    expect(SCHEMA_VERSION).toBe(19);
 
     const tables = await backend.select<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('timer_session', 'timer_segments')"
@@ -61,7 +61,7 @@ describe("migrations", () => {
     await ensureMigrated(backend, [{ version: 1, sql: SCHEMA_SQL }]);
     expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(1);
     await ensureMigrated(backend);
-    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(18);
+    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(19);
     await backend.close();
   });
 
@@ -80,7 +80,7 @@ describe("migrations", () => {
        VALUES ('x2', 'task', 'T2', NULL, 'body only', '2026-08-01', 1, '2026-08-01 00:00')`
     );
     await ensureMigrated(backend);
-    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(18);
+    expect((await backend.select<{ user_version: number }>("PRAGMA user_version"))[0].user_version).toBe(19);
     const rows = await backend.select<{ id: string; note: string | null }>("SELECT id, note FROM entries ORDER BY id");
     expect(rows[0].note).toBe("short note\n\nlong\nbody");
     expect(rows[1].note).toBe("body only");
@@ -195,4 +195,19 @@ describe("migrations", () => {
     ]);
     await backend.close();
   });
+});
+
+
+it("preserves existing v18 fixes and queues them for the first place sync", async () => {
+  const backend = await MemorySqliteBackend.open([]);
+  await ensureMigrated(backend,MIGRATION_STEPS.filter(step => step.version <= 18));
+  await backend.execute("INSERT INTO location_geocodes VALUES (?,?,?,?,?,?)",["旧地点",116.3,40,100,"manual","2026-11-03T00:00:00Z"]);
+  await ensureMigrated(backend);
+  const places = await backend.select<{address:string;lng:number}>("SELECT * FROM location_geocodes");
+  expect(places[0]).toMatchObject({address:"旧地点",lng:116.3});
+  const changes = await backend.select<{entity_id:string;data_json:string}>("SELECT * FROM sync_changes WHERE entity='place'");
+  expect(changes).toHaveLength(1);
+  expect(changes[0].entity_id).toBe("旧地点");
+  expect(JSON.parse(changes[0].data_json)).toEqual({fix:[116.3,40,100,"manual"],updated_at:"2026-11-03T00:00:00Z"});
+  await backend.close();
 });

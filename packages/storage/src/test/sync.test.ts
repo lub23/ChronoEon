@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEntryId, DEFAULT_CHRONOEON_SETTINGS, draftToItem, type Entry } from "@chronoeon/domain";
 import { SqliteItemStore } from "../SqliteItemStore";
 import { AiConversationStore } from "../ai/aiConversationStore";
+import { GeocodeStore } from "../geo/GeocodeStore";
 import { SyncStore } from "../sync/SyncStore";
 import { SyncEngine, contentHash, type Publication, type RemoteIndex, type SyncBackend } from "../sync/SyncEngine";
 import { openMemoryStore } from "./helpers";
@@ -585,4 +586,58 @@ describe("seven-day snapshot and recycle-bin policy", () => {
     release(); await normal; expect((await manual).snapshotCreated).toBe(true);
     expect(remote.index!.snapshot!.generation).toBe(2);
   });
+});
+
+
+describe("saved place synchronization", () => {
+  it("syncs fixes, exclusions, deletions and snapshot restoration without geocoding", async () => {
+    const remote = new MemoryBackend(), a = await device(remote, "A"), b = await device(remote, "B");
+    const left = new GeocodeStore(a.backend), right = new GeocodeStore(b.backend);
+    const changed = vi.fn(), unsubscribe = a.sync.subscribe(changed);
+    await left.put({ address: "  工作室  ", lng: 116.3, lat: 40, score: 100, level: "manual" });
+    expect(changed).toHaveBeenCalledOnce();
+    await a.engine.run(); await b.engine.run();
+    expect(await right.all()).toEqual(await left.all());
+    await right.put({ address: "工作室", lng: 116.4, lat: 40.1, score: -1, level: "manual" });
+    await b.engine.run(); await a.engine.run();
+    expect((await left.all())[0]).toMatchObject({ lng: 116.4, lat: 40.1, score: -1 });
+    await a.engine.run({ rebuildSnapshot: true });
+    const c = await device(remote, "C"); await c.engine.run();
+    expect(await new GeocodeStore(c.backend).all()).toEqual(await left.all());
+    await left.remove("工作室"); await a.engine.run(); await b.engine.run(); await c.engine.run();
+    expect(await right.all()).toEqual([]);
+    expect(await new GeocodeStore(c.backend).all()).toEqual([]);
+    unsubscribe(); await Promise.all([a.backend.close(), b.backend.close(), c.backend.close()]);
+  });
+
+  it("keeps concurrent coordinate pairs intact and resolves the whole fix", async () => {
+    const remote = new MemoryBackend(), a = await device(remote, "A"), b = await device(remote, "B");
+    const left = new GeocodeStore(a.backend), right = new GeocodeStore(b.backend);
+    await left.put({ address: "Office", lng: 100, lat: 20, score: 100, level: "manual" });
+    await a.engine.run(); await b.engine.run();
+    await left.put({ address: "Office", lng: 110, lat: 20, score: 100, level: "manual" });
+    await right.put({ address: "Office", lng: 100, lat: 30, score: 90, level: "gps" });
+    await a.engine.run(); await b.engine.run(); await a.engine.run();
+    expect(await left.all()).toEqual(await right.all());
+    const row = (await left.all())[0];
+    expect([[110,20],[100,30]]).toContainEqual([row.lng,row.lat]);
+    const conflict = (await a.sync.conflicts()).find(value => value.entity === "place" && value.field === "fix")!;
+    expect(conflict.versions.map(version => version.value)).toContainEqual([110,20,100,"manual"]);
+    expect(conflict.versions.map(version => version.value)).toContainEqual([100,30,90,"gps"]);
+    await a.sync.resolve("place","Office","fix",[110,20,100,"manual"],conflict.clock);
+    await a.engine.run(); await b.engine.run();
+    expect((await right.all())[0]).toMatchObject({lng:110,lat:20,score:100,level:"manual"});
+    expect((await b.sync.conflicts()).filter(value => value.entity === "place")).toEqual([]);
+    await Promise.all([a.backend.close(),b.backend.close()]);
+  });
+});
+
+
+it("does not let an in-flight lookup replace a newly synchronized fix", async () => {
+  const {backend} = await openMemoryStore(), places = new GeocodeStore(backend);
+  await places.put({address:"Office",lng:116,lat:40,score:100,level:"manual",updatedAt:"2026-11-03T01:00:00Z"});
+  expect(await places.put({address:"Office",lng:100,lat:20,score:80,level:"geocoder"},null)).toBe(false);
+  expect((await places.all())[0]).toMatchObject({lng:116,lat:40,level:"manual"});
+  expect(await places.put({address:"Office",lng:117,lat:41,score:90,level:"geocoder"},"2026-11-03T01:00:00Z")).toBe(true);
+  await backend.close();
 });

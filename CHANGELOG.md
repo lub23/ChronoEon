@@ -1,12 +1,14 @@
 # ChronoEon 0.1.3 / 时元 0.1.3
 
 - **Footprints:** explore geocoded records and assets on a globe, with heat spots, collapsible nearby-place groups and captioned photo cards. Trails stay quiet by default, split long gaps, merge repeated routes and show the latest transport record with a +N journey history. At space scale, a simplified animated solar system replaces the map; rendering stops when you return to Earth.
+- Saved WGS84 place coordinates, manual corrections and map exclusions now sync with the existing journal and snapshots. Existing fixes join sync on upgrade; concurrent edits preserve whole coordinate pairs and offer conflict resolution.
 - **Places:** configure apihz.cn or Amap in Settings → Services. Device GPS first matches nearby saved places locally; request name candidates, refresh coordinates from an address or pick a point on the shared map. Place management supports sorting, editable name/coordinate drafts and explicit saving. Stored coordinates use WGS84, including conversion from Amap's GCJ-02.
 - **Capture:** open a compact desktop window with the global shortcut, drag it into position and expand the syntax examples when needed. Add status, recurrence and reminders with ^ / * / ~ tokens. Incremental local habit learning improves titles, payment/category choices and existing-tag suggestions; photo prompts extract meals and completed exercise details. Review AI drafts before saving.
 - **Review and organization:** Collections groups ideas and assets separately from Insights (bills, schedules and footprints). Bills gain monthly budgets and account balances. Assets gain tags and linked purchase/sale bills, with disposal dates tied to a sale when selected. Composers have clearer time, tag and note layouts.
 - **Polish:** add a short SVG logo startup animation, refine location status indicators and keyboard interactions, show readable catalog names and grouped changes in operation history, and improve calendar-chip dragging. English and Simplified Chinese remain available throughout.
 
 - **足迹：** 在地球地图上查看记录和物品，支持热力、可收展的附近地点分组与带文字的照片卡片。轨迹默认克制显示，按时间分段并合并重复路线；连线上展示最新交通，+N 可查看历史并打开原记录。远景呈现简化运动的太阳系，进入地球近景后停绘。
+- 已保存的 WGS84 地点坐标、手动修正和地图排除状态纳入现有同步日志与快照；升级自动保留并上传已有坐标，并发修改保留完整坐标对并可选择冲突版本。
 - **地点：** 设置 → 服务可配置接口盒子或高德。GPS 优先在本地匹配附近历史地点，也可查询名称候选、按地址刷新坐标或在共享地图上选点。地点管理支持排序、名称/坐标草稿和统一更新；坐标统一以 WGS84 保存，高德 GCJ-02 自动转换。
 - **随心记：** 全局快捷键唤起可拖动的桌面快捷浮窗，语法示例按需展开，新增 ^状态、*重复、~提醒。增量学习历史习惯，改善简洁标题、支付/分类及已有标签建议；照片提示词提取饮食及已完成健身动作。AI 草稿经用户核对后保存。
 - **整理与统计：** 藏集独立容纳灵感和物品，统计包含账单、日程和足迹。账单新增月预算及账户余额；物品支持标签、关联购入/出售账目和处置日期；优化编辑器的时间、标签与备注布局。
