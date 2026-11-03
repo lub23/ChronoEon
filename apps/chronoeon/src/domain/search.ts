@@ -45,6 +45,11 @@ export function searchExcerpt(text: string, needle: string, locale: Locale, maxL
 
 /** Asset search uses the same visible text fields on every search surface. */
 export function itemMatchesSearch(item: Item, search: string, locale: Locale): boolean {
-  const needle = search.trim().toLocaleLowerCase(localeTag[locale]);
-  return !needle || [item.name, item.notes, item.location, item.payment].some(value => value?.toLocaleLowerCase(localeTag[locale]).includes(needle));
+  const raw = search.trim().toLocaleLowerCase(localeTag[locale]);
+  if (!raw) return true;
+  const tagOnly = raw.startsWith("#");
+  const needle = tagOnly ? raw.slice(1) : raw;
+  const tags = (item.tags ?? []).map((tag) => tag.replace(/^#/, ""));
+  const fields = tagOnly ? tags : [item.name, item.notes, item.location, item.payment, ...tags];
+  return fields.some(value => value?.toLocaleLowerCase(localeTag[locale]).includes(needle));
 }

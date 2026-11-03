@@ -29,7 +29,7 @@ describe("AI capture", () => {
     const image = { type: "image_url" as const, image_url: { url: "data:image/png;base64,test" } };
     const result = await parseAICapture({ provider: { id:"test",name:"Test",preset:"compatible",kind:"openai-compatible",baseUrl:"https://example.test/v1",model:"test" }, text:"",images:[image],entries:[],settings,locale:"zh",signal:new AbortController().signal });
     expect(result.parsed.candidates[0].draft.title).toBe("Coffee");
-    expect(result.parsed.candidates[0].draft.tags).toEqual(["coffee"]);
+    expect(result.parsed.candidates[0].draft.tags).toBeUndefined();
     const call = vi.mocked(requestAICompletion).mock.calls.at(-1)!;
     expect(call[1][1].content).toContainEqual(image); expect(call[2]).toHaveProperty("properties.entries");
     expect(call[4]).toMatchObject({ disableReasoning: true, stream: true, maxTokens: 4096 });

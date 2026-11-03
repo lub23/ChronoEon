@@ -147,6 +147,7 @@ describe("app: create flow (browser demo)", () => {
   it("applies the global search to the stats view", async () => {
     window.localStorage.setItem("chronoeon.preference.view", JSON.stringify("insights"));
     act(() => { root.render(<App />); });
+    await act(async () => { await vi.dynamicImportSettled(); });
     await flush(150);
     expect(host.textContent).toContain("权衡盈虚");
 
@@ -489,7 +490,7 @@ describe("app: create flow (browser demo)", () => {
     // Leftward content motion moves to the next view: Month → Insights.
     await act(async () => { touchSwipe(220, 90); });
     await flush();
-    expect(document.querySelector(".nav-item.is-active span")?.textContent).toBe("灵感");
+    expect(document.querySelector(".nav-item.is-active span")?.textContent).toBe("统计");
   });
 
   it("promotes the already-mounted next month after a vertical swipe without a remount", async () => {
@@ -537,8 +538,8 @@ describe("app: create flow (browser demo)", () => {
         .find((item) => item.textContent?.includes("统计"))!.click();
     });
     await flush();
-    // Bills -> schedules -> items are three independent pager surfaces.
-    for (let step = 0; step < 2; step++) {
+    // Bills -> schedules -> items -> ideas are four independent pager surfaces.
+    for (let step = 0; step < 3; step++) {
       await act(async () => { touchSwipe(220, 90); });
       await flush();
       expect(document.querySelector(".mobile-sidebar-backdrop")?.className).not.toContain("is-open");

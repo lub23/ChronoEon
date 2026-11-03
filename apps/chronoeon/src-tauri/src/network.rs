@@ -17,6 +17,9 @@ pub fn ensure_tls_ready() -> Result<(), String> {
 }
 
 /// Preserve connection/TLS causes without attaching URL queries or request headers.
+/// Android routes AI requests through the platform HTTP client, so this is
+/// desktop-only (otherwise it is an unused-function warning there).
+#[cfg(not(target_os = "android"))]
 pub fn ai_request_error(error: reqwest::Error) -> String {
     let error = error.without_url();
     let mut message = format!("AI request failed: {error}");

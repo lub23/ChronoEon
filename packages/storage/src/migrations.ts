@@ -1,5 +1,7 @@
 import { SCHEMA_V15_SQL } from "./schema/v15";
 import { SCHEMA_V16_SQL } from "./schema/v16";
+import { SCHEMA_V17_SQL } from "./schema/v17";
+import { SCHEMA_V18_SQL } from "./schema/v18";
 import type { PersistencePort } from "./persistence/PersistencePort";
 import { StorageError } from "./errors";
 import { SCHEMA_SQL, SCHEMA_V2_SQL, SCHEMA_V3_SQL, SCHEMA_V4_SQL, SCHEMA_V5_SQL, SCHEMA_V6_SQL, SCHEMA_V7_SQL, SCHEMA_V8_SQL, SCHEMA_V9_SQL, SCHEMA_V10_SQL, SCHEMA_V11_SQL, SCHEMA_V12_SQL, SCHEMA_V13_SQL, SCHEMA_V14_SQL } from "./schema/schemaSql";
@@ -27,6 +29,8 @@ export const MIGRATION_STEPS: MigrationStep[] = [
   { version: 14, sql: SCHEMA_V14_SQL },
   { version: 15, sql: SCHEMA_V15_SQL },
   { version: 16, sql: SCHEMA_V16_SQL },
+  { version: 17, sql: SCHEMA_V17_SQL },
+  { version: 18, sql: SCHEMA_V18_SQL },
 ];
 
 export const SCHEMA_VERSION = MIGRATION_STEPS[MIGRATION_STEPS.length - 1].version;

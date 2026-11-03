@@ -1,6 +1,7 @@
 import type { SVGProps } from "react";
 
 export type IconName =
+  | "plane" | "train" | "car" | "ship" | "walk"
   | "eye" | "eye-off" | "device" | "shirt" | "home" | "bike" | "box"
   | "agenda" | "month" | "week" | "day" | "idea" | "insights" | "plus" | "minus" | "search" | "folder"
   | "sun" | "moon" | "languages" | "chevron-left" | "chevron-right" | "calendar"
@@ -10,9 +11,15 @@ export type IconName =
   | "menu" | "inbox" | "target" | "book" | "refresh" | "minimize" | "maximize"
   | "restore" | "filter" | "drag" | "settings" | "download" | "upload"
   | "timer" | "play" | "pause" | "stop" | "image" | "tag" | "copy" | "clipboard" | "flag"
-  | "bell" | "keyboard" | "chart" | "coins" | "chevron-down" | "chevron-up" | "camera";
+  | "bell" | "keyboard" | "chart" | "coins" | "chevron-down" | "chevron-up" | "camera" | "map";
 
 const paths: Record<IconName, React.ReactNode> = {
+  plane: <><path d="m22 2-7 20-4-9-9-4Z"/><path d="m11 13 5-5"/></>,
+  train: <><rect x="5" y="3" width="14" height="15" rx="4"/><path d="M5 10h14M9 3v7M15 3v7M8 21l2-3M16 21l-2-3"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/></>,
+  car: <><path d="m5 7 2-4h10l2 4 2 3v9h-3v-3H6v3H3v-9Z"/><path d="M5 8h14M6 12h2M16 12h2"/></>,
+  ship: <><path d="M5 12V6h14v6M9 6V3h6v3M3 13l9-3 9 3-3 6H6Z"/><path d="M2 22q3-3 6 0 3-3 6 0 3-3 8 0"/></>,
+  walk: <><circle cx="14" cy="4" r="2"/><path d="m7 11 4-4 4 2 3 3M11 7l-2 7 4 3 1 5M9 14l-4 7M14 9l-1 4"/></>,
+  map: <><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3Z"/><path d="M9 3v15M15 6v15"/></>,
   eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></>,
   "eye-off": <><path d="m3 3 18 18M10.5 5.1 12 5c6.5 0 10 7 10 7a20 20 0 0 1-3.3 4.2M6.2 6.2A21 21 0 0 0 2 12s3.5 7 10 7a12 12 0 0 0 5.8-1.8M10 10a3 3 0 0 0 4 4"/></>,
   device: <><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M10 18h4"/></>,

@@ -123,7 +123,7 @@ describe("item editor", () => {
     const receipt = bill(), close = vi.fn(), save = vi.fn(async () => { close(); });
     renderComposer({ seed: { name: "" }, entries: [receipt], save, close });
     fill(field("Name"), "Camera");
-    choose("Linked bill", "Camera receipt");
+    choose("Purchase bill", "Camera receipt");
     expect(field("Cost").value).toBe("300");
     await act(async () => { document.querySelector(".composer-sheet form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ name: "Camera", purchaseEntryId: receipt.id, acquiredOn: receipt.date, cost: 300 }), undefined);
@@ -133,7 +133,7 @@ describe("item editor", () => {
     const save = vi.fn(async (_draft: ItemDraft, _id?: string) => {});
     renderComposer({ item: item({ purchaseEntryId: "bill-id" }), entries: [bill()], save });
     choose("Source", "Gift");
-    expect(document.querySelector('button[aria-label="Linked bill"]')).toBeNull();
+    expect(document.querySelector('button[aria-label="Purchase bill"]')).toBeNull();
     await act(async () => { document.querySelector(".composer-sheet form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
     expect(save.mock.calls[0][0]).toMatchObject({ acquisition: "gift", cost: 0, purchaseEntryId: undefined });
   });
@@ -145,12 +145,15 @@ describe("item editor", () => {
     expect(document.querySelector('[role="alert"]')).toBeNull();
   });
   it.each(["Discarded", "Sold"])("archives via %s and retains the form on failed persistence", async disposal => {
-    const close = vi.fn(), save = vi.fn(async () => { throw new Error("disk full"); });
+    const close = vi.fn(), save = vi.fn(async (_draft: ItemDraft, _id?: string) => { throw new Error("disk full"); });
     renderComposer({ item: item(), save, close });
     choose("Disposal", disposal);
-    expect(field("Disposed on").value).toBe(today);
+    // The disposal clock appears beside the sale bill and defaults to today.
+    expect(document.querySelectorAll('.item-disposal-row button[aria-label="Disposed at"]')).toHaveLength(2);
+    expect(document.querySelector('button[aria-label="Sale bill"]') !== null).toBe(disposal === "Sold");
     await act(async () => { document.querySelector(".composer-sheet form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
     expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0]).toMatchObject({ disposal: disposal.toLowerCase(), disposedOn: today });
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Could not save");
     expect(close).not.toHaveBeenCalled();
     expect(document.querySelector<HTMLButtonElement>('.composer-sheet button[type="submit"]')!.disabled).toBe(false);

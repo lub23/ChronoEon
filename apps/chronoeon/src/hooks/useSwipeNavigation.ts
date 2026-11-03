@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { addMonths, format } from "date-fns";
 import type { AppView } from "../domain/entry";
+import type { InsightsTab } from "../components/insightsTabs";
 import { isChipDragActive } from "../components/dragGesture";
 
-export const VIEW_ORDER: AppView[] = ["agenda", "day", "week", "month", "ideas", "insights"];
+/** Swipe pages, left to right; Insights is last and pages through its own tabs. */
+export const VIEW_ORDER: AppView[] = ["agenda", "day", "week", "month", "insights"];
 const MOTION_MS = 200;
 const MIN_MOTION_MS = 110;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -28,8 +30,9 @@ export function horizontalScrollOwner(target: Element, boundary: Element, dx: nu
   return null;
 }
 
-type InsightsPage = "bills" | "tasks" | "items";
-const INSIGHTS_ORDER: InsightsPage[] = ["bills", "tasks", "items"];
+type InsightsPage = InsightsTab;
+/** The map is deliberately absent: horizontal drags pan it instead of paging. */
+const INSIGHTS_ORDER: InsightsPage[] = ["bills", "tasks", "items", "ideas"];
 export function navigationPageKey(view: AppView, date: Date, insightsTab?: InsightsPage): string {
   if (view === "insights" && insightsTab) return `insights:${insightsTab}`;
   return view === "month" ? `month:${format(date, "yyyy-MM")}` : view;
@@ -274,9 +277,10 @@ export function useSwipeNavigation(options: Options) {
           let insightsTab: InsightsPage | undefined;
           if (current.insightsTab && current.onInsightsTabChange) {
             if (current.activeView === "insights") {
-              insightsTab = INSIGHTS_ORDER[INSIGHTS_ORDER.indexOf(current.insightsTab) + g.side];
+              const index = INSIGHTS_ORDER.indexOf(current.insightsTab);
+              insightsTab = index < 0 ? undefined : INSIGHTS_ORDER[index + g.side];
               if (insightsTab) view = "insights";
-            } else if (view === "insights") insightsTab = g.side > 0 ? "bills" : "items";
+            } else if (view === "insights") insightsTab = g.side > 0 ? INSIGHTS_ORDER[0] : INSIGHTS_ORDER[INSIGHTS_ORDER.length - 1];
           }
           if (current.menuOpen) { g.kind = "sidebar"; g.opening = false; }
           else {

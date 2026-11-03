@@ -44,7 +44,7 @@ describe("ViewDock", () => {
   it("keeps day/week in the range menu and month immediately to its right", () => {
     const handlers = render({ activeView: "day", dayCount: 3 });
     const buttons = [...host.querySelectorAll<HTMLButtonElement>(".view-dock-views > button, .view-dock-day-group > button")];
-    // List, day/week, month, quick note, ideas, insights.
+    // List, day/week, month, quick note, insights.
     expect(buttons).toHaveLength(6);
 
     act(() => { host.querySelector<HTMLButtonElement>('[aria-label="日视图 · 3"]')!.click(); });
@@ -73,7 +73,7 @@ describe("ViewDock", () => {
     expect(handlers.onViewChange).toHaveBeenCalledWith("week");
   });
 
-  it("keeps the quick-note button beside Ideas and opens on click", () => {
+  it("keeps the quick-note button beside Collections and opens on click", () => {
     const handlers = render();
     const quickNote = host.querySelector<HTMLButtonElement>(".view-dock-quicknote")!;
     expect(quickNote).toBeTruthy();
@@ -84,8 +84,8 @@ describe("ViewDock", () => {
     expect(host.querySelector(".view-dock-new")).toBeNull();
     expect(quickNote.querySelector(".quick-note-ai-sparkle")).toBeNull();
     expect(quickNote.querySelector(".quick-note-glyph")?.getAttribute("fill")).toBe("none");
-    // It sits directly before the Ideas button.
-    expect(quickNote.nextElementSibling?.getAttribute("aria-label")).toBe("灵感");
+    // Collections precedes statistics in the Dock.
+    expect(quickNote.nextElementSibling?.querySelector("button")?.getAttribute("aria-label")).toBe("藏集");
 
     act(() => quickNote.click());
     expect(handlers.onQuickNote).toHaveBeenCalledTimes(1);

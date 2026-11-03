@@ -37,6 +37,8 @@
 .item-card-secondary { min-width: 0; flex: 1; min-height: 32px; }
 .item-note { display: block; font-size: 11px; line-height: 16px; height: 16px; color: var(--ink-faint); font-style: italic; }
 .item-bill-links { min-height: 16px; }
+.item-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 6px; }
+.item-tags span { padding: 1px 7px; border-radius: 99px; background: color-mix(in srgb, var(--item-category, var(--accent)) 14%, transparent); color: var(--ink-soft); font-size: 10px; line-height: 15px; }
 .item-history-line { color: var(--ink-soft); font-size: 11px; margin: 0 0 7px; }
 .item-bill-links { display: flex; flex-direction: row; gap: 8px; height: 16px; overflow: hidden; }
 .item-bill-link { display: flex; align-items: center; gap: 5px; padding: 2px 0; text-align: left; font-size: 11px; line-height: 16px; min-width: 0; white-space: nowrap; color: var(--ink-soft); background: transparent; }

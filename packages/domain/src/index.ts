@@ -5,6 +5,8 @@ export * from "./settings";
 
 export * from "./ai";
 export * from "./attachments";
+export * from "./budget";
+export * from "./geo";
 export * from "./calendar";
 export * from "./colors";
 export * from "./formatting";

@@ -1,5 +1,5 @@
 import { historyTransaction } from "./history/transaction";
-import { itemImageHashes, billDirectionForCategory, validateItemDraft, type Item, type ChronoEonSettings } from "@chronoeon/domain";
+import { itemImageHashes, billDirectionForCategory, normalizeItemTags, validateItemDraft, type Item, type ChronoEonSettings } from "@chronoeon/domain";
 import type { ItemStore } from "@chronoeon/ports";
 import { StorageError } from "./errors";
 import { notifyLocalChange, runDatabaseOperation, subscribeLocalChanges } from "./persistence/coordinator";
@@ -22,19 +22,28 @@ interface ItemRow {
   purchase_entry_id: string | null;
   disposal: Item["disposal"] | null;
   disposed_on: string | null;
+  disposed_at: string | null;
   sale_amount: number | null;
   sale_entry_id: string | null;
   images_json: string;
   notes: string | null;
+  tags_json: string;
   created_at: string;
   updated_at: string;
 }
 
-const COLUMNS = ["id", "name", "calendar", "category", "acquisition", "acquired_on", "acquired_at", "cost", "currency", "location", "payment", "purchase_entry_id", "disposal", "disposed_on", "sale_amount", "sale_entry_id", "images_json", "notes", "created_at", "updated_at"] as const;
+const COLUMNS = ["id", "name", "calendar", "category", "acquisition", "acquired_on", "acquired_at", "cost", "currency", "location", "payment", "purchase_entry_id", "disposal", "disposed_on", "disposed_at", "sale_amount", "sale_entry_id", "images_json", "notes", "tags_json", "created_at", "updated_at"] as const;
+
+function parseStrings(json: string): string[] {
+  try {
+    const value: unknown = JSON.parse(json);
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item !== "") : [];
+  } catch { return []; }
+}
 
 export function toItem(row: ItemRow): Item {
-  let images: unknown = [];
-  try { images = JSON.parse(row.images_json); } catch { images = []; }
+  const images = parseStrings(row.images_json);
+  const tags = parseStrings(row.tags_json);
   return { id: row.id, name: row.name, calendarId: row.calendar, category: row.category, acquisition: row.acquisition,
     acquiredOn: row.acquired_on, acquiredAt: row.acquired_at.match(/(\d{2}:\d{2})$/)?.[1] ?? row.acquired_at, cost: row.cost, currency: row.currency,
     ...(row.location ? { location: row.location } : {}),
@@ -42,10 +51,12 @@ export function toItem(row: ItemRow): Item {
     ...(row.purchase_entry_id ? { purchaseEntryId: row.purchase_entry_id } : {}),
     ...(row.disposal ? { disposal: row.disposal } : {}),
     ...(row.disposed_on ? { disposedOn: row.disposed_on } : {}),
+    ...(row.disposed_at ? { disposedAt: row.disposed_at } : {}),
     ...(row.sale_amount !== null ? { saleAmount: row.sale_amount } : {}),
     ...(row.sale_entry_id ? { saleEntryId: row.sale_entry_id } : {}),
-    images: Array.isArray(images) ? images.filter((image): image is string => typeof image === "string" && image !== "") : [],
+    images,
     ...(row.notes ? { notes: row.notes } : {}),
+    ...(tags.length ? { tags } : {}),
     createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
@@ -98,11 +109,11 @@ export class SqliteItemStore implements ItemStore {
     await this.validateBinding(item.id, item.purchaseEntryId, previous?.purchase_entry_id, "expense", item.currency.trim(), settings);
     await this.validateBinding(item.id, item.saleEntryId, previous?.sale_entry_id, "income", item.currency.trim(), settings);
     const result: Item = { ...item, name: item.name.trim(), currency: item.currency.trim(), location: item.location?.trim() || undefined,
-      notes: item.notes?.trim() || undefined, images,
+      notes: item.notes?.trim() || undefined, images, tags: normalizeItemTags(item.tags),
       createdAt: previous?.created_at ?? item.createdAt, updatedAt: nextTimestamp(previous?.updated_at ?? item.createdAt) };
     const values: SqlParam[] = [result.id, result.name, result.calendarId, result.category, result.acquisition, result.acquiredOn, result.acquiredAt, result.cost, result.currency,
-      result.location ?? null, result.payment ?? null, result.purchaseEntryId ?? null, result.disposal ?? null, result.disposedOn ?? null, result.saleAmount ?? null,
-      result.saleEntryId ?? null, JSON.stringify(images), result.notes ?? null, result.createdAt, result.updatedAt];
+      result.location ?? null, result.payment ?? null, result.purchaseEntryId ?? null, result.disposal ?? null, result.disposedOn ?? null, result.disposedAt ?? null, result.saleAmount ?? null,
+      result.saleEntryId ?? null, JSON.stringify(images), result.notes ?? null, JSON.stringify(result.tags ?? []), result.createdAt, result.updatedAt];
     await this.backend.execute(`INSERT INTO items (${COLUMNS.join(",")}) VALUES (${COLUMNS.map(() => "?").join(",")}) ON CONFLICT(id) DO UPDATE SET ${COLUMNS.filter((column) => column !== "id" && column !== "created_at").map((column) => `${column}=excluded.${column}`).join(",")}`, values);
     return result;
   }

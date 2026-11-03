@@ -7,7 +7,7 @@ A local-first home for **schedules, tasks, ideas and expenses**, for Windows,
 Linux, macOS and Android. SQLite is the authoritative store.
 时元是一款本地优先的日程、任务、日记、灵感、收支与物品管理应用。
 
-**v0.1.2** · [Download / 下载](https://github.com/lub23/ChronoEon/releases/tag/v0.1.2)
+**v0.1.3** · [Download / 下载](https://github.com/lub23/ChronoEon/releases/tag/v0.1.3)
 
 日常使用请打开构建或安装后的 ChronoEon；`tauri:dev` 用于开发。Windows 原生 dev 与 exe 共用 `%LOCALAPPDATA%\app.chronoeon.desktop\chronoeon.db`，本机设置也保存于该 SQLite 数据库；浏览器演示的数据独立。
 Use the built application for daily work. Native dev and packaged builds share SQLite records and device settings; the browser demo is separate.
@@ -15,8 +15,10 @@ Use the built application for daily work. Native dev and packaged builds share S
 ![Agenda view with today's schedule](apps/chronoeon/public/screenshots/agenda.jpg)
 ![Month calendar](apps/chronoeon/public/screenshots/month.jpg)
 ![Day timeline](apps/chronoeon/public/screenshots/day.jpg)
-![Statistics and review](apps/chronoeon/public/screenshots/stats.jpg)
-![Ideas grouped along the vine / 藤蔓分组灵感](apps/chronoeon/public/screenshots/ideas.png)
+![Budget and account insights / 预算与账户统计](apps/chronoeon/public/screenshots/stats.jpg)
+![Footprints and nearby-place records / 足迹与附近地点记录](apps/chronoeon/public/screenshots/footprints.jpg)
+![Solar system at space scale / 太阳系远景](apps/chronoeon/public/screenshots/solar-system.jpg)
+![Collections: ideas / 藏集：灵感](apps/chronoeon/public/screenshots/ideas.png)
 ![Reviewed batch replacement / 批量替换预览](apps/chronoeon/public/screenshots/batch-replace.png)
 ![Compact mobile filters / 手机筛选](apps/chronoeon/public/screenshots/filter-mobile.png)
 ![Category heatmap legend / 分类热力图图例](apps/chronoeon/public/screenshots/heatmap.png)
@@ -24,13 +26,12 @@ Use the built application for daily work. Native dev and packaged builds share S
 The product code is `apps/chronoeon/` (`app.chronoeon.desktop`). `packages/*`
 holds the UI-independent rules: `domain`, `storage`, `ports`.
 
-## What is new in 0.1.2 / 本版更新
+## What is new in 0.1.3 / 本版更新
 
-- Ask streams its answer and tool steps in one process card. Relative periods such as “last month” resolve on the device; elapsed time stops when the answer completes and excludes saving and connection shutdown. / 随心问流式展示检索与回答过程，在本机确定“上个月”等日期；回复完成即停止计时，不计入保存及等待连接关闭的时间。
-- Capture understands current-time ranges and meal times, learns common record habits and shows notes in draft summaries. Review all AI drafts before saving. / 随心记完善“现在到…”、跨日范围和用餐时间，参考历史记录习惯，草稿摘要显示备注；AI 草稿须确认后保存。
-- Paste up to four images into a conversation. Stored images use compressed WebP; native compression and WebDAV transfers are faster. / 对话支持粘贴最多四张图片，复用压缩后的 WebP，优化原生压缩与 WebDAV 传输。
-- Mobile conversation drawers support swipes; idea/item groups, filters, category details and transitions are clearer. Four additional accent colors follow light/dark themes. / 手机对话侧栏支持滑动，优化灵感/物品分组、筛选、分类明细和过渡，新增胭脂、琥珀、靛青、黛墨主题色。
-- Local Windows and APK builds work from ordinary PowerShell with installed toolchains discovered automatically. / 保留本地手动构建与调试命令，普通 PowerShell 自动加载已安装的 Windows / Android 工具链。
+- Footprints combines a globe, nearby-place record groups, captioned photos and quiet travel arcs. Transport labels show the latest journey and expandable history; the far view reveals an animated solar system. / 足迹支持地球地图、附近地点分组、照片说明与简洁轨迹，交通标签可展开历史，远景呈现运动的太阳系。
+- GPS, saved-place matching, address lookup and map picking share one location workflow. Configure apihz.cn or Amap under Settings → Services; edit place names and WGS84 coordinates before saving. / 统一 GPS、历史地点匹配、地址查询与地图选点；设置 → 服务可配置接口盒子或高德，地点名称与坐标编辑后统一保存。
+- A draggable desktop quick-capture window, expandable syntax examples and incremental habit learning make everyday recording quicker. Photo drafts describe meals and completed workouts; review them before saving. / 桌面快捷浮窗可拖动，语法示例按需展开，增量学习记录习惯；照片草稿识别饮食与已完成健身动作，确认后保存。
+- Collections separates ideas/assets from Insights. Monthly budgets, account balances, asset tags and linked sale records improve review; forms, operation history and the SVG startup animation receive a visual refresh. / 藏集与统计分开，新增月预算、账户余额、物品标签及出售账目关联，并优化表单、操作历史和 SVG 启动动画。
 
 ## Run the browser demo
 
@@ -42,7 +43,7 @@ npm run dev          # http://localhost:1420
 ```
 
 The demo keeps everything in browser local storage. What it shows: the List /
-Day / Week / Month / Ideas / Statistics views, the Dock with
+Day / Week / Month / Collections / Insights views, the Dock with
 its quick-note button, natural-language capture, both
 languages and both themes.
 
@@ -134,7 +135,7 @@ and verifies the APK, and overwrites the same version's output.
 ```powershell
 rustup target add aarch64-linux-android
 npm run android:apk
-adb install -r .build/android/ChronoEon-0.1.2-arm64.apk
+adb install -r .build/android/ChronoEon-0.1.3-arm64.apk
 adb logcat # inspect device logs / 查看真机日志
 ```
 

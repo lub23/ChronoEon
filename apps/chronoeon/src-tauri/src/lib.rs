@@ -1,3 +1,5 @@
+// `ai_stream::Completion` assembles SSE fragments on every platform; only the
+// reqwest-based reader inside it is desktop-only (see the cfg in that file).
 mod ai_stream;
 mod device;
 mod ai_credentials;
@@ -938,6 +940,72 @@ async fn reverse_geocode(latitude: f64, longitude: f64, language: String) -> Res
     })
 }
 
+/// Forward geocoding through the service the user configured (apihz.cn or
+/// Amap) with their own credentials. Rust only transports: it builds the query,
+/// bounds the response and hands the parsed JSON to the webview, which knows
+/// each provider's answer shape and coordinate system. The webview itself
+/// cannot reach these hosts under the app's CSP.
+#[tauri::command]
+async fn geocode_address(provider: String, endpoint: String, id: String, key: String, address: String, reverse_point: Option<[f64; 2]>) -> Result<serde_json::Value, String> {
+    let address = address.trim().to_string();
+    if reverse_point.is_none() && (address.is_empty() || address.chars().count() > 120) {
+        return Err("GEOCODE_ADDRESS_INVALID".into());
+    }
+    if let Some([lng, lat]) = reverse_point {
+        if provider != "amap" || !lng.is_finite() || !lat.is_finite() || lng.abs() > 180.0 || lat.abs() > 90.0 {
+            return Err("GEOCODE_COORDINATES_INVALID".into());
+        }
+    }
+    let (id, key) = (id.trim().to_string(), key.trim().to_string());
+    let (default_endpoint, params): (&str, Vec<(&str, String)>) = match provider.as_str() {
+        "amap" => {
+            if key.is_empty() {
+                return Err("GEOCODE_CREDENTIALS_MISSING".into());
+            }
+            if let Some([lng, lat]) = reverse_point {
+                ("https://restapi.amap.com/v3/geocode/regeo", vec![("key", key), ("location", format!("{lng},{lat}")), ("extensions", "all".into()), ("radius", "250".into()), ("output", "JSON".into())])
+            } else {
+                ("https://restapi.amap.com/v3/geocode/geo", vec![("key", key), ("address", address), ("output", "JSON".to_string())])
+            }
+        }
+        _ => {
+            if id.is_empty() || key.is_empty() {
+                return Err("GEOCODE_CREDENTIALS_MISSING".into());
+            }
+            ("https://cn.apihz.cn/api/other/jwjuhe.php", vec![("id", id), ("key", key), ("address", address)])
+        }
+    };
+    let base = if endpoint.trim().is_empty() { default_endpoint } else { endpoint.trim() };
+    let endpoint = reqwest::Url::parse_with_params(base, &params)
+        .map_err(|error| format!("Could not build the geocoder request: {error}"))?;
+    if endpoint.scheme() != "https" {
+        return Err("GEOCODE_ENDPOINT_INVALID".into());
+    }
+    network::ensure_tls_ready()?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(12_000))
+        .build()
+        .map_err(|error| format!("Could not create the geocoder client: {error}"))?;
+    let response = client
+        .get(endpoint)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|error| format!("Geocoding failed: {}", error.without_url()))?;
+    let status = response.status();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("Could not read the geocoder response: {error}"))?;
+    if bytes.len() > 64 * 1024 {
+        return Err("Geocoder response exceeded the safety limit".into());
+    }
+    if !status.is_success() {
+        return Err(format!("Geocoder returned {status}"));
+    }
+    serde_json::from_slice(&bytes).map_err(|error| format!("Geocoder returned invalid JSON: {error}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -994,6 +1062,7 @@ pub fn run() {
             device::device_reverse_geocode,
             device::background_command,
             reverse_geocode,
+            geocode_address,
             sync_backend_fetch,
             sync_backend_publish,
             sync_storage_usage,

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useTouchDevice } from "../hooks/useTouchDevice";
 import type { AppView, Locale } from "../domain/entry";
-import type { InsightsTab } from "./StatsView";
+import { INSIGHTS_GROUPS, INSIGHTS_TABS, type InsightsTab } from "./insightsTabs";
 import { t, type MessageKey } from "../i18n";
 import { formatAccelerator } from "../platform/globalShortcut";
 import { Brand } from "./Brand";
@@ -27,8 +27,6 @@ const viewItems: Array<{ id: AppView; icon: IconName; label: MessageKey }> = [
   { id: "day", icon: "day", label: "day" },
   { id: "week", icon: "week", label: "week" },
   { id: "month", icon: "month", label: "month" },
-  { id: "ideas", icon: "idea", label: "ideas" },
-  { id: "insights", icon: "insights", label: "insights" },
 ];
 
 export function Sidebar({
@@ -48,9 +46,7 @@ export function Sidebar({
   const label = (key: MessageKey) => t(key, locale);
   const keyboardHint = t("keyboardHint", locale);
   const [dayMenuOpen, setDayMenuOpen] = useState(false);
-  const [insightsMenuOpen, setInsightsMenuOpen] = useState(false);
   const dayGroupRef = useRef<HTMLDivElement>(null);
-  const insightsGroupRef = useRef<HTMLDivElement>(null);
   const minDayCount = 1;
   const maxDayCount = 6;
   // The day menu exists for the collapsed rail only: expanded, the stepper is
@@ -76,23 +72,6 @@ export function Sidebar({
 
   useEffect(() => { if (!collapsed) setDayMenuOpen(false); }, [collapsed]);
   useEffect(() => { if (activeView !== "day") setDayMenuOpen(false); }, [activeView]);
-  useEffect(() => {
-    if (!insightsMenuOpen) return;
-    const dismiss = (event: Event) => {
-      if (insightsGroupRef.current?.contains(event.target as Node)) return;
-      if ((event.target as Element | null)?.closest?.(".nav-insights-item")) return;
-      setInsightsMenuOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setInsightsMenuOpen(false); };
-    window.addEventListener("pointerdown", dismiss);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", dismiss);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [insightsMenuOpen]);
-  useEffect(() => { if (!collapsed) setInsightsMenuOpen(false); }, [collapsed]);
-  useEffect(() => { if (activeView !== "insights") setInsightsMenuOpen(false); }, [activeView]);
 
   return (
     <aside className={collapsed ? "sidebar is-collapsed" : "sidebar"}>
@@ -121,8 +100,7 @@ export function Sidebar({
             <button
               type="button"
               className={(activeView === item.id ? "nav-item is-active" : "nav-item")
-                + (item.id === "day" ? " nav-day-item" : "")
-                + (item.id === "insights" ? " nav-insights-item" : "")}
+                + (item.id === "day" ? " nav-day-item" : "")}
               onClick={() => {
                 // Collapsed, the day row behaves like the Dock: selecting the
                 // calendar opens the day-range menu instead of a dead click.
@@ -131,22 +109,16 @@ export function Sidebar({
                   else onViewChange("day");
                   return;
                 }
-                if (item.id === "insights" && collapsed) {
-                  if (activeView === "insights") setInsightsMenuOpen((open) => !open);
-                  else onViewChange("insights");
-                  return;
-                }
                 onViewChange(item.id);
               }}
               aria-label={label(item.label)}
               aria-current={activeView === item.id ? "page" : undefined}
-              aria-expanded={item.id === "day" && collapsed ? dayMenuVisible : item.id === "insights" && collapsed ? insightsMenuOpen : undefined}
+              aria-expanded={item.id === "day" && collapsed ? dayMenuVisible : undefined}
               title={label(item.label)}
             >
               <Icon name={item.icon} size={19} />
               {!collapsed && <span>{t(item.label, locale)}</span>}
               {item.id === "day" && collapsed && dayCount > 1 && <b className="nav-day-badge">{dayCount}</b>}
-              {item.id === "ideas" && !collapsed && <span className="nav-dot" />}
             </button>
             {item.id === "day" && dayMenuVisible && (
               <div className="nav-day-wrap" ref={dayGroupRef}>
@@ -165,42 +137,6 @@ export function Sidebar({
                     </button>
                   ))}
                 </div>
-              </div>
-            )}
-            {item.id === "insights" && collapsed && insightsMenuOpen && (
-              <div className="nav-day-wrap" ref={insightsGroupRef}>
-                <div className="view-dock-days-menu nav-day-menu" role="menu" aria-label={t("insights", locale)}>
-                  {(["bills", "tasks", "items"] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={insightsTab === tab}
-                      className={insightsTab === tab ? "is-selected" : ""}
-                      onClick={() => { onInsightsTabChange?.(tab); onViewChange("insights"); setInsightsMenuOpen(false); }}
-                    >
-                      {insightsTab === tab ? <Icon name="check" size={12} /> : <i />}
-                      <Icon name={tab === "bills" ? "coins" : tab === "tasks" ? "clock" : "box"} size={12} />
-                      {t(tab === "bills" ? "statsBills" : tab === "tasks" ? "statsTasks" : "items", locale)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {item.id === "insights" && activeView === "insights" && !collapsed && onInsightsTabChange && (
-              <div className="sidebar-insights-switch" role="group" aria-label={t("insights", locale)}>
-                {(["bills", "tasks", "items"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    className={insightsTab === tab ? "is-active" : ""}
-                    aria-pressed={insightsTab === tab}
-                    onClick={() => onInsightsTabChange(tab)}
-                  >
-                    <Icon name={tab === "bills" ? "coins" : tab === "tasks" ? "clock" : "box"} size={13} />
-                    <span>{t(tab === "bills" ? "statsBills" : tab === "tasks" ? "statsTasks" : "items", locale)}</span>
-                  </button>
-                ))}
               </div>
             )}
             {item.id === "day" && activeView === "day" && !collapsed && onDayCountChange && (
@@ -230,6 +166,7 @@ export function Sidebar({
             )}
           </Fragment>
         ))}
+        {INSIGHTS_GROUPS.map(group => <SidebarInsightsGroup key={group.key} group={group} locale={locale} collapsed={collapsed} activeView={activeView} tab={insightsTab} onViewChange={onViewChange} onTabChange={onInsightsTabChange} />)}
       </nav>
 
       <div className="sidebar-spacer" />
@@ -242,4 +179,33 @@ export function Sidebar({
       {!collapsed && !touchDevice && <p className="sidebar-hint"><Icon name="command" size={14} /> {keyboardHint}</p>}
     </aside>
   );
+}
+
+function SidebarInsightsGroup({ group, locale, collapsed, activeView, tab, onViewChange, onTabChange }: {
+  group: typeof INSIGHTS_GROUPS[number]; locale: Locale; collapsed: boolean; activeView: AppView; tab: InsightsTab;
+  onViewChange: (view: AppView) => void; onTabChange?: (tab: InsightsTab) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const last = useRef<InsightsTab>(group.tabs[0]);
+  const contains = group.tabs.some(value => value === tab);
+  const active = activeView === "insights" && contains;
+  if (contains) last.current = tab;
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => { if (!ref.current?.contains(event.target as Node)) setOpen(false); };
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    window.addEventListener("pointerdown", dismiss); window.addEventListener("keydown", key);
+    return () => { window.removeEventListener("pointerdown", dismiss); window.removeEventListener("keydown", key); };
+  }, [open]);
+  useEffect(() => { if (!active || !collapsed) setOpen(false); }, [active, collapsed]);
+  const choose = (value: InsightsTab) => { onTabChange?.(value); onViewChange("insights"); setOpen(false); };
+  const label = t(group.label, locale);
+  const tabs = INSIGHTS_TABS.filter(item => group.tabs.some(value => value === item.tab));
+  const controls = tabs.map(item => <button key={item.tab} type="button" role={collapsed ? "menuitemradio" : undefined} aria-checked={collapsed ? active && item.tab === tab : undefined} aria-pressed={!collapsed ? active && item.tab === tab : undefined} className={item.tab === tab && active ? (collapsed ? "is-selected" : "is-active") : ""} onClick={() => choose(item.tab)}><Icon name={item.icon} size={13} /><span>{item.tab === "map" ? (locale === "zh" ? "足迹" : "Footprints") : t(item.label, locale)}</span></button>);
+  return <div className="sidebar-insights-group" ref={ref}>
+    <button type="button" className={`nav-item nav-insights-item${active ? " is-active" : ""}`} aria-label={label} title={label} aria-current={active ? "page" : undefined} aria-expanded={collapsed ? open : active} onClick={() => { if (collapsed && active) setOpen(value => !value); else choose(last.current); }}><Icon name={group.icon} size={19} />{!collapsed && <span>{label}</span>}</button>
+    {collapsed && open && <div className="nav-day-wrap"><div className="view-dock-days-menu nav-day-menu" role="menu" aria-label={label}>{controls}</div></div>}
+    {!collapsed && active && <div className="sidebar-insights-switch" role="group" aria-label={label}>{controls}</div>}
+  </div>;
 }

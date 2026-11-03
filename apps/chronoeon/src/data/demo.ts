@@ -1,5 +1,15 @@
 import { addDays, format } from "date-fns";
-import { CATEGORY_COLORS, type Entry } from "../domain/entry";
+import { CATEGORY_COLORS, type Entry, type GeoPlace } from "../domain/entry";
+
+/**
+ * Coordinates for the demo places, so the browser demo can draw the map
+ * without a geocoder. The desktop reads the real geocode cache instead.
+ */
+export const DEMO_PLACES: GeoPlace[] = [
+  { address: "Studio · North room", lng: 116.334, lat: 40.01, score: 100, level: "demo" },
+  { address: "Conference Room B", lng: 116.461, lat: 39.919, score: 100, level: "demo" },
+  { address: "Misty Ridge Trail", lng: 117.247, lat: 40.608, score: 90, level: "demo" },
+];
 
 function day(base: Date, offset: number): string {
   return format(addDays(base, offset), "yyyy-MM-dd");

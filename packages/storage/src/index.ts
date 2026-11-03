@@ -1,6 +1,8 @@
 export { OperationHistoryStore } from "./history/OperationHistoryStore";
 export type { OperationHistoryRecord, OperationHistoryChange, HistoryRow } from "./history/OperationHistoryStore";
 export { RECOVERY_RETENTION_MS } from "./history/transaction";
+export { GeocodeStore } from "./geo/GeocodeStore";
+export type { GeocodeRow } from "./geo/GeocodeStore";
 export { SqliteEntryStore } from "./SqliteEntryStore";
 export { SqliteItemStore } from "./SqliteItemStore";
 export type { AttachmentRowInput, DeletedEntrySummary, SeedBatch, SeedMeta } from "./SqliteEntryStore";

@@ -1,3 +1,4 @@
+import { PlaceServicesContext } from "./components/PlaceServices";
 import type { EntryReplacement, ItemReplacement } from "./domain/bulkReplace";
 import { isMobilePlatform } from "./hooks/useTouchDevice";
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -6,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { addDays, addMonths, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { draftToEntry, entriesForDate, isAppView, resolveEntryColor, type AppView, type DueReminder, type Entry, type EntryDraft, type EntryStatus, type Locale, type ThemeMode } from "./domain/entry";
 import { EMPTY_ENTRY_FILTER, entryMatchesFilter, filterActive, type EntryFilter } from "./domain/entryFilter";
-import { billCategoryOptions, createDefaultSettings, createEntryId, defaultItemCategoryForCalendar, defaultPaymentMethodForCalendar, formatEntryTime, localizeBuiltinSettings, mergeSharedSettings, normalizeChronoEonSettings, outstandingTaskSections, scheduleCategoryOptions, timerSessionToDraft, type AIProviderConfig, type ChronoEonSettings, type TimerSegment, type TimerSession } from "@chronoeon/domain";
+import { billCategoryOptions, createDefaultSettings, createEntryId, defaultItemCategoryForCalendar, defaultPaymentMethodForCalendar, formatEntryTime, localizeBuiltinSettings, mergeSharedSettings, normalizeChronoEonSettings, outstandingTaskSections, scheduleCategoryOptions, timerSessionToDraft, type AIProviderConfig, type ChronoEonSettings, type GeocodeProvider, type TimerSegment, type TimerSession, GEO_LEVEL_MANUAL } from "@chronoeon/domain";
 import type { LunarPreference } from "./domain/lunar";
 import { entryToDraft, entryWithDraft, entryWithOccurrenceMove, entryWithOccurrenceStatus, sourceEntryId, type EntryEditContext } from "./domain/entryWorkflow";
 import { entryMatchesSearch, itemMatchesSearch } from "./domain/search";
@@ -42,12 +43,16 @@ import { Brand } from "./components/Brand";
 import { AmbientParticles } from "./components/AmbientParticles";
 import { EntryComposer } from "./components/EntryComposer";
 import { Icon } from "./components/Icon";
-import { IdeasView } from "./components/IdeasView";
 import { useSqliteItems } from "./hooks/useSqliteItems";
 import { billCategoryForValue, draftToItem, validateItemDraft, type Item, type ItemDraft } from "@chronoeon/domain";
 import type { SqliteItemStore } from "@chronoeon/storage";
-import { type InsightsTab } from "./components/StatsView";
+import { type InsightsTab } from "./components/insightsTabs";
 const StatsView = lazy(() => import("./components/StatsView").then(module => ({ default: module.StatsView })));
+import { useGeocodeQueue } from "./hooks/useGeocodeQueue";
+import { DEMO_PLACES } from "./data/demo";
+import { geocodeConfigured as isGeocodeConfigured, type GeocodeConfig } from "./platform/geocode";
+import { listenQuickCaptureEvents, openQuickCaptureWindow } from "./platform/quickWindow";
+import type { GeocodeStore } from "@chronoeon/storage";
 import { MonthView } from "./components/MonthView";
 const PhotoWallView = lazy(() => import("./components/PhotoWallView").then(module => ({ default: module.PhotoWallView })));
 import { EntryContextMenu, type EntryMenuTarget } from "./components/EntryContextMenu";
@@ -217,6 +222,29 @@ function App() {
   const [mobileViewport, setMobileViewport] = useState(() => mediaMatches("(max-width: 820px)"));
   const [captureShortcut, setCaptureShortcut] = usePersistentPreference<string>("captureShortcut", DEFAULT_CAPTURE_SHORTCUT);
   const [captureShortcutEnabled, setCaptureShortcutEnabled] = usePersistentPreference<boolean>("captureShortcutEnabled", true);
+  const [geocodeProvider, setGeocodeProvider] = usePersistentPreference<GeocodeProvider>("geocodeProvider", "apihz");
+  const [geocodeApiId, setGeocodeApiId] = usePersistentPreference<string>("geocodeApiId", "");
+  const [geocodeApiKey, setGeocodeApiKey] = usePersistentPreference<string>("geocodeApiKey", "");
+  const [amapKey, setAmapKey] = usePersistentPreference<string>("amapKey", "");
+  const [apihzEndpoint, setApihzEndpoint] = usePersistentPreference<string>("apihzEndpoint", "");
+  const [amapEndpoint, setAmapEndpoint] = usePersistentPreference<string>("amapEndpoint", "");
+  const [geocodeStore, setGeocodeStore] = useState<GeocodeStore | null>(null);
+  const geocodeConfig = useMemo<GeocodeConfig>(() => geocodeProvider === "amap"
+    ? { provider: "amap", endpoint: amapEndpoint, id: "", key: amapKey }
+    : { provider: "apihz", endpoint: apihzEndpoint, id: geocodeApiId, key: geocodeApiKey },
+  [geocodeProvider, amapEndpoint, amapKey, apihzEndpoint, geocodeApiId, geocodeApiKey]);
+  const geocodeConfigured = isGeocodeConfigured(geocodeConfig);
+  const geocodes = useGeocodeQueue(geocodeStore, entries, items, geocodeConfig);
+  // The browser demo has no geocode cache; its few places carry fixed coordinates.
+  const demoPlaces = useMemo(() => new Map(DEMO_PLACES.map((place) => [place.address, place])), []);
+  const places = isTauri() ? geocodes.places : demoPlaces;
+  const locationCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const record of [...entries, ...items]) { const address = record.location?.trim(); if (address) counts.set(address, (counts.get(address) ?? 0) + 1); }
+    return counts;
+  }, [entries, items]);
+  const precisePlaces = isTauri() ? geocodes.precise : DEMO_PLACES;
+  const availableTags = useMemo(() => [...new Set([...entries.flatMap(entry => entry.tags ?? []), ...items.flatMap(item => item.tags ?? [])])], [entries, items]);
   const [shortcutStatus, setShortcutStatus] = useState<"registered" | "conflict" | "unsupported" | "off">("off");
   const [timerOpen, setTimerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -289,7 +317,7 @@ function App() {
   const navigation = useSwipeNavigation({
     insightsTab,
     onInsightsTabChange: setInsightsTab,
-    enabled: mobileViewport,
+    enabled: mobileViewport && !(activeView === "insights" && insightsTab === "map"),
     activeView,
     selectedDate,
     onDateChange: setSelectedDate,
@@ -332,6 +360,7 @@ function App() {
     setSqliteStore(session.store);
     setItemStore(session.items);
     setSyncJournal(session.sync);
+    setGeocodeStore(session.geocodes);
     setTimerStore(session.timers);
     setConversationStore(session.conversations);
     setSqliteBootFailed(false);
@@ -783,8 +812,16 @@ function App() {
   }, [warmCaptureProvider]);
 
   const triggerGlobalCapture = useCallback(() => {
+    // Desktop: a floating capture box that parses as you type. Elsewhere the
+    // unified dialog inside the main window remains the capture surface.
+    if (isTauri() && !isMobilePlatform()) {
+      void openQuickCaptureWindow(locale)
+        .then((opened) => { if (!opened) openUnifiedDialog("capture"); })
+        .catch((error) => { console.warn("Could not open the quick capture window", error); openUnifiedDialog("capture"); });
+      return;
+    }
     openUnifiedDialog("capture");
-  }, [openUnifiedDialog]);
+  }, [locale, openUnifiedDialog]);
 
   useEffect(() => {
     if (!captureShortcutEnabled) {
@@ -950,6 +987,29 @@ function App() {
 
   const viewActions = useRef({ toggleTask, setEntryStatus, openComposerAt, openComposer, selectView, openEntryMenu, handleReschedule });
   viewActions.current = { toggleTask, setEntryStatus, openComposerAt, openComposer, selectView, openEntryMenu, handleReschedule };
+  // The quick capture window writes to the same database from another webview;
+  // our in-memory cache only learns about it through these events.
+  const quickHandlers = useRef({ onSaved: (_count: number) => {}, onManual: (_text: string) => {} });
+  quickHandlers.current = {
+    onSaved: (count) => {
+      sqliteStoreRef.current?.notifyRebuilt();
+      void sqliteItems.reload();
+      if (count > 0) notify(`${count} ${t("smartCaptureCreated", locale)}`);
+      void syncService.run();
+    },
+    onManual: (text) => {
+      void focusAppWindow();
+      const [title, ...lines] = text.split("\n");
+      viewActions.current.openComposerAt(text ? { title, note: lines.join("\n").trim() || undefined } : {});
+    },
+  };
+  useEffect(() => {
+    let dispose = () => {};
+    void listenQuickCaptureEvents({ onSaved: (count) => quickHandlers.current.onSaved(count), onManual: (text) => quickHandlers.current.onManual(text) })
+      .then((unlisten) => { dispose = unlisten; })
+      .catch((error) => console.warn("Quick capture events are unavailable", error));
+    return () => dispose();
+  }, []);
   // A clock tick, speech update or toast must not rebuild a whole calendar.
   // Keep just the active/incoming JSX surfaces stable; events read live actions.
   const currentPageKey = navigationPageKey(activeView, selectedDate, insightsTab);
@@ -1001,8 +1061,12 @@ function App() {
         />
       );
     }
-    if (view === "ideas") return <IdeasView entries={itemEntries} locale={locale} settings={settings} search={deferredSearch} today={todayKey} onEdit={entry => viewActions.current.openComposer(entry)} onNew={() => viewActions.current.openComposerAt({ kind: "idea", date: todayKey, start: format(new Date(), "HH:mm") })} />;
-    return <Suspense fallback={<div className="panel" role="status">{t("loading", locale)}</div>}><StatsView tab={pageTab ?? "bills"} onTabChange={setInsightsTab} items={searchedItems} allEntries={entries} onAddItem={() => openItemComposer()} onEditItem={item => openItemComposer(item)} onOpenBill={entry => viewActions.current.openComposer(entry)} onEditEntry={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={deferredSearch} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} /></Suspense>;
+    return <Suspense fallback={<div className="panel" role="status">{t("loading", locale)}</div>}><StatsView tab={pageTab ?? "bills"} onTabChange={setInsightsTab} items={searchedItems} allEntries={entries} onAddItem={() => openItemComposer()} onEditItem={item => openItemComposer(item)} onOpenBill={entry => viewActions.current.openComposer(entry)} onEditEntry={entry => viewActions.current.openComposer(entry)} entries={photosOnly ? [] : searchedEntries} locale={locale} settings={settings} today={todayKey} search={deferredSearch} onToggle={(id, entry) => { void viewActions.current.toggleTask(id, entry); }} onStatus={(entry, status) => { void viewActions.current.setEntryStatus(entry, status); }} onOpenDate={(date) => { setSelectedDate(parseISO(date)); viewActions.current.selectView("day"); }} onSettingsChange={updateSettings}
+      onAddIdea={() => viewActions.current.openComposerAt({ kind: "idea", date: todayKey, start: format(new Date(), "HH:mm") })}
+      places={places} geocodeConfigured={geocodeConfigured} geocodePending={geocodes.pending}
+      onOpenSettings={() => { setSettingsInitialSection("ai"); setSettingsOpen(true); }}
+      onExcludePlace={address => { void geocodes.exclude(address); }} onRetryPlace={address => { void geocodes.retry(address); }}
+      onSetPlace={(address, point) => { void geocodes.cache(address, point, GEO_LEVEL_MANUAL, 100); }} /></Suspense>;
   }
     // Keep JSX identity for the outgoing page when a neighbor mounts and when
     // that neighbor is promoted. Never rerender both heavy surfaces on lock.
@@ -1016,10 +1080,11 @@ function App() {
       return pages.get(key)!;
     };
   }, [safeDayCount, entryFilter.photosOnly,
-    searchedEntries, searchedItems, entries, locale, settings, filter, search, lunar, dayPhotos, todayKey]);
+    searchedEntries, searchedItems, entries, locale, settings, filter, search, lunar, dayPhotos, todayKey,
+    places, geocodes.pending, geocodes.exclude, geocodes.retry, geocodes.cache, geocodeConfigured, updateSettings]);
   const renderedViews = useMemo(() => new Map(visiblePages.map(page => [page.key, renderPage(page)])), [visiblePages, renderPage]);
 
-  const preferences: AppPreferences = { resizeStep, lunar, dayPhotos, accentTheme, remindersEnabled, captureShortcut, captureShortcutEnabled, lowEndMode };
+  const preferences: AppPreferences = { resizeStep, lunar, dayPhotos, accentTheme, remindersEnabled, captureShortcut, captureShortcutEnabled, lowEndMode, geocodeProvider, geocodeApiId, geocodeApiKey, amapKey, apihzEndpoint, amapEndpoint };
 
   function applyPreferences(patch: Partial<AppPreferences>) {
     if (patch.resizeStep === 5 || patch.resizeStep === 10) setResizeStep(patch.resizeStep);
@@ -1030,6 +1095,12 @@ function App() {
     if (patch.captureShortcut !== undefined) setCaptureShortcut(patch.captureShortcut);
     if (patch.captureShortcutEnabled !== undefined) setCaptureShortcutEnabled(patch.captureShortcutEnabled);
     if (patch.lowEndMode !== undefined) setLowEndMode(patch.lowEndMode);
+    if (patch.geocodeProvider !== undefined) setGeocodeProvider(patch.geocodeProvider);
+    if (patch.geocodeApiId !== undefined) setGeocodeApiId(patch.geocodeApiId);
+    if (patch.geocodeApiKey !== undefined) setGeocodeApiKey(patch.geocodeApiKey);
+    if (patch.amapKey !== undefined) setAmapKey(patch.amapKey);
+    if (patch.apihzEndpoint !== undefined) setApihzEndpoint(patch.apihzEndpoint);
+    if (patch.amapEndpoint !== undefined) setAmapEndpoint(patch.amapEndpoint);
   }
 
   const entryMenuNode = entryMenu ? (
@@ -1055,7 +1126,7 @@ function App() {
   ) : null;
 
   const timerNode = timerOpen ? (
-    <TimerWidget locale={locale} settings={settings} timer={timer} open={timerOpen} history={entries} onConfirm={confirm} onNotice={notify} onPin={desktopTimerWindow ? () => { void openTimerWindow(locale).catch((error) => console.warn("Could not open the timer window", error)); } : undefined} onClose={() => setTimerOpen(false)} />
+    <TimerWidget locale={locale} settings={settings} timer={timer} open={timerOpen} history={entries} places={precisePlaces} onPlaceLocated={(address, point) => { void geocodes.cache(address, point); }} onConfirm={confirm} onNotice={notify} onPin={desktopTimerWindow ? () => { void openTimerWindow(locale).catch((error) => console.warn("Could not open the timer window", error)); } : undefined} onClose={() => setTimerOpen(false)} />
   ) : null;
 
   const changeAIPreferences = useCallback((next: AIProviderPreferences) => {
@@ -1088,6 +1159,7 @@ function App() {
     transferBusy={transferBusy}
     notificationPermission={reminders.permission}
     shortcutStatus={shortcutStatus}
+    geocodeStatus={{ cached: places.size, pending: geocodes.pending }}
     initialSection={settingsInitialSection}
     aiPreferences={aiPreferences}
     onAIPreferencesChange={changeAIPreferences}
@@ -1153,7 +1225,9 @@ function App() {
     aiPreferences={aiPreferences}
     conversations={conversationStore}
     settings={settings}
-    availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
+    availableTags={availableTags}
+    places={precisePlaces}
+    onPlaceLocated={(address, point) => { void geocodes.cache(address, point); }}
     initialMode={chatInitialMode}
     showArchivedOnly={chatArchivedOnly}
     onOpenEntry={(entryId) => {
@@ -1239,7 +1313,8 @@ function App() {
     notify(t("deleted", locale));
   }, [closeComposer, locale, notify, sqliteItems.reload]);
 
-  const captureDialog = composerOpen ? <EntryComposer onOpenBill={entry => viewActions.current.openComposer(entry)} entries={entries} items={items} pendingItemLink={captureLinkedItem} editingItem={editingItem} initialItemDraft={itemDraftSeed} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onEditItem={item => openItemComposer(item)} onCreateItemFromBill={createItemFromBill} availableTags={[...new Set(entries.flatMap(entry => entry.tags ?? []))]}
+  const captureDialog = composerOpen ? <EntryComposer onOpenBill={entry => viewActions.current.openComposer(entry)} entries={entries} items={items} pendingItemLink={captureLinkedItem} editingItem={editingItem} initialItemDraft={itemDraftSeed} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onEditItem={item => openItemComposer(item)} onCreateItemFromBill={createItemFromBill} availableTags={availableTags}
+    places={precisePlaces} onPlaceLocated={(address, point) => { void geocodes.cache(address, point); }}
     locale={locale} settings={settings} selectedDate={selectedKey} editing={editingEntry} sourceEntry={editingSourceEntry}
     readOnly={Boolean(historyPreview?.subject && (historyPreview.subject.type === "entry"
       ? !entries.some(entry => entry.id === historyPreview.subject!.value.id)
@@ -1260,6 +1335,14 @@ function App() {
   // behind it. The drawer (phone widths) is off-canvas and reserves nothing.
   const sidebarReserve = mobileViewport ? 0 : sidebarCollapsed && !mobileMenuOpen ? 72 : 246;
   return (
+    <PlaceServicesContext.Provider value={{ places, addresses: [...new Set([...entries.map(entry => entry.location), ...items.map(item => item.location)].filter((value): value is string => Boolean(value?.trim())))], config: geocodeConfig, cache: geocodes.cache, notice: message => notify(message), counts: locationCounts,
+      rename: async (address, name) => {
+        const now = new Date().toISOString();
+        await replaceEntryFields(entries.filter(entry => entry.location === address).map(before => ({ before, after: { ...before, location: name, updatedAt: now } })), items.filter(item => item.location === address).map(before => ({ before, after: { ...before, location: name, updatedAt: now } })));
+        const point = places.get(address);
+        if (point) await geocodes.cache(name, point, point.level ?? GEO_LEVEL_MANUAL, point.score ?? 100);
+        await geocodes.retry(address);
+      } }}>
       <div className={`app-shell${calendarShell ? " is-calendar-shell" : ""}${lowEndMode ? " is-low-end" : ""}${chatOpen ? " is-chat-open" : ""}`}
         style={{ "--nav-width": `${sidebarReserve}px` } as React.CSSProperties}>
       {!lowEndMode && !mobileViewport && <AmbientParticles />}
@@ -1286,14 +1369,13 @@ function App() {
           showWindowControls={!isMobilePlatform()}
         />
         <div ref={navigation.pagerRef} className="view-pager" data-axis={navigation.preview?.axis ?? "x"}>
-          {visiblePages.map(({ key, view }) => (
-          <div key={key} className={"content-scroll view-page" + (isCalendarView(view) ? " is-calendar-page" : "")} data-view={view}
+          {visiblePages.map(({ key, view, insightsTab: pageTab }) => (
+          <div key={key} className={"content-scroll view-page" + (isCalendarView(view) ? " is-calendar-page" : "")} data-view={view} data-insights-tab={view === "insights" ? pageTab : undefined}
             data-position={key === currentPageKey ? "current" : "preview"} aria-hidden={key !== currentPageKey || undefined} inert={key !== currentPageKey}
             style={key !== currentPageKey ? { "--page-origin": navigation.preview!.side * 100 + "%" } as React.CSSProperties : undefined}>
           <section className={isCalendarView(view)
             ? "content-inner content-inner--calendar"
             : view === "agenda" ? "content-inner content-inner--list"
-            : view === "ideas" ? "content-inner content-inner--ideas"
             : "content-inner"}>
             <div className="view-stage">
               {view === "agenda" && <>
@@ -1373,6 +1455,7 @@ function App() {
       <MotionPresence>{confirmDialog}</MotionPresence>
       {toast && <Toast toast={toast} locale={locale} onDismiss={dismissToast} />}
     </div>
+    </PlaceServicesContext.Provider>
   );
 }
 

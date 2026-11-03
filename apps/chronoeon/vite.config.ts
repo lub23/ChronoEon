@@ -21,6 +21,9 @@ export default defineConfig({
     watch: { ignored: ["**/src-tauri/**", "**/.audit/**"] }
   },
   envPrefix: ["VITE_", "TAURI_"],
+  // MapLibre 6 spawns its worker from a sibling module via import.meta.url;
+  // pre-bundling would point that URL at .vite/deps where the file does not exist.
+  optimizeDeps: { exclude: ["maplibre-gl"] },
   build: {
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: process.env.TAURI_ENV_DEBUG ? false : "esbuild",

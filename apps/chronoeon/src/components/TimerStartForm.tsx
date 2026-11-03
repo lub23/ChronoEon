@@ -1,13 +1,17 @@
+import { LocationField } from "./LocationField";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { categoryOptionsForKind, defaultCategoryForKind, inferLocationCandidates, type CaptureHistoryItem, type ChronoEonSettings, type Locale, type TimerStartOptions } from "@chronoeon/domain";
 import { categoryLabel, t } from "../i18n";
 import { AttachmentField } from "./AttachmentField";
 import { GlassSelect } from "./GlassSelect";
 import { Icon } from "./Icon";
-import { readCurrentPlace } from "../platform/location";
+import type { GeoPlace, GeoPoint } from "@chronoeon/domain";
 
 interface TimerStartFormProps {
   locale: Locale;
+  /** Trusted places for reusing a device fix, and where a fresh fix is cached. */
+  places?: GeoPlace[];
+  onPlaceLocated?: (address: string, point: GeoPoint) => void;
   settings: ChronoEonSettings;
   /** Draft category owned by the parent so it can live in a header slot. */
   category: string;
@@ -45,12 +49,11 @@ export function TimerCategorySelect({ locale, settings, value, onChange }: { loc
  * promise (focused on open, Enter starts); location, note and photos are
  * optional and can also be filled in after the clock is running.
  */
-export function TimerStartForm({ locale, settings, category, onCategoryChange, showCategory = false, autoFocus = true, disabled = false, onStart, onNotice, onTitleChange, history = [] }: TimerStartFormProps) {
+export function TimerStartForm({ locale, settings, category, onCategoryChange, showCategory = false, autoFocus = true, disabled = false, onStart, onNotice, onTitleChange, history = [], places = [], onPlaceLocated }: TimerStartFormProps) {
   const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
   const [note, setNote] = useState("");
   const [images, setImages] = useState<string[]>([]);
-  const [locating, setLocating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const locationTouchedRef = useRef(false);
   const today = useMemo(() => {
@@ -93,21 +96,6 @@ export function TimerStartForm({ locale, settings, category, onCategoryChange, s
     setImages([]);
   }
 
-  async function locateDevice() {
-    if (locating) return;
-    setLocating(true);
-    try {
-      const place = await readCurrentPlace(locale);
-      if (!place) {
-        onNotice?.(t("locationUnavailable", locale), "warning");
-        return;
-      }
-      setLocation(place.label);
-    } finally {
-      setLocating(false);
-    }
-  }
-
   return (
     <form className="timer-start-form" onSubmit={(event) => { event.preventDefault(); begin(); }}>
       <div className="timer-start-fields">
@@ -121,31 +109,8 @@ export function TimerStartForm({ locale, settings, category, onCategoryChange, s
           <span>{t("title", locale)}</span>
           <input ref={inputRef} value={title} onChange={(event) => { setTitle(event.target.value); onTitleChange?.(event.target.value); }} placeholder={t("timerPlaceholder", locale)} />
         </label>
-        <label className="field-label field-label--large timer-location-field">
-          <span>
-            {t("location", locale)}
-            <button
-              type="button"
-              className="icon-button location-locate"
-              onClick={() => void locateDevice()}
-              disabled={locating}
-              aria-label={t("useDeviceLocation", locale)}
-              title={t("useDeviceLocation", locale)}
-            >
-              <Icon name="map-pin" size={14} />
-            </button>
-          </span>
-          <input value={location} onChange={(event) => { locationTouchedRef.current = true; setLocation(event.target.value); }} placeholder={t("locationPlaceholder", locale)} />
-        </label>
+        <LocationField value={location} locale={locale} disabled={disabled} suggestions={locationSuggestions} places={places} onPlaceLocated={onPlaceLocated} onChange={value => { locationTouchedRef.current = true; setLocation(value ?? ""); }} />
       </div>
-      {locationSuggestions.length > 1 && (
-        <div className="field-suggestions" role="group" aria-label={t("location", locale)}>
-          {locationSuggestions.map(suggestion => (
-            <button key={suggestion.value} type="button" className={location === suggestion.value ? "is-active" : ""}
-              onClick={() => { locationTouchedRef.current = true; setLocation(suggestion.value); }}>{suggestion.value}</button>
-          ))}
-        </div>
-      )}
       <label className="field-label timer-note-field"><span>{t("note", locale)}</span>
         <textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder={t("notePlaceholder", locale)} />
       </label>

@@ -1,5 +1,5 @@
 import { extractExplicit, extractScheduleFields, type CaptureIssue } from "./explicit";
-export { completeCapture, captureMatchPositions, CAPTURE_COMMANDS, type CaptureIssue } from "./explicit";
+export { completeCapture, captureMatchPositions, parseRecurrenceToken, parseReminderToken, parseStatusToken, CAPTURE_COMMANDS, CAPTURE_TOKEN_PREFIXES, REMINDER_MINUTES, type CaptureCompletion, type CaptureCompletionValues, type CaptureIssue } from "./explicit";
 import type { ItemDraft } from "../item";
 import { defaultItemCategoryForCalendar } from "../settings";
 import type { EntryDraft, EntryKind, Locale } from "../entry";
@@ -18,7 +18,7 @@ import { extractTimeSpans, resolveTime } from "./time";
 import { CaptureDecisionIndex, type CaptureFieldDecisions } from "./decision";
 
 export { CaptureDecisionIndex, type CaptureFieldDecisions } from "./decision";
-export { buildCaptureHabits, describeCaptureHabits, type CaptureHabits, type CaptureHabitTitle, type CaptureHabitCount } from "./habits";
+export { CaptureHabitLearner, buildCaptureHabits, describeCaptureHabits, type CaptureHabits, type CaptureHabitTitle, type CaptureHabitCount } from "./habits";
 
 export interface CaptureHistoryItem {
   id?: string;
@@ -129,21 +129,26 @@ export function parseCapture(input: string, { now, locale, settings, history = [
     explicit.issues.push({ field: "status", value: explicit.fields.status, code: "conflict" });
     delete explicit.fields.status;
   }
-  if (kind === "idea" && Object.keys(schedule).length) explicit.issues.push({ field: "recurrence", value: schedule.recurrence ?? schedule.reminder ?? "", code: "conflict" });
-  if (schedule.recurrence === "weekly" && !schedule.recurringDays) schedule.recurringDays = [new Date(`${time.date}T12:00:00`).getDay()];
+  if (kind === "idea" && (Object.keys(schedule).length || explicit.fields.recurrence || explicit.fields.reminder)) {
+    explicit.issues.push({ field: "recurrence", value: schedule.recurrence ?? explicit.fields.recurrence ?? schedule.reminder ?? explicit.fields.reminder ?? "", code: "conflict" });
+    delete explicit.fields.recurrence; delete explicit.fields.recurringDays; delete explicit.fields.reminder;
+  }
+  const draft: EntryDraft = {
+    kind,
+    title,
+    ...time,
+    calendar: settings.defaultCalendarID,
+    category: category.value,
+    location: location ?? (settings.locationAutofill ? decisions.location.selected : undefined),
+    note,
+    ...(kind === "bill" ? money : {}),
+    ...(kind !== "idea" ? schedule : {}),
+    ...explicit.fields,
+  };
+  // A weekly repeat without named days repeats on the day it was scheduled for.
+  if (draft.recurrence === "weekly" && !draft.recurringDays?.length) draft.recurringDays = [new Date(`${draft.date}T12:00:00`).getDay()];
   return {
-    draft: {
-      kind,
-      title,
-      ...time,
-      calendar: settings.defaultCalendarID,
-      category: category.value,
-      location: location ?? (settings.locationAutofill ? decisions.location.selected : undefined),
-      note,
-      ...(kind === "bill" ? money : {}),
-      ...(kind !== "idea" ? schedule : {}),
-      ...explicit.fields,
-    },
+    draft,
     spans: text.spans.sort((a, b) => a.start - b.start).map(({ kind, text }) => ({ kind, text })),
     confidence: { category: category.confidence },
     decisions,
@@ -172,7 +177,8 @@ export function parseAssetCapture(input: string, options: CaptureOptions): { dra
     draft: { name: parsed.draft.title, calendarId: options.settings.defaultCalendarID,
       category: category?.[0]?.id ?? defaultItemCategoryForCalendar(options.settings), acquisition: gift ? "gift" : "purchase",
       acquiredOn: parsed.draft.date, acquiredAt: parsed.draft.start ?? "00:00", cost: Math.abs(parsed.draft.amount ?? 0),
-      currency: parsed.draft.currency ?? options.settings.bill.currency, location: parsed.draft.location, payment: parsed.draft.payment, notes: parsed.draft.note },
+      currency: parsed.draft.currency ?? options.settings.bill.currency, location: parsed.draft.location, payment: parsed.draft.payment,
+      tags: parsed.draft.tags, notes: parsed.draft.note },
     link: parsed.link, issues,
   };
 }

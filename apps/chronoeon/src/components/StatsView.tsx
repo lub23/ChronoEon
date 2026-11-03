@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { MotionPresence, createMotionPortal as createPortal } from "./MotionPresence";
 import {
   aggregateBillStats,
@@ -28,6 +28,8 @@ import {
   type StatsPresetKey,
   type StatsRange,
   titleFor,
+  type GeoPlace,
+  type GeoPoint,
 } from "@chronoeon/domain";
 import { catalogLabel, categoryLabel, compositeCategoryLabel, t, type MessageKey } from "../i18n";
 import { GlassDatePicker } from "./GlassDateTimePicker";
@@ -40,6 +42,11 @@ import { registerModalDismiss, useFocusTrap } from "./modalLayer";
 import { usePersistentPreference } from "../hooks/usePersistentPreference";
 import { StatsHeatmap } from "./StatsHeatmap";
 import { ItemsView } from "./ItemsView";
+import { IdeasView } from "./IdeasView";
+import { BudgetAccountsCard } from "./BudgetAccountsCard";
+import type { InsightsTab } from "./insightsTabs";
+export type { InsightsTab } from "./insightsTabs";
+const MapView = lazy(() => import("./MapView").then(module => ({ default: module.MapView })));
 
 interface StatsViewProps {
   entries: Entry[];
@@ -56,16 +63,53 @@ interface StatsViewProps {
   onEditItem?: (item: Item) => void;
   onOpenBill?: (entry: Entry) => void;
   onEditEntry?: (entry: Entry) => void;
+  /** Budget and balances are shared settings; without this the card is read-only. */
+  onSettingsChange?: (settings: ChronoEonSettings) => void;
+  onAddIdea?: () => void;
+  /** Geocode cache and its controls, for the map tab. */
+  places?: Map<string, GeoPlace>;
+  geocodeConfigured?: boolean;
+  geocodePending?: number;
+  onOpenSettings?: () => void;
+  onExcludePlace?: (address: string) => void;
+  onRetryPlace?: (address: string) => void;
+  onSetPlace?: (address: string, point: GeoPoint) => void;
 }
 
 type StatsTab = "bills" | "tasks";
-export type InsightsTab = StatsTab | "items";
 
+/**
+ * One Insights surface, five tabs: bills and time keep the statistics layout;
+ * assets and ideas share a switch because both are collections of things; the
+ * map locates every record with a place.
+ */
 export function StatsView({ tab = "bills", onTabChange, ...props }: StatsViewProps & { tab?: InsightsTab; onTabChange?: (tab: InsightsTab) => void }) {
-  if (tab !== "items") return <StatsDetailView {...props} tab={tab} onTabChange={value => onTabChange?.(value)} />;
-  return <section className="stats-page">
-    <ItemsView items={props.items ?? []} entries={props.allEntries ?? props.entries} locale={props.locale} settings={props.settings} today={props.today} search={props.search} onAdd={props.onAddItem} onEdit={props.onEditItem} onOpenBill={props.onOpenBill} />
-  </section>;
+  const { locale } = props;
+  if (tab === "map") {
+    return <section className="stats-page stats-page--map">
+      <Suspense fallback={<div className="panel" role="status">{t("loading", locale)}</div>}>
+        <MapView entries={props.entries} items={props.items ?? []} places={props.places ?? new Map()} locale={locale} settings={props.settings} today={props.today}
+          configured={Boolean(props.geocodeConfigured)} geocodePending={props.geocodePending ?? 0}
+          onOpenEntry={entry => props.onEditEntry?.(entry)} onOpenItem={item => props.onEditItem?.(item)} onOpenSettings={() => props.onOpenSettings?.()}
+          onExcludePlace={props.onExcludePlace} onRetryPlace={props.onRetryPlace} onSetPlace={props.onSetPlace} />
+      </Suspense>
+    </section>;
+  }
+  if (tab === "items" || tab === "ideas") {
+    return <section className="stats-page stats-page--things">
+      <div className="stats-tabs things-switch" role="tablist" aria-label={t("insights", locale)}>
+        {(["items", "ideas"] as const).map((value) => (
+          <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? "is-active" : ""} onClick={() => onTabChange?.(value)}>
+            <Icon name={value === "items" ? "box" : "idea"} size={14} />{t(value, locale)}
+          </button>
+        ))}
+      </div>
+      {tab === "items"
+        ? <ItemsView items={props.items ?? []} entries={props.allEntries ?? props.entries} locale={locale} settings={props.settings} today={props.today} search={props.search} onAdd={props.onAddItem} onEdit={props.onEditItem} onOpenBill={props.onOpenBill} />
+        : <IdeasView entries={props.entries} locale={locale} settings={props.settings} search={props.search ?? ""} today={props.today} onEdit={entry => props.onEditEntry?.(entry)} onNew={() => props.onAddIdea?.()} />}
+    </section>;
+  }
+  return <StatsDetailView {...props} tab={tab} onTabChange={value => onTabChange?.(value)} />;
 }
 interface CategoryDetail {
   title: string;
@@ -218,7 +262,7 @@ function bucketLabels(buckets: ReviewBucket[], granularity: ReviewGranularity, l
   });
 }
 
-function StatsDetailView({ entries, locale, settings, today, search = "", onToggle, onStatus, onOpenDate, onEditEntry, tab, onTabChange }: StatsViewProps & { tab: StatsTab; onTabChange: (tab: InsightsTab) => void }) {
+function StatsDetailView({ entries, allEntries, locale, settings, today, search = "", onToggle, onStatus, onOpenDate, onEditEntry, onSettingsChange, tab, onTabChange }: StatsViewProps & { tab: StatsTab; onTabChange: (tab: InsightsTab) => void }) {
   const [preset, setPreset] = usePersistentPreference<StatsPresetKey>("stats-preset", "this_month");
   const [customRange, setCustomRange] = usePersistentPreference<StatsRange | null>("stats-custom-range", null);
  const [keyword, setKeyword] = usePersistentPreference("stats-keyword", "");
@@ -412,6 +456,7 @@ function StatsDetailView({ entries, locale, settings, today, search = "", onTogg
         </section>
       )}
 
+      {tab === "bills" && <BudgetAccountsCard entries={allEntries ?? entries} settings={settings} locale={locale} symbol={symbol} today={today} onSettingsChange={onSettingsChange} />}
       {tab === "bills" ? (
         <BillsPanel bills={bills} locale={locale} symbol={symbol} onOpenDetail={setDetail} />
       ) : (

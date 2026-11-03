@@ -1,7 +1,7 @@
 import type { useSyncService } from "../sync/useSyncService";
 import { useTouchDevice } from "../hooks/useTouchDevice";
 import { useEffect, useRef, useState } from "react";
-import { billCategoryForValue, type CalendarConfig, type ChronoEonSettings, type Item } from "@chronoeon/domain";
+import { billCategoryForValue, type CalendarConfig, type ChronoEonSettings, type GeocodeProvider, type Item } from "@chronoeon/domain";
 import { OperationHistory } from "./OperationHistory";
 import { AttachmentMaintenance } from "./AttachmentMaintenance";
 import type { OperationHistoryRecord, SyncStore } from "@chronoeon/storage";
@@ -19,6 +19,7 @@ import { SyncSettingsPanel } from "./SyncSettingsPanel";
 import type { SyncConfig } from "../sync/types";
 import { GlassSelect } from "./GlassSelect";
 import { Icon } from "./Icon";
+import { MapServiceSettings } from "./MapServiceSettings";
 import { backgroundTimingSupported } from "../platform/background";
 import { BackgroundTimingSettings } from "./BackgroundTimingSettings";
 import { registerModalDismiss, useFocusTrap } from "./modalLayer";
@@ -37,6 +38,14 @@ export interface AppPreferences {
   captureShortcutEnabled: boolean;
   lowEndMode: boolean;
   resizeStep?: 5 | 10;
+  /** Geocoding service and its credentials; device-local like the shortcut. */
+  geocodeProvider?: GeocodeProvider;
+  geocodeApiId?: string;
+  geocodeApiKey?: string;
+  amapKey?: string;
+  /** Empty means the provider's default endpoint. */
+  apihzEndpoint?: string;
+  amapEndpoint?: string;
 }
 
 interface SettingsDialogProps {
@@ -49,6 +58,8 @@ interface SettingsDialogProps {
   transferBusy: boolean;
   notificationPermission: NotificationPermissionState;
   shortcutStatus: "registered" | "conflict" | "unsupported" | "off";
+  /** How many places the geocoder cache knows and how many are still queued. */
+  geocodeStatus?: { cached: number; pending: number };
   initialSection?: SettingsSection;
   aiPreferences: AIProviderPreferences;
   onAIPreferencesChange: (preferences: AIProviderPreferences) => void;
@@ -116,6 +127,7 @@ export function SettingsDialog({
   transferBusy,
   notificationPermission,
   shortcutStatus,
+  geocodeStatus,
   initialSection = "general",
   aiPreferences,
   onAIPreferencesChange,
@@ -323,7 +335,7 @@ export function SettingsDialog({
     closeRef.current();
   }), []);
 
-  const sectionItems: Array<{ id: SettingsSection; icon: "settings" | "calendar" | "tag" | "bell" | "sparkle" | "download" | "refresh"; label: MessageKey }> = [
+  const sectionItems: Array<{ id: SettingsSection; icon: "settings" | "calendar" | "tag" | "bell" | "sparkle" | "download" | "refresh" | "map-pin"; label: MessageKey }> = [
     { id: "general", icon: "settings", label: "settingsGeneral" },
     { id: "calendar", icon: "calendar", label: "settingsCalendar" },
     { id: "catalogs", icon: "tag", label: "settingsCatalogs" },
@@ -574,14 +586,15 @@ export function SettingsDialog({
               </div>
             </>}
 
-            {section === "ai" && (
+            {section === "ai" && <>
+              <MapServiceSettings locale={locale} preferences={preferences} geocodeStatus={geocodeStatus} onChange={onPreferencesChange} />
               <AISettingsPanel
                 locale={locale}
                 preferences={aiPreferences}
                 onChange={onAIPreferencesChange}
                 onTest={onTestAI}
               />
-            )}
+            </>}
 
             {section === "data" && <>
               <SectionHeading title={t("settingsData", locale)} detail={t("syncDataNote", locale)} />
@@ -589,7 +602,7 @@ export function SettingsDialog({
                 <div className="settings-data-block"><div className="settings-option-copy"><strong>{t("exportEntries", locale)}</strong><small>{t("entriesCsvDetail", locale)}</small></div><button type="button" className="secondary-button" disabled={transferBusy} onClick={() => void onExportEntries()}><Icon name="download" size={15} />{transferBusy ? t("importExportBusy", locale) : t("exportEntries", locale)}</button></div>
               </div>
               {isTauri && historyJournal && <AttachmentMaintenance locale={locale} journal={historyJournal} onChanged={() => syncService.refreshUsage()} />}
-              {historyJournal && onHistoryRestored && <OperationHistory locale={locale} journal={historyJournal} onRestored={onHistoryRestored} onPreview={onHistoryPreview} />}
+              {historyJournal && onHistoryRestored && <OperationHistory locale={locale} journal={historyJournal} settings={settings} onRestored={onHistoryRestored} onPreview={onHistoryPreview} />}
               {isTauri
                 ? <SyncSettingsPanel entries={entries} locale={locale} config={syncConfig} onChange={onSyncConfigChange} service={syncService} />
                 : <div className="settings-card"><p className="settings-footnote">{t("syncNeedsTauri", locale)}</p></div>}

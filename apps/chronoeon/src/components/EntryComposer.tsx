@@ -1,3 +1,4 @@
+import { LocationField } from "./LocationField";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ALL_DAY_REMINDERS,
@@ -39,10 +40,9 @@ import { TagInput } from "./TagInput";
 import { TaskStatusMenu } from "./TaskSummaryList";
 import { EntryGlyph, TaskStatusGlyph } from "./ItemGlyph";
 import { registerModalDismiss, useFocusTrap } from "./modalLayer";
-import { FieldSuggestions, locationFieldCandidates } from "./FieldSuggestions";
-import { readCurrentPlace } from "../platform/location";
+import { locationFieldCandidates } from "./FieldSuggestions";
 import { labeledOptions, priorities, recurrenceOptions, reminderLabels, reminderTriggerLabel, weekdayIndexForDate } from "./entryFieldLabels";
-import type { Item } from "@chronoeon/domain";
+import type { GeoPlace, GeoPoint, Item } from "@chronoeon/domain";
 import { ItemFields, ItemPhotoField } from "./ItemFields";
 import { acquisitionLabels, itemCategoryIconName } from "./ItemsView";
 import { RecurrenceWeekdays } from "./RecurrenceWeekdays";
@@ -74,6 +74,9 @@ interface EntryComposerProps {
   onSaveItem?: (draft: ItemDraft, id?: string) => Promise<void>;
   onDeleteItem?: (id: string) => void | Promise<void>;
   readOnly?: boolean;
+  /** Trusted places for reusing a device fix, and where a fresh fix is cached. */
+  places?: GeoPlace[];
+  onPlaceLocated?: (address: string, point: GeoPoint) => void;
 }
 
 function normalizeScheduleTimes(draft: EntryDraft, timeScale: ChronoEonSettings["timeScale"]): EntryDraft {
@@ -184,6 +187,8 @@ export function EntryComposer({
   onSaveItem,
   onDeleteItem,
   readOnly = false,
+  places = [],
+  onPlaceLocated,
 }: EntryComposerProps) {
   const occurrence = Boolean(editing?.recurrenceSourceId && editing.occurrenceDate);
   const source = sourceEntry ?? editing;
@@ -217,8 +222,6 @@ export function EntryComposer({
   const [deleting, setDeleting] = useState(false);
   const deletingRef = useRef(false);
   const itemBusyRef = useRef(false);
-  const [locating, setLocating] = useState(false);
-  const locationInput = useRef<HTMLInputElement | null>(null);
   const now = new Date();
   const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   // A selected value wins over every later title-derived suggestion.
@@ -251,12 +254,12 @@ export function EntryComposer({
     });
   }, [itemDraft?.name, itemDraft?.calendarId, itemHistory, itemSuggestions, editingItem, settings]);
   const [statusMenu, setStatusMenu] = useState<{ left: number; top: number } | null>(null);
-  const locationSuggestions = useMemo(
-    () => settings.locationAutofill && activeKind !== "item" && !readOnly
+  const locationSuggestions = useMemo(() => {
+    const learned = settings.locationAutofill && activeKind !== "item" && !readOnly
       ? locationFieldCandidates(draft.title, draft.location, localHistory, draft.date)
-      : [],
-    [activeKind, draft.date, draft.location, draft.title, localHistory, settings.locationAutofill, readOnly],
-  );
+      : [];
+    return learned;
+  }, [activeKind, draft.date, draft.location, draft.title, localHistory, settings.locationAutofill, readOnly]);
   // The draft at open time is the discard baseline: Esc (or the close button)
   // with unsaved changes asks before losing them.
   const pristineRef = useRef<string>(JSON.stringify(initialDraft(selectedDate, occurrence ? editing : source, settings, seed)));
@@ -385,22 +388,6 @@ export function EntryComposer({
     setScope(next);
     setDraft(initialDraft(selectedDate, next === "occurrence" ? editing : source, settings, seed));
     setError(null);
-  }
-
-  /** Fill the location with a real system address, including street/POI when available. */
-  async function locateDevice() {
-    if (locating || occurrenceOnly) return;
-    setLocating(true);
-    try {
-      const place = await readCurrentPlace(locale);
-      if (!place) {
-        onNotice?.(t("locationUnavailable", locale), "warning");
-        return;
-      }
-      update("location", place.label);
-    } finally {
-      setLocating(false);
-    }
   }
 
   function changeAllDay(allDay: boolean) {
@@ -688,11 +675,13 @@ export function EntryComposer({
               settings={settings}
               today={todayKey}
               busy={itemBusy}
-              editing={Boolean(editingItem)}
               itemId={editingItem?.id}
               onOpenBill={onOpenBill}
               showDate
               showPhotos={false}
+              availableTags={availableTags}
+              places={places}
+              onPlaceLocated={onPlaceLocated}
               onError={message => setError(message as MessageKey)}
             />
           )}
@@ -704,51 +693,7 @@ export function EntryComposer({
               <input disabled={occurrenceOnly} autoFocus={!occurrenceOnly} value={draft.title} onChange={(event) => update("title", event.target.value)} placeholder={t("titlePlaceholder", locale)} />
               {error === "required" && <small>{t("required", locale)}</small>}
             </label>
-            {draft.kind !== "idea" ? (
-              <label className="field-label location-field">
-                <span>
-                  {t("location", locale)}
-                  <button
-                    type="button"
-                    className="icon-button location-locate"
-                    onClick={() => void locateDevice()}
-                    disabled={occurrenceOnly || locating}
-                    aria-label={t("useDeviceLocation", locale)}
-                    title={t("useDeviceLocation", locale)}
-                  >
-                    <Icon name="map-pin" size={14} />
-                  </button>
-                </span>
-                <div className="location-input-wrap">
-                  <input
-                    disabled={occurrenceOnly}
-                    ref={locationInput}
-                    value={draft.location ?? ""}
-                    onChange={(event) => { locationTouchedRef.current = true; update("location", event.target.value); }}
-                    placeholder={t("locationPlaceholder", locale)}
-                  />
-                  {Boolean(draft.location) && (
-                    <button
-                      type="button"
-                      className="icon-button location-clear"
-                      disabled={occurrenceOnly}
-                      onClick={() => { locationTouchedRef.current = true; update("location", undefined); }}
-                      aria-label={t("clearLocation", locale)}
-                      title={t("clearLocation", locale)}
-                    >
-                      <Icon name="close" size={11} />
-                    </button>
-                  )}
-                  <FieldSuggestions inputRef={locationInput} locale={locale} suggestions={locationSuggestions}
-                    onSelect={value => { locationTouchedRef.current = true; update("location", value); }} />
-                </div>
-              </label>
-            ) : (
-              <label className="field-label idea-title-tags">
-                <span>{t("tags", locale)}</span>
-                <TagInput value={draft.tags} available={availableTags} onChange={(tags) => update("tags", tags)} locale={locale} />
-              </label>
-            )}
+            <LocationField locale={locale} value={draft.location} disabled={occurrenceOnly} places={places} onPlaceLocated={onPlaceLocated} suggestions={locationSuggestions} onChange={value => { locationTouchedRef.current = true; update("location", value); }} />
           </div>
           )}
 
@@ -765,7 +710,8 @@ export function EntryComposer({
           )}
 
           {activeKind !== "item" && (
-          <div className={draft.kind === "task" || draft.kind === "event" ? "when-groups" : "when-groups when-groups--single"}>
+          <div className={draft.kind === "task" || draft.kind === "event" ? "when-tags-row is-schedule" : "when-tags-row"}>
+          <div className={draft.kind === "task" || draft.kind === "event" ? "when-groups when-groups--schedule" : "when-groups when-groups--single"}>
             <div className="when-group">
               <span>{t("time", locale)}</span>
               <div className="when-controls">
@@ -817,6 +763,13 @@ export function EntryComposer({
                 </div>
               </div>
             )}
+          </div>
+          {(draft.kind === "idea" || draft.kind === "bill") && (
+          <label className="field-label when-tags-field">
+            <span>{t("tags", locale)}</span>
+            <TagInput value={draft.tags} available={availableTags} onChange={(tags) => update("tags", tags)} locale={locale} />
+          </label>
+          )}
           </div>
           )}
 
@@ -909,17 +862,15 @@ export function EntryComposer({
                 </section>
               )}
 
-              {/* A three-line note beside the single-line tags. */}
+              {/* The note beside the kind's own extras: importance for schedules, the linked asset for bills. */}
               <div className={draft.kind === "idea" ? "composer-pair composer-pair--note-only" : "composer-pair"}>
                 <label className="field-label"><span>{t("note", locale)}</span><textarea rows={4} value={draft.note ?? ""} onChange={(event) => update("note", event.target.value)} placeholder={t("notePlaceholder", locale)} /></label>
                 <div className="composer-pair-side">
-                  {draft.kind !== "idea" && <label className="field-label"><span>{t("tags", locale)}</span>
-                    <TagInput value={draft.tags} available={availableTags} onChange={(tags) => update("tags", tags)} locale={locale} />
-                  </label>}
                   {/* Importance and urgency sit under the tags, where a narrow
                       phone still fits them. */}
                   {(draft.kind === "task" || draft.kind === "event") && (
                     <div className="field-stack">
+                      <label className="field-label"><span>{t("tags", locale)}</span><TagInput value={draft.tags} available={availableTags} onChange={tags => update("tags", tags)} locale={locale} /></label>
                       <label className="field-label"><span>{t("priority", locale)}</span>
                         <GlassSelect
                           value={draft.priority ?? ""}

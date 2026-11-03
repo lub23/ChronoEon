@@ -15,11 +15,19 @@ export interface CalendarCategory {
   builtinKey?: string;
 }
 
+/** A balance the user typed in; bills recorded after `at` move it. */
+export interface PaymentBalanceAnchor {
+  amount: number;
+  /** ISO timestamp of the manual update. */
+  at: string;
+}
+
 export interface PaymentMethodConfig {
   id: string;
   name: string;
   builtin?: boolean;
   builtinKey?: string;
+  balance?: PaymentBalanceAnchor;
 }
 
 export interface ItemCategoryConfig {
@@ -58,6 +66,8 @@ export interface CalendarConfig {
   defaultPaymentMethodId: string;
   itemCategories: ItemCategoryConfig[];
   defaultItemCategoryId: string;
+  /** Monthly spending budget in the shared bill currency; absent = none. */
+  budgetMonthly?: number;
   provider?: string;
   externalId?: string;
 }
@@ -433,11 +443,16 @@ function normalizePaymentMethods(value: unknown, fallback: PaymentMethodConfig[]
     const id = item.id.trim();
     const name = item.name.trim();
     const builtinKey = item.builtin !== false ? builtinPaymentKey(name) ?? builtinPaymentKey(id) : undefined;
+    const anchor = asRecord(item.balance);
+    const balance = typeof anchor.amount === "number" && Number.isFinite(anchor.amount) && typeof anchor.at === "string" && anchor.at.trim()
+      ? { amount: anchor.amount, at: anchor.at.trim() }
+      : undefined;
     return [{
       id,
       name,
       ...(item.builtin === true || builtinKey ? { builtin: true } : {}),
       ...(typeof item.builtinKey === "string" ? { builtinKey: item.builtinKey } : builtinKey ? { builtinKey } : {}),
+      ...(balance ? { balance } : {}),
     }];
   });
   return methods.length ? [...new Map(methods.map(method => [method.id, method])).values()] : structuredClone(fallback);
@@ -530,6 +545,8 @@ export function normalizeChronoEonSettings(value: unknown): ChronoEonSettings {
       defaultPaymentMethodId,
       itemCategories,
       defaultItemCategoryId,
+      ...(typeof calendar.budgetMonthly === "number" && Number.isFinite(calendar.budgetMonthly) && calendar.budgetMonthly > 0
+        ? { budgetMonthly: calendar.budgetMonthly } : {}),
       provider: typeof calendar.provider === "string" ? calendar.provider : undefined,
       externalId: typeof calendar.externalId === "string" ? calendar.externalId : undefined
     }];

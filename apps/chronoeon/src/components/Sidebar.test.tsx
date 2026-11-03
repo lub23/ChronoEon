@@ -144,10 +144,10 @@ describe("Sidebar", () => {
     const insightsButton = [...host.querySelectorAll<HTMLButtonElement>(".nav-item")]
       .find((button) => button.getAttribute("aria-label") === "统计")!;
     await act(async () => { insightsButton.click(); });
-    const itemsOption = [...host.querySelectorAll<HTMLButtonElement>(".nav-day-menu button")]
-      .find((button) => button.textContent?.includes("物品"))!;
-    await act(async () => { itemsOption.click(); });
-    expect(onInsightsTabChange).toHaveBeenCalledWith("items");
+    const tasksOption = [...host.querySelectorAll<HTMLButtonElement>(".nav-day-menu button")]
+      .find((button) => button.textContent?.includes("日程"))!;
+    await act(async () => { tasksOption.click(); });
+    expect(onInsightsTabChange).toHaveBeenCalledWith("tasks");
     expect(onViewChange).toHaveBeenCalledWith("insights");
 
     act(() => {
@@ -166,10 +166,10 @@ describe("Sidebar", () => {
       );
     });
     const controls = [...host.querySelectorAll<HTMLButtonElement>(".sidebar-insights-switch button")];
-    expect(controls).toHaveLength(3);
+    expect(controls).toHaveLength(2);
     expect(controls.find((button) => button.textContent?.includes("物品"))?.getAttribute("aria-pressed")).toBe("true");
-    await act(async () => { controls[0].click(); });
-    expect(onInsightsTabChange).toHaveBeenCalledWith("bills");
+    await act(async () => { controls[1].click(); });
+    expect(onInsightsTabChange).toHaveBeenCalledWith("ideas");
   });
 
   it("shows the running version with an update check that needs the app shell", async () => {

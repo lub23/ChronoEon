@@ -5,8 +5,7 @@ import { titleFor, type ChronoEonSettings, type Locale } from "../domain/entry";
 import type { DayPhotoGroup } from "../hooks/useDayPhotos";
 import { categoryOptionsForKind } from "@chronoeon/domain";
 import { categoryLabel, t } from "../i18n";
-import { LocationGlyph } from "./ItemGlyph";
-import { openImagePreview } from "./photoPreviewBus";
+import { PhotoFrame } from "./PhotoFrame";
 
 interface PhotoWallProps {
   locale: Locale;
@@ -53,39 +52,7 @@ export function PhotoWall({ locale, settings, days, groups, onSelectDate }: Phot
               const categoryOption = categoryOptionsForKind(entry.kind, settings, entry.calendar)
                 .find((option) => option.value === entry.category);
               const category = categoryLabel(entry.category, locale, categoryOption?.label, settings);
-              // Front sheet first; at most two sheets peek behind it.
-              const sheets = group.urls.slice(0, 3);
-              return (
-                <article key={group.id} className="photo-wall-item">
-                  <button
-                    type="button"
-                    className={`photo-wall-stack sheets-${sheets.length}`}
-                    onClick={() => openImagePreview(group.urls, 0)}
-                    aria-label={`${t("photoPreview", locale)} · ${title}`}
-                    title={t("photoPreview", locale)}
-                  >
-                    {sheets.map((url, index) => (
-                      <span key={`${group.id}-${index}`} className={`photo-wall-sheet sheet-${index}`}>
-                        <img src={url} alt="" loading="lazy" />
-                      </span>
-                    ))}
-                  </button>
-                  <div className="photo-wall-caption">
-                    <strong className="photo-wall-title">
-                      <i className={`photo-wall-dot is-${entry.kind}`} title={t(entry.kind, locale)} aria-hidden="true" />
-                      <i className="photo-wall-dot is-category" style={{ background: accent }} title={category} aria-hidden="true" />
-                      <span>{title}</span>
-                    </strong>
-                    {entry.note && <p className="photo-wall-note">{entry.note}</p>}
-                    {entry.location && (
-                      <span className="photo-wall-location" title={entry.location}>
-                        <LocationGlyph size={10} />
-                        <span>{entry.location}</span>
-                      </span>
-                    )}
-                  </div>
-                </article>
-              );
+              return <PhotoFrame key={group.id} title={title} note={entry.note} location={entry.location} urls={group.urls} locale={locale} kind={entry.kind} category={category} accent={accent} />;
             })}
           </div>
         </section>

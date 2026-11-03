@@ -1,4 +1,6 @@
+#[cfg(not(target_os = "android"))]
 use eventsource_stream::Eventsource;
+#[cfg(not(target_os = "android"))]
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 
@@ -60,6 +62,9 @@ impl Completion {
 #[cfg(test)]
 pub async fn read(response: reqwest::Response) -> Result<Value, String> { read_with_progress(response, None).await }
 
+/// Desktop reads the SSE body here; Android assembles chunks delivered by the
+/// Kotlin HTTP client through `Completion` instead.
+#[cfg(not(target_os = "android"))]
 pub async fn read_with_progress(response: reqwest::Response, progress: Option<tauri::ipc::Channel<Value>>) -> Result<Value, String> {
     let mut size = 0usize;
     let bytes = response.bytes_stream().map(move |chunk| {

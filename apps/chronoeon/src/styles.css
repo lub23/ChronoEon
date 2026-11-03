@@ -1158,10 +1158,20 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .composer-category-field--top { min-width: 84px; }
 .composer-status-toggle { width: 34px; height: 34px; flex: 0 0 34px; border: 1px solid var(--line-strong); border-radius: 10px; background: color-mix(in srgb, var(--surface-solid) 55%, transparent); color: var(--ink-soft); }
 .composer-status-toggle:disabled { opacity: .58; }
-.title-location-row { display: grid; grid-template-columns: minmax(0, 9fr) minmax(0, 7fr); align-items: end; gap: 10px; }
+.title-location-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 10px; }
 .title-location-row .field-label input { height: 34px; font-size: 13px; }
-.idea-title-tags { min-width: 0; }
-.idea-title-tags .tag-input, .idea-title-tags .tag-input input { width: 100%; min-width: 0; }
+/* The clock beside the tags, half the row each; schedules stack start over end on the left. */
+.when-tags-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.when-groups.when-groups--stacked { grid-template-columns: minmax(0, 1fr); }
+.when-tags-field { min-width: 0; gap: 5px; }
+.when-tags-field > span { color: var(--ink-faint); font-size: 10px; font-weight: 650; letter-spacing: .04em; }
+.when-tags-field .tag-input, .when-tags-field .tag-input input { width: 100%; min-width: 0; }
+.when-tags-field .tag-input input { height: 34px; }
+/* A disposal keeps its clock beside the sale bill, half the row each. */
+.item-disposal-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; }
+.item-disposal-row > .when-group > span { color: var(--ink-faint); font-size: 10px; font-weight: 650; letter-spacing: .04em; }
+.item-disposal-row .item-bill-picker { min-width: 0; }
+.item-disposal-row .item-bill-picker .glass-select { width: 100%; max-width: none; }
 .field-label--title input { height: 34px; padding: 0 12px; background: var(--surface-solid); font-family: var(--font-serif); font-size: 13px; }
 .location-locate { width: 20px; height: 20px; flex: 0 0 20px; margin-left: 3px; border-radius: 6px; }
 .location-field .location-input-wrap { position: relative; display: block; width: 100%; }
@@ -1765,7 +1775,8 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 @media (max-width: 430px) {
   /* The title and the location keep their two columns at every width: the row
      used to stack the moment the keyboard narrowed the viewport. */
-  .title-location-row { grid-template-columns: minmax(0, 9fr) minmax(0, 7fr); gap: 7px; }
+  .title-location-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .when-tags-row { gap: 7px; }
   .composer-kind-bar { padding-inline: 13px; }
   .composer-form { padding-inline: 13px; }
   .when-groups { gap: 8px; }
@@ -4708,6 +4719,28 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
 .location-locate:disabled { opacity: .45; }
 
 .view-dock-menu-separator { display: block; height: 1px; margin: 3px 2px; background: var(--line); }
+/* Three fanned leaves in a corner: this button holds more than one view. */
+.view-dock-item.has-stack { padding-right: 0; }
+.view-dock-stack-mark { position: absolute; right: 5px; bottom: 5px; display: flex; flex-direction: column; align-items: flex-end; gap: 1.5px; pointer-events: none; opacity: .5; transition: opacity .2s, transform .2s; }
+.view-dock-stack-mark b { display: block; height: 1.6px; border-radius: 2px; background: currentColor; }
+.view-dock-stack-mark b:nth-child(1) { width: 3.5px; }
+.view-dock-stack-mark b:nth-child(2) { width: 5.5px; }
+.view-dock-stack-mark b:nth-child(3) { width: 7.5px; }
+.view-dock-item:hover .view-dock-stack-mark, .view-dock-item.is-active .view-dock-stack-mark { opacity: .85; }
+.view-dock-stack-mark.is-open { opacity: 1; transform: translateY(-1px); }
+.view-dock-insights-menu { width: 156px; }
+/* Assets and ideas share one surface; this switch flips between them. */
+.stats-page--things { gap: 12px; }
+.things-switch { align-self: flex-start; }
+.things-switch button { gap: 6px; padding: 6px 14px; }
+/* The map tab owns the whole page: nothing scrolls, the stage stretches. */
+.content-scroll[data-insights-tab="map"] { display: flex; flex-direction: column; overflow: hidden; }
+.content-scroll[data-insights-tab="map"] > .content-inner { display: flex; flex: 1; min-height: 0; flex-direction: column; padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px)); }
+.content-scroll[data-insights-tab="map"] > .content-inner > .view-stage { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+/* An idea's tags fill the empty half beside its clock in the capture review. */
+.capture-review-tags { display: block; min-width: 0; }
+.capture-review-tags .tag-input input { height: 32px; font-size: 11px; }
+.map-service-card .settings-field input[type="url"] { font: 11px var(--font-mono); }
 
 /* Capture is a primary action, not another small view selector. Keep this after
    the narrow icon rules so a phone never shrinks its glyph to 13px. */
@@ -4887,10 +4920,14 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
   .composer-handle { display: none; }
 }
 
-.item-chip.is-touch-selected { outline: 2px solid var(--chip-accent); outline-offset: 1px; box-shadow: 0 0 0 3px var(--panel); }
-.item-chip.is-touch-selected .calendar-resize-handle { height: 18px; max-height: 50%; touch-action: none; background: color-mix(in srgb, var(--chip-accent) 25%, transparent); }
+.item-chip.is-touch-selected { outline: 2px solid var(--chip-accent); outline-offset: 1px; box-shadow: 0 0 0 3px var(--panel); cursor: grab; }
+/* Resize stays on the edges; the body between them is the move handle, so a
+   short chip still has somewhere to grab. */
+.item-chip.is-touch-selected .calendar-resize-handle { height: 14px; max-height: 32%; touch-action: none; background: color-mix(in srgb, var(--chip-accent) 25%, transparent); }
 
 .item-chip.is-touch-selected .calendar-span-handle { width: 18px; touch-action: none; background: color-mix(in srgb, var(--chip-accent) 25%, transparent); }
+/* The status glyph keeps its own strip on the left; the span handle starts after it. */
+.item-chip.is-touch-selected .calendar-span-handle--start { left: 24px; }
 
 .capture-review-footer { display: flex; justify-content: flex-end; padding-top: 8px; }
 .capture-ai-optimize { font-size: 11px; min-height: 32px; gap: 5px; }
@@ -4900,8 +4937,9 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
 
 .capture-syntax-help dl > div:nth-last-child(-n+2) { grid-column: 1 / -1; }
 
-/* Keep the task status target clear of both touch resize handles. */
-.item-chip.is-touch-selected .calendar-resize-handle { left: 48px; }
+/* Keep the task status target clear of both touch resize handles; everything
+   right of the glyph belongs to the handles and the move body. */
+.item-chip.is-touch-selected .calendar-resize-handle { left: 26px; }
 @media (pointer: coarse) {
   .item-chip-glyph.is-interactive { position: relative; z-index: 4; }
   .item-chip-glyph.is-interactive::before { content: ""; position: absolute; inset: -10px; }
@@ -4987,3 +5025,118 @@ html.is-timer-window, html.is-timer-window body { overflow: hidden; background: 
 .bulk-replace.is-open { padding: 10px; border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--accent-wash) 22%, transparent); }
 .bulk-replace-field { display: grid; gap: 4px; font-size: 12px; }
 .bulk-replace-field .glass-select { width: 100%; min-width: 0; max-width: none; }
+
+/* v0.1.3 — budget & accounts card (insights → bills): a ring for the month, tiles for the accounts */
+.budget-card .stats-card-header { align-items: center; }
+.budget-total { color: var(--ink-faint); font-size: 11.5px; font-weight: 500; }
+.budget-total b { margin-left: 2px; color: var(--ink); font-family: var(--font-num); font-weight: 650; }
+.budget-grid { display: grid; grid-template-columns: minmax(230px, 1fr) minmax(0, 1.5fr); gap: 16px 22px; align-items: start; }
+.budget-ring-block { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(145deg, color-mix(in srgb, var(--surface-solid) 70%, transparent), color-mix(in srgb, var(--accent-wash) 30%, transparent)); --ring-color: var(--green); }
+.budget-ring-block.is-warn { --ring-color: var(--gold); }
+.budget-ring-block.is-over { --ring-color: #b23b2e; }
+.budget-ring { position: relative; width: 104px; height: 104px; }
+.budget-ring > svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.budget-ring-track { fill: none; stroke: color-mix(in srgb, var(--ink-faint) 18%, var(--surface-muted)); stroke-width: 9; }
+.budget-ring-fill { fill: none; stroke: var(--ring-color); stroke-width: 9; stroke-linecap: round; transition: stroke-dashoffset .6s var(--ease), stroke .3s; }
+.budget-ring-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; color: var(--ink); text-align: center; }
+.budget-ring-center strong { font: 650 22px/1 var(--font-num); letter-spacing: -.02em; }
+.budget-ring-center strong small { margin-left: 1px; font-size: 11px; font-weight: 600; color: var(--ink-faint); }
+.budget-ring-center span { color: var(--ink-faint); font-size: 10px; }
+.budget-ring-center svg { width: 22px; height: 22px; color: var(--ink-faint); }
+.budget-copy { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.budget-copy small { color: var(--ink-faint); font-size: 11px; }
+.budget-copy strong { font: 650 19px/1.2 var(--font-num); color: var(--ink); letter-spacing: -.01em; }
+.budget-copy strong span { color: var(--ink-faint); font-size: 12px; font-weight: 500; }
+.budget-empty { color: var(--ink-faint); font-style: normal; font-size: 13px; }
+.budget-meta { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 0; color: var(--ink-soft); font-size: 11.5px; }
+.budget-meta .is-over { color: #b23b2e; }
+.budget-edit { align-self: flex-start; min-height: 28px; margin-top: 4px; gap: 5px; padding: 0 10px; font-size: 11px; }
+.budget-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.budget-form input { width: 112px; min-height: 30px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-solid); color: var(--ink); font: 13px var(--font-num); }
+.budget-form .primary-action, .budget-form .secondary-button { min-height: 30px; padding: 0 11px; font-size: 11.5px; }
+.account-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.account-tile { position: relative; display: flex; min-width: 0; flex-direction: column; gap: 3px; padding: 10px 12px 9px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--surface-solid) 72%, transparent); transition: border-color .2s, box-shadow .2s, transform .2s; }
+.account-tile:hover { border-color: color-mix(in srgb, var(--accent) 34%, var(--line)); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+.account-tile.is-unset { border-style: dashed; }
+.account-tile.is-editing { grid-column: 1 / -1; }
+.account-tile > header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.account-name { display: inline-flex; min-width: 0; align-items: center; gap: 6px; overflow: hidden; color: var(--ink-soft); font-size: 11.5px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+.account-name svg { flex: 0 0 auto; color: var(--ink-faint); }
+.account-edit { width: 22px; height: 22px; flex: 0 0 22px; opacity: .55; }
+.account-tile:hover .account-edit, .account-edit:focus-visible { opacity: 1; }
+.account-tile strong { font: 650 17px/1.2 var(--font-num); color: var(--ink); letter-spacing: -.01em; }
+.account-tile strong.is-expense { color: #b23b2e; }
+.account-tile em { color: var(--ink-faint); font-style: normal; font-size: 12px; }
+.account-tile small { overflow: hidden; color: var(--ink-faint); font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
+.budget-rule { margin: 10px 0 0; }
+@media (max-width: 760px) {
+  .budget-grid { grid-template-columns: minmax(0, 1fr); }
+  .budget-ring-block { grid-template-columns: 92px minmax(0, 1fr); }
+  .budget-ring { width: 92px; height: 92px; }
+}
+
+/* Operation history: batch rows and resolved names */
+.history-kind { margin-right: 6px; padding: 1px 6px; border-radius: 99px; background: var(--surface-muted); color: var(--ink-faint); font: 500 10px var(--font-sans); font-style: normal; }
+.history-title-text { font-weight: 600; }
+.history-count { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: var(--accent-wash); color: var(--accent-dark); font: 600 10px/16px var(--font-num); }
+.history-card.is-batch .history-note { color: var(--ink-soft); }
+
+.location-tools { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.location-status { width: 5px; height: 5px; flex: 0 0 5px; border-radius: 50%; background: #929996; margin-left: 3px; margin-right: 0; }
+.location-status.is-busy { background: #d7a438; animation: map-pulse 1.4s infinite; }
+.location-status.is-error { background: #cb5555; }
+.location-status.is-saved { background: #4f9b73; }
+
+.place-manager { border-top: 1px solid var(--line); padding-top: 12px; }
+.place-manager h4 { margin: 0 0 10px; }
+.place-manager h4 small { font-size: 10px; color: var(--ink-faint); }
+.place-manager-fields { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; margin-top: 12px; }
+.place-manager-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.place-picker-backdrop { position: fixed; inset: 0; z-index: 240; display: grid; place-items: center; padding: 18px; background: #101b2a80; }
+.place-picker { display: flex; flex-direction: column; width: min(900px, 100%); height: min(700px, 88dvh); overflow: hidden; background: var(--surface-solid); }
+.place-picker header, .place-picker footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; font-size: 12px; }
+.place-picker-map { flex: 1; min-height: 200px; }
+.item-note-link-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; }
+.item-note-field textarea { min-height: 104px; height: 100%; }
+.item-note-side { align-content: space-between; }
+.composer-pair { align-items: stretch; }
+.composer-pair > .field-label textarea { flex: 1; height: 100%; min-height: 104px; }
+.composer-pair-side { align-content: stretch; }
+.composer-pair-side > .field-stack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: space-between; gap: 10px; }
+@media (max-width: 600px) { .place-manager-fields { grid-template-columns: 1fr 1fr; } .place-manager-fields > :first-child { grid-column: 1 / -1; } }
+
+.view-dock-groups { display: flex; align-items: center; gap: 3px; }
+
+.when-tags-row.is-schedule { display: block; }
+.when-groups--schedule { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.composer-pair:has(.field-stack) > .field-label textarea { min-height: 118px; }
+
+.capture-review-location-wrap > .location-field { width: 100%; gap: 2px; }
+.capture-review-location-wrap .location-field > span { font-size: 9px; }
+.capture-review-location-wrap .location-tools .icon-button { width: 21px; height: 21px; padding: 2px; }
+.capture-review-location-wrap .location-status { margin-inline: 2px; }
+.capture-review-pair { align-items: stretch; }
+.capture-review-pair textarea { flex: 1; height: 100%; }
+.capture-review-pair-side { align-content: space-between; }
+.capture-review-pair:has(.capture-review-stack) textarea { min-height: 118px; }
+
+.composer-pair-side > .field-stack > :first-child { grid-column: 1 / -1; }
+
+.location-field .location-heading { min-height: 18px; height: 18px; }
+.location-tools .icon-button { width: 20px; height: 18px; min-height: 0; padding: 0; border-radius: 5px; }
+.capture-review-location-wrap .location-tools .icon-button { width: 18px; height: 16px; }
+.place-picker-opening { display: flex; gap: 20px; align-items: center; padding: 18px; background: var(--surface-solid); }
+.place-manager-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.place-manager-heading h4 { margin: 0; }
+.place-sort-tools { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 9px; gap: 2px; }
+.place-sort-tools button { padding: 3px 8px; font-size: 11px; border-radius: 6px; background: transparent; color: var(--ink-soft); }
+.place-sort-tools button.is-active { background: var(--accent-wash); color: var(--accent-dark); }
+.place-manager .place-manager-select { width: 100%; max-width: 100%; }
+.place-manager-select .glass-select-trigger { width: 100%; }
+.place-manager-fields .location-input-wrap, .place-manager-fields .location-input-wrap input { width: 100%; }
+.place-unsaved { display: inline-block; width: 5px; height: 5px; margin-left: 4px; border-radius: 50%; background: var(--ink-faint); opacity: .7; }
+.place-manager-actions .place-update { margin-left: auto; min-height: 32px; gap: 5px; }
+.place-switch-confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; font-size: 11px; color: var(--ink-soft); }
+.place-switch-confirm button { padding: 3px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-solid); }
+.sidebar-insights-group { position: relative; }
+.sidebar-insights-group > .nav-item { width: 100%; }

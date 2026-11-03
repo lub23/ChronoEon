@@ -1,16 +1,16 @@
+import { LocationField } from "./LocationField";
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
-import { BUILTIN_CURRENCIES, billDirectionForCategory, defaultPaymentMethodForCalendar, paymentMethodsForCalendar, type Item, type ItemDraft, type ChronoEonSettings, type Entry, type Locale } from "@chronoeon/domain";
+import { BUILTIN_CURRENCIES, billDirectionForCategory, defaultPaymentMethodForCalendar, paymentMethodsForCalendar, type GeoPlace, type GeoPoint, type Item, type ItemDraft, type ChronoEonSettings, type Entry, type Locale } from "@chronoeon/domain";
 import { t, paymentMethodLabel } from "../i18n";
 import { GlassDatePicker, GlassTimePicker } from "./GlassDateTimePicker";
 import { pickEntryAttachments, releaseAttachment } from "../platform/attachments";
-import { readCurrentPlace } from "../platform/location";
 import { disposalLabels as itemDisposalLabels, itemCategoryIconName, itemCategoryLabel, itemMoney } from "./ItemsView";
 import { GlassSelect } from "./GlassSelect";
 import { Icon } from "./Icon";
 import { AttachmentThumb } from "./AttachmentThumb";
 import { openImagePreview } from "./photoPreviewBus";
 import { clearChipDrag, markChipDragActive } from "./dragGesture";
-import { FieldSuggestions } from "./FieldSuggestions";
+import { TagInput } from "./TagInput";
 
 export interface ItemFieldsProps {
   locationSuggestions?: Array<{ value: string }>;
@@ -22,15 +22,19 @@ export interface ItemFieldsProps {
   settings: ChronoEonSettings;
   today: string;
   busy?: boolean;
-  editing?: boolean;
   itemId?: string;
   onOpenBill?: (entry: Entry) => void;
   showDate?: boolean;
   showPhotos?: boolean;
   onError?: (message: string) => void;
+  availableTags?: string[];
+  /** Trusted places for reusing a device fix, and where a fresh fix is cached. */
+  places?: GeoPlace[];
+  onPlaceLocated?: (address: string, point: GeoPoint) => void;
 }
 
-function BillPicker({ value, direction, itemId, items, entries, settings, locale, name, onChange, disabled, onOpenBill }: {
+function BillPicker({ label, value, direction, itemId, items, entries, settings, locale, name, onChange, disabled, onOpenBill }: {
+  label: string;
   onOpenBill?: (entry: Entry) => void;
   value?: string; direction: "income" | "expense"; itemId?: string; items: Item[]; entries: Entry[];
   settings: ChronoEonSettings; locale: Locale; name: string; onChange: (entry?: Entry) => void; disabled?: boolean;
@@ -46,7 +50,6 @@ function BillPicker({ value, direction, itemId, items, entries, settings, locale
     : eligible;
   const selected = entries.find(entry => entry.kind === "bill" && entry.id === value);
   const visible = selected && !matches.includes(selected) ? [selected, ...matches.slice(0, 79)] : matches.slice(0, 80);
-  const label = t("itemBillLink", locale);
   return (
     <label className="field-label item-bill-picker">
       <span className="linked-field-heading">{label}{selected && onOpenBill && <button type="button" className="icon-button" aria-label={`${label} · ${selected.title}`} onClick={() => onOpenBill(selected)}><Icon name="arrow-right" size={14} /></button>}</span>
@@ -171,16 +174,32 @@ export function ItemPhotoField({ value, icon, locale, settings, entryDate, busy,
   );
 }
 
+function currentClock(): string {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
+/**
+ * The asset form shares its shape with ideas and bills: title beside place,
+ * the acquisition clock beside tags, money, then notes beside the purchase
+ * bill and disposal. A sale bill fixes the disposal time; without one the
+ * time is free, exactly like a discarded item.
+ */
 export function ItemFields({
-  draft, patch, items, entries, locale, settings, today, busy = false, locationSuggestions = [],
-  editing = false, itemId, onOpenBill, showDate = true, showPhotos = true, onError,
+  draft, patch, items, entries, locale, settings, today, busy = false, locationSuggestions = [], availableTags = [], places = [], onPlaceLocated,
+  itemId, onOpenBill, showDate = true, showPhotos = true, onError,
 }: ItemFieldsProps) {
-  const [locating, setLocating] = useState(false);
-  const locationInput = useRef<HTMLInputElement | null>(null);
   const acquiredTime = draft.acquiredAt.match(/(\d{2}:\d{2})$/)?.[1] ?? "12:00";
+  const saleLinked = draft.disposal === "sold" && Boolean(draft.saleEntryId);
+
   function linkBill(entry: Entry | undefined, sale = false) {
-    if (sale) patch({ saleEntryId: entry?.id, ...(entry ? { disposedOn: entry.date, saleAmount: Math.abs(entry.amount ?? 0) } : {}) });
-    else patch({
+    if (sale) {
+      patch({ saleEntryId: entry?.id, ...(entry
+        ? { disposedOn: entry.date, disposedAt: entry.start ?? "12:00", saleAmount: Math.abs(entry.amount ?? 0) }
+        : { saleAmount: undefined }) });
+      return;
+    }
+    patch({
       purchaseEntryId: entry?.id,
       ...(entry ? {
         calendarId: entry.calendar ?? draft.calendarId,
@@ -193,13 +212,14 @@ export function ItemFields({
       } : {}),
     });
   }
-  async function locate() {
-    if (locating || busy) return;
-    setLocating(true);
-    try {
-      const place = await readCurrentPlace(locale);
-      if (place) patch({ location: place.label });
-    } finally { setLocating(false); }
+  function changeDisposal(value: string) {
+    const disposal = (value || undefined) as Item["disposal"];
+    patch({
+      disposal,
+      disposedOn: disposal ? draft.disposedOn ?? today : undefined,
+      disposedAt: disposal ? draft.disposedAt ?? currentClock() : undefined,
+      ...(disposal !== "sold" ? { saleEntryId: undefined, saleAmount: undefined } : {}),
+    });
   }
   return (
     <>
@@ -208,35 +228,25 @@ export function ItemFields({
           <span>{t("itemName", locale)} <em>*</em></span>
           <input required maxLength={180} value={draft.name} onChange={event => patch({ name: event.target.value })} />
         </label>
-        <label className="field-label location-field">
-          <span>
-            {t("location", locale)}
-            <button type="button" className="icon-button location-locate" onClick={() => void locate()} disabled={busy || locating} aria-label={t("useDeviceLocation", locale)}>
-              <Icon name="map-pin" size={14} />
-            </button>
-          </span>
-          <div className="location-input-wrap">
-            <input ref={locationInput} value={draft.location ?? ""} onChange={event => patch({ location: event.target.value })} placeholder={t("locationPlaceholder", locale)} />
-            <FieldSuggestions inputRef={locationInput} locale={locale} suggestions={locationSuggestions} onSelect={value => patch({ location: value })} />
-            {Boolean(draft.location) && (
-              <button type="button" className="icon-button location-clear" disabled={busy} onClick={() => patch({ location: undefined })} aria-label={t("clearLocation", locale)}>
-                <Icon name="close" size={11} />
-              </button>
-            )}
-          </div>
-        </label>
+        <LocationField locale={locale} value={draft.location} disabled={busy} places={places} onPlaceLocated={onPlaceLocated} suggestions={locationSuggestions} onChange={value => patch({ location: value })} />
       </div>
 
-      <div className="when-groups when-groups--single">
-        <div className="when-group">
-          <span>{t("itemTime", locale)}</span>
-          <div className="when-controls">
-            {showDate && (
-              <GlassDatePicker value={draft.acquiredOn} ariaLabel={t("itemTime", locale)} locale={locale} clearable={false} hideIcon max={draft.disposedOn || today} onChange={value => patch({ acquiredOn: value ?? draft.acquiredOn })} />
-            )}
-            <GlassTimePicker value={acquiredTime} locale={locale} ariaLabel={t("itemTime", locale)} clearable={false} hideIcon onChange={value => patch({ acquiredAt: value ?? acquiredTime })} />
+      <div className="when-tags-row">
+        <div className="when-groups when-groups--single">
+          <div className="when-group">
+            <span>{t("itemTime", locale)}</span>
+            <div className="when-controls">
+              {showDate && (
+                <GlassDatePicker value={draft.acquiredOn} ariaLabel={t("itemTime", locale)} locale={locale} clearable={false} hideIcon max={draft.disposedOn || today} onChange={value => patch({ acquiredOn: value ?? draft.acquiredOn })} />
+              )}
+              <GlassTimePicker value={acquiredTime} locale={locale} ariaLabel={t("itemTime", locale)} clearable={false} hideIcon onChange={value => patch({ acquiredAt: value ?? acquiredTime })} />
+            </div>
           </div>
         </div>
+        <label className="field-label when-tags-field">
+          <span>{t("tags", locale)}</span>
+          <TagInput value={draft.tags} available={availableTags} onChange={tags => patch({ tags })} locale={locale} />
+        </label>
       </div>
 
       <div className="bill-primary-row">
@@ -258,21 +268,26 @@ export function ItemFields({
         <label className="field-label item-note-field"><span>{t("itemNotes", locale)}</span><textarea rows={4} value={draft.notes ?? ""} onChange={event => patch({ notes: event.target.value })} placeholder={t("notePlaceholder", locale)} /></label>
         <div className="item-note-side">
           {draft.acquisition === "purchase" && (
-            <BillPicker value={draft.purchaseEntryId} direction="expense" itemId={itemId} onOpenBill={onOpenBill} items={items} entries={entries} settings={settings} locale={locale} name={draft.name} onChange={entry => linkBill(entry)} disabled={busy} />
+            <BillPicker label={t("itemPurchaseBill", locale)} value={draft.purchaseEntryId} direction="expense" itemId={itemId} onOpenBill={onOpenBill} items={items} entries={entries} settings={settings} locale={locale} name={draft.name} onChange={entry => linkBill(entry)} disabled={busy} />
           )}
           <label className="field-label">{t("itemDisposal", locale)}
-            <GlassSelect value={draft.disposal ?? ""} options={[{ value: "", label: t("itemRetained", locale) }, ...Object.entries(itemDisposalLabels).filter(([value]) => value !== "lost").map(([value, label]) => ({ value, label: t(label, locale) }))]} onChange={value => patch({ disposal: (value || undefined) as Item["disposal"], disposedOn: value ? draft.disposedOn ?? today : undefined, ...(value !== "sold" ? { saleEntryId: undefined, saleAmount: undefined } : { saleAmount: draft.saleAmount ?? 0 }) })} disabled={busy} ariaLabel={t("itemDisposal", locale)} />
+            <GlassSelect value={draft.disposal ?? ""} options={[{ value: "", label: t("itemRetained", locale) }, ...Object.entries(itemDisposalLabels).filter(([value]) => value !== "lost").map(([value, label]) => ({ value, label: t(label, locale) }))]} onChange={changeDisposal} disabled={busy} ariaLabel={t("itemDisposal", locale)} />
           </label>
         </div>
       </div>
       {draft.disposal && (
-        <label className="field-label">{t("itemDisposedOn", locale)}<input type="date" min={draft.acquiredOn} max={today} required value={draft.disposedOn ?? today} onChange={event => patch({ disposedOn: event.target.value })} /></label>
-      )}
-      {draft.disposal === "sold" && (
-        <>
-          <label className="field-label">{t("itemSaleAmount", locale)}<input type="number" min="0" step="0.01" required value={draft.saleAmount ?? 0} onChange={event => patch({ saleAmount: Number(event.target.value) })} /></label>
-          <BillPicker value={draft.saleEntryId} direction="income" itemId={itemId} onOpenBill={onOpenBill} items={items} entries={entries.filter(entry => !entry.currency || entry.currency === draft.currency)} settings={settings} locale={locale} name={draft.name} onChange={entry => linkBill(entry, true)} disabled={busy} />
-        </>
+        <div className="item-disposal-row">
+          <div className="when-group">
+            <span>{t("itemDisposedAt", locale)}</span>
+            <div className="when-controls">
+              <GlassDatePicker value={draft.disposedOn ?? today} min={draft.acquiredOn} max={today} ariaLabel={t("itemDisposedAt", locale)} locale={locale} clearable={false} hideIcon disabled={busy || saleLinked} onChange={value => patch({ disposedOn: value ?? draft.disposedOn ?? today })} />
+              <GlassTimePicker value={draft.disposedAt ?? "12:00"} locale={locale} ariaLabel={t("itemDisposedAt", locale)} clearable={false} hideIcon disabled={busy || saleLinked} onChange={value => patch({ disposedAt: value ?? draft.disposedAt ?? "12:00" })} />
+            </div>
+          </div>
+          {draft.disposal === "sold" && (
+            <BillPicker label={t("itemSaleBill", locale)} value={draft.saleEntryId} direction="income" itemId={itemId} onOpenBill={onOpenBill} items={items} entries={entries.filter(entry => !entry.currency || entry.currency === draft.currency)} settings={settings} locale={locale} name={draft.name} onChange={entry => linkBill(entry, true)} disabled={busy} />
+          )}
+        </div>
       )}
       {showPhotos && (
         <ItemPhotoField value={draft.images ?? []} icon={<Icon name={itemCategoryIconName(draft.category, settings, draft.calendarId)} size={20} />} locale={locale} settings={settings} entryDate={draft.acquiredOn} busy={busy} disabled={busy} onChange={images => patch({ images })} onNotice={onError} />

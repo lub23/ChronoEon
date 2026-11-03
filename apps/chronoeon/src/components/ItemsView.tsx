@@ -153,8 +153,9 @@ export function ItemsView({ items, entries, locale, settings, today, search = ""
         </dl>
         <footer className="item-card-footer">
           <div className="item-card-secondary">
-            {item.disposal && <p className="item-history-line">{t(disposalLabels[item.disposal], locale)} · {item.disposedOn}{item.disposal === "sold" && ` · ${itemMoney(item.saleAmount ?? 0, item.currency, settings, locale)}`}</p>}
+            {item.disposal && <p className="item-history-line">{t(disposalLabels[item.disposal], locale)} · {item.disposedOn}{item.disposedAt ? ` ${item.disposedAt}` : ""}{item.disposal === "sold" && item.saleAmount !== undefined && ` · ${itemMoney(item.saleAmount, item.currency, settings, locale)}`}</p>}
             <FadeText className="item-note" title={item.notes}>{item.notes || "\u00a0"}</FadeText>
+            {(item.tags?.length ?? 0) > 0 && <div className="item-tags">{item.tags!.map(tag => <span key={tag}>#{tag}</span>)}</div>}
             {(item.purchaseEntryId || item.saleEntryId) && <div className="item-bill-links">{[item.purchaseEntryId, item.saleEntryId].filter(Boolean).map(id => {
               const entry = bills.get(id!);
               return <button key={id} type="button" className="item-bill-link" disabled={!entry || !onOpenBill} onClick={() => entry && onOpenBill?.(entry)}><Icon name="coins" size={12} /><FadeText>{entry ? `${entry.date} · ${entry.title}` : t("itemBillMissing", locale)}</FadeText></button>;

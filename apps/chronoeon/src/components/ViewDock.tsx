@@ -1,6 +1,6 @@
 import { MotionPresence } from "./MotionPresence";
-import type { InsightsTab } from "./StatsView";
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { INSIGHTS_GROUPS, INSIGHTS_TABS, insightsTabIcon, type InsightsTab } from "./insightsTabs";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { AppView, Locale } from "../domain/entry";
 import { t } from "../i18n";
 import { Icon, type IconName } from "./Icon";
@@ -24,13 +24,6 @@ interface ViewDockProps {
   children?: ReactNode;
 }
 
-type PlainView = "agenda" | "ideas" | "insights";
-
-const dockItems: Array<{ view: PlainView; icon: IconName; label: "agenda" | "ideas" | "insights" }> = [
-  { view: "ideas", icon: "idea", label: "ideas" },
-  { view: "insights", icon: "insights", label: "insights" },
-];
-
 const FULL_DAY_OPTIONS = [1, 2, 3, 4, 5, 6];
 /** A single centered add mark. */
 function QuickNoteGlyph() {
@@ -41,9 +34,16 @@ function QuickNoteGlyph() {
   );
 }
 
+/** Three stacked leaves under an icon: this button holds several views. */
+function StackMark({ open }: { open: boolean }) {
+  return <i className={open ? "view-dock-stack-mark is-open" : "view-dock-stack-mark"} aria-hidden="true"><b /><b /><b /></i>;
+}
+
 /**
  * Icon-only glass Dock. Day/week share the day-range menu; Month is adjacent.
- * The quick-note button sits beside Ideas: click it to type.
+ * The quick-note button sits between the calendar and Insights; Insights
+ * carries every statistics surface (bills, time, assets, ideas, map) in one
+ * menu and shows the icon of the surface currently open.
  */
 export function ViewDock({
   locale,
@@ -60,10 +60,14 @@ export function ViewDock({
   children,
 }: ViewDockProps) {
   const [switchOpen, setSwitchOpen] = useState(false);
-  const [insightsOpen, setInsightsOpen] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState<"stats" | "things" | null>(null);
+  const lastStats = useRef<InsightsTab>("bills");
+  const lastThings = useRef<InsightsTab>("items");
+  if (insightsTab === "items" || insightsTab === "ideas") lastThings.current = insightsTab; else lastStats.current = insightsTab;
   const switchGroupRef = useRef<HTMLDivElement>(null);
   const insightsGroupRef = useRef<HTMLDivElement>(null);
   const calendarActive = activeView === "day" || activeView === "week";
+  const insightsActive = activeView === "insights";
   const calendarIcon: IconName = calendarView === "week" ? "week" : "day";
   const calendarLabel = calendarView === "week" ? t("week", locale) : t("day", locale);
   const dayOptions = FULL_DAY_OPTIONS;
@@ -90,14 +94,14 @@ export function ViewDock({
     const dismiss = (event: Event) => {
       if (insightsGroupRef.current?.contains(event.target as Node)) return;
       if (event.target instanceof Element && event.target.closest(".glass-select-popup")) return;
-      setInsightsOpen(false);
+      setInsightsOpen(null);
     };
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); setInsightsOpen(false); } };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); setInsightsOpen(null); } };
     window.addEventListener("pointerdown", dismiss);
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("pointerdown", dismiss); window.removeEventListener("keydown", onKey); };
   }, [insightsOpen]);
-  useEffect(() => { if (activeView !== "insights") setInsightsOpen(false); }, [activeView]);
+  useEffect(() => { if (!insightsActive) setInsightsOpen(null); }, [insightsActive]);
   return (
     <nav className="view-dock is-icon-only" aria-label={t("views", locale)}>
       <div className="view-dock-views">
@@ -114,7 +118,7 @@ export function ViewDock({
 
         <div className="view-dock-day-group" ref={switchGroupRef}>
           <button
-            className={calendarActive ? "view-dock-item is-active" : "view-dock-item"}
+            className={calendarActive ? "view-dock-item has-stack is-active" : "view-dock-item has-stack"}
             type="button"
             onClick={() => {
               if (calendarActive) setSwitchOpen((open) => !open);
@@ -127,6 +131,7 @@ export function ViewDock({
           >
             <Icon name={calendarIcon} size={18} />
             {activeView === "day" && dayCount > 1 && <b className="view-dock-day-count">{dayCount}</b>}
+            <StackMark open={switchOpen} />
           </button>
           <MotionPresence>{switchOpen && (
             <div className="view-dock-days-menu" role="menu" aria-label={t("dayCount", locale)}>
@@ -181,45 +186,22 @@ export function ViewDock({
           <QuickNoteGlyph />
         </button>
 
-        {dockItems.map((item) => item.view === "insights"
-          ? <div key={item.view} className="view-dock-day-group" ref={insightsGroupRef}>
-              <button
-                className={activeView === item.view ? "view-dock-item is-active" : "view-dock-item"}
-                type="button"
-                onClick={() => { if (activeView === item.view) setInsightsOpen(open => !open); else onViewChange(item.view); }}
-                aria-label={t(item.label, locale)}
-                aria-current={activeView === item.view ? "page" : undefined}
-                aria-expanded={activeView === item.view ? insightsOpen : undefined}
-                title={t(item.label, locale)}
-              >
-                <Icon name={item.icon} size={18} />
-              </button>
-              <MotionPresence>{insightsOpen && (
-                <div className="view-dock-days-menu" role="menu" aria-label={t("insights", locale)}>
-                  {(["bills", "tasks", "items"] as const).map((tab) => (
-                    <button key={tab} type="button" role="menuitemradio" aria-checked={insightsTab === tab}
-                      className={insightsTab === tab ? "is-selected" : ""}
-                      onClick={() => { onInsightsTabChange?.(tab); setInsightsOpen(false); }}>
-                      {insightsTab === tab && <Icon name="check" size={12} />}
-                      <Icon name={tab === "bills" ? "coins" : tab === "tasks" ? "clock" : "box"} size={12} />
-                      {t(tab === "bills" ? "statsBills" : tab === "tasks" ? "statsTasks" : "items", locale)}
-                    </button>
-                  ))}
-                </div>
-              )}</MotionPresence>
-            </div>
-          : <button
-              key={item.view}
-              className={activeView === item.view ? "view-dock-item is-active" : "view-dock-item"}
-              type="button"
-              onClick={() => { setSwitchOpen(false); onViewChange(item.view); }}
-              aria-label={t(item.label, locale)}
-              aria-current={activeView === item.view ? "page" : undefined}
-              title={t(item.label, locale)}
-            >
-              <Icon name={item.icon} size={18} />
-            </button>
-        )}
+        <div className="view-dock-groups" ref={insightsGroupRef}>
+          {INSIGHTS_GROUPS.map(({ key: group, label: groupLabel }) => {
+            const tabs = INSIGHTS_TABS.filter(item => group === "things" ? item.tab === "items" || item.tab === "ideas" : item.tab !== "items" && item.tab !== "ideas");
+            const active = insightsActive && tabs.some(item => item.tab === insightsTab);
+            const current = group === "stats" ? lastStats.current : lastThings.current;
+            const label = t(groupLabel, locale);
+            const open = insightsOpen === group;
+            return <div className="view-dock-day-group" key={group}>
+              <button type="button" className={active ? "view-dock-item has-stack is-active" : "view-dock-item has-stack"} aria-label={label} title={label} aria-current={active ? "page" : undefined} aria-expanded={open} onClick={() => {
+                if (active) setInsightsOpen(open ? null : group);
+                else { onInsightsTabChange?.(current); onViewChange("insights"); setInsightsOpen(null); }
+              }}><Icon name={insightsTabIcon(current)} size={18} /><StackMark open={open} /></button>
+              <MotionPresence>{open && <div className="view-dock-days-menu view-dock-insights-menu" role="menu" aria-label={label}>{tabs.map(item => <button key={item.tab} type="button" role="menuitemradio" aria-checked={active && insightsTab === item.tab} className={active && insightsTab === item.tab ? "is-selected" : ""} onClick={() => { onInsightsTabChange?.(item.tab); onViewChange("insights"); setInsightsOpen(null); }}><Icon name={item.icon} size={12} />{item.tab === "map" ? (locale === "zh" ? "足迹" : "Footprints") : t(item.label, locale)}</button>)}</div>}</MotionPresence>
+            </div>;
+          })}
+        </div>
       </div>
       <span className="view-dock-divider" aria-hidden="true" />
       <button

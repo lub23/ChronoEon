@@ -23,8 +23,11 @@ export interface Item {
   location?: string;
   payment?: string;
   purchaseEntryId?: string;
+  tags?: string[];
   disposal?: ItemDisposal;
   disposedOn?: string;
+  /** Local civil time of the disposal in `HH:MM`; a linked sale bill supplies it. */
+  disposedAt?: string;
   /** Sale proceeds in the asset's currency, independent of the linked bill. */
   saleAmount?: number;
   saleEntryId?: string;
@@ -51,7 +54,9 @@ export function validateItemDraft(draft: ItemDraft): void {
   if (draft.disposal !== undefined) {
     if (!["sold", "lost", "discarded"].includes(draft.disposal)) throw new Error("ASSET_INVALID_DISPOSAL");
     if (!draft.disposedOn || !isIsoDate(draft.disposedOn) || draft.disposedOn < draft.acquiredOn) throw new Error("ASSET_INVALID_DISPOSED_ON");
-  } else if (draft.disposedOn !== undefined) throw new Error("ASSET_INVALID_DISPOSED_ON");
+    if (draft.disposedAt !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(draft.disposedAt)) throw new Error("ASSET_INVALID_DISPOSED_AT");
+  } else if (draft.disposedOn !== undefined || draft.disposedAt !== undefined) throw new Error("ASSET_INVALID_DISPOSED_ON");
+  if (draft.tags !== undefined && (!Array.isArray(draft.tags) || draft.tags.some((tag) => typeof tag !== "string"))) throw new Error("ASSET_INVALID_TAGS");
   if (draft.purchaseEntryId !== undefined && draft.purchaseEntryId === draft.saleEntryId) throw new Error("ASSET_INVALID_SALE_LINK");
   if (draft.disposal !== "sold" && (draft.saleAmount !== undefined || draft.saleEntryId !== undefined)) throw new Error("ASSET_INVALID_SALE");
   if (draft.saleAmount !== undefined && (!Number.isFinite(draft.saleAmount) || draft.saleAmount < 0)) throw new Error("ASSET_INVALID_SALE_AMOUNT");
@@ -61,8 +66,14 @@ export function draftToItem(draft: ItemDraft): Item {
   validateItemDraft(draft);
   const now = new Date().toISOString();
   return { ...draft, name: draft.name.trim(), currency: draft.currency.trim(), location: draft.location?.trim() || undefined,
-    notes: draft.notes?.trim() || undefined, images: draft.images?.filter(Boolean),
+    notes: draft.notes?.trim() || undefined, images: draft.images?.filter(Boolean), tags: normalizeItemTags(draft.tags),
     id: createEntryId(), createdAt: now, updatedAt: now };
+}
+
+/** Trimmed, de-duplicated, without a leading `#`; undefined when nothing is left. */
+export function normalizeItemTags(tags: string[] | undefined): string[] | undefined {
+  const clean = [...new Set((tags ?? []).map((tag) => tag.trim().replace(/^#/, "")).filter(Boolean))];
+  return clean.length ? clean : undefined;
 }
 
 export function itemImageHashes(images: string[] | undefined): string[] {

@@ -1,6 +1,6 @@
 import type { EntryKind, Locale } from "../entry";
 import type { CaptureHistoryItem } from "./index";
-import { normalizedTitle } from "./titleMatch";
+import { normalizedTitle, titleMatchScore } from "./titleMatch";
 
 /** What the user usually records under one title: the defaults a parser or a
  *  model should reach for when the text itself gives no value. */
@@ -33,6 +33,8 @@ export interface CaptureHabits {
   categories: Partial<Record<EntryKind, CaptureHabitCount[]>>;
   locations: CaptureHabitCount[];
   payments: CaptureHabitCount[];
+  /** Bill categories with the payment method they are usually paid with. */
+  billCategoryPayments: Array<{ category: string; payment: string; count: number }>;
   currency?: string;
   /** Average title length in characters. */
   titleLength: number;
@@ -112,7 +114,7 @@ function habitForGroup(group: readonly CaptureHistoryItem[]): CaptureHabitTitle 
 /** Pure statistics over the user's own records; nothing here is persisted, so
  *  the profile is always rebuilt from the current database. */
 export function buildCaptureHabits(history: readonly CaptureHistoryItem[], options: { maxTitles?: number; minCount?: number } = {}): CaptureHabits {
-  const { maxTitles = 30, minCount = 2 } = options;
+  const { maxTitles = 60, minCount = 2 } = options;
   const items = history.filter((item) => item.title.trim());
   const groups = new Map<string, CaptureHistoryItem[]>();
   for (const item of items) {
@@ -134,6 +136,15 @@ export function buildCaptureHabits(history: readonly CaptureHistoryItem[], optio
     categories[kind] = counted(ofKind.map((item) => item.category)).slice(0, 3);
   }
   const bills = items.filter((item) => item.kind === "bill");
+  const billsByCategory = new Map<string, CaptureHistoryItem[]>();
+  for (const bill of bills) {
+    if (!bill.category?.trim() || !bill.payment?.trim()) continue;
+    billsByCategory.set(bill.category, [...(billsByCategory.get(bill.category) ?? []), bill]);
+  }
+  const billCategoryPayments = [...billsByCategory.entries()].flatMap(([category, group]) => {
+    const [top] = counted(group.map((item) => item.payment));
+    return top && top.count >= 2 ? [{ category, payment: top.value, count: top.count }] : [];
+  }).sort((left, right) => right.count - left.count).slice(0, 6);
   return {
     total: items.length,
     kinds: counted(items.map((item) => item.kind)),
@@ -147,6 +158,7 @@ export function buildCaptureHabits(history: readonly CaptureHistoryItem[], optio
     categories,
     locations: counted(items.map((item) => item.location)).slice(0, 6),
     payments: counted(bills.map((item) => item.payment)).slice(0, 3),
+    billCategoryPayments,
     currency: dominant(bills.map((item) => item.currency)),
     titleLength: items.length ? Math.round(items.reduce((sum, item) => sum + [...item.title.trim()].length, 0) / items.length) : 0,
   };
@@ -157,10 +169,20 @@ const KIND_LABELS: Record<Locale, Record<EntryKind, string>> = {
   en: { event: "Event", task: "Task", bill: "Bill", idea: "Idea" },
 };
 
+/** Frequent records that resemble what is being typed come first, so the
+ *  bounded profile spends its budget on the habits that matter right now. */
+function rankTitles(titles: readonly CaptureHabitTitle[], query: string): CaptureHabitTitle[] {
+  const text = query.trim();
+  if (!text) return [...titles];
+  const scores = new Map(titles.map((habit) => [habit, Math.max(titleMatchScore(habit.title, text), titleMatchScore(text, habit.title))]));
+  return [...titles].sort((left, right) => (scores.get(right) ?? 0) - (scores.get(left) ?? 0) || right.count - left.count);
+}
+
 /** A compact, human-readable profile. It doubles as model context and as the
  *  explanation the user sees of what the app has learned. Empty while there is
- *  too little history to call anything a habit. */
-export function describeCaptureHabits(habits: CaptureHabits, locale: Locale, budget = 1400): string {
+ *  too little history to call anything a habit. When `query` is given, the
+ *  records most similar to it lead the list. */
+export function describeCaptureHabits(habits: CaptureHabits, locale: Locale, budget = 1400, query = ""): string {
   if (habits.total < 5) return "";
   const zh = locale === "zh";
   const kindLabel = (kind: EntryKind) => KIND_LABELS[locale][kind];
@@ -197,7 +219,7 @@ export function describeCaptureHabits(habits: CaptureHabits, locale: Locale, bud
 
   const described: string[] = [];
   let used = lines.join("\n").length;
-  for (const habit of habits.titles) {
+  for (const habit of rankTitles(habits.titles, query)) {
     const details = [
       `${kindLabel(habit.kind)}${habit.category ? `/${habit.category}` : ""}`,
       habit.start ? `${habit.start}${habit.durationMinutes ? `+${habit.durationMinutes}min` : ""}` : habit.durationMinutes ? `${habit.durationMinutes}min` : "",
@@ -212,6 +234,49 @@ export function describeCaptureHabits(habits: CaptureHabits, locale: Locale, bud
     described.push(line);
   }
   if (described.length) lines.push(`- ${zh ? "常见记录" : "Frequent records"}: ${described.join("; ")}`);
+  if (habits.billCategoryPayments.length) {
+    const line = `- ${zh ? "账目分类的支付习惯" : "Payment by bill category"}: ${habits.billCategoryPayments.map((item) => `${item.category} → ${item.payment} (×${item.count})`).join("; ")}`;
+    if (used + line.length <= budget) { lines.push(line); used += line.length + 1; }
+  }
   if (habits.titleLength) lines.push(`- ${zh ? `标题风格：平均 ${habits.titleLength} 字，简短，不含时间地点` : `Title style: about ${habits.titleLength} characters, short, without times or places`}`);
   return lines.join("\n");
+}
+
+/** Per-session learning from the current SQLite projection, including edits and deletions. */
+export class CaptureHabitLearner {
+  private records = new Map<string, { signature: string; item: CaptureHistoryItem }>();
+  private groups = new Map<string, Map<string, CaptureHistoryItem>>();
+  private learned = new Map<string, CaptureHabitTitle>();
+  private profile: CaptureHabits | undefined;
+
+  update(history: readonly CaptureHistoryItem[]): CaptureHabits {
+    const incoming = new Map(history.map((item, index) => [item.id ?? `row:${index}`, item]));
+    const dirty = new Set<string>();
+    const remove = (id: string, item: CaptureHistoryItem) => {
+      const key = normalizedTitle(item.title);
+      this.groups.get(key)?.delete(id);
+      dirty.add(key);
+    };
+    for (const [id, stored] of this.records) if (!incoming.has(id)) { remove(id, stored.item); this.records.delete(id); }
+    for (const [id, item] of incoming) {
+      const signature = JSON.stringify(item);
+      const stored = this.records.get(id);
+      if (stored?.signature === signature) continue;
+      if (stored) remove(id, stored.item);
+      const key = normalizedTitle(item.title);
+      const group = this.groups.get(key) ?? new Map<string, CaptureHistoryItem>();
+      group.set(id, item); this.groups.set(key, group); dirty.add(key);
+      this.records.set(id, { signature, item: { ...item } });
+    }
+    if (!this.profile || dirty.size) {
+      for (const key of dirty) {
+        const group = this.groups.get(key);
+        if (!key || !group || group.size < 2) { this.learned.delete(key); if (!group?.size) this.groups.delete(key); }
+        else this.learned.set(key, habitForGroup([...group.values()]));
+      }
+      this.profile = { ...buildCaptureHabits([...this.records.values()].map(record => record.item), { maxTitles: 0 }),
+        titles: [...this.learned.values()].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title)) };
+    }
+    return this.profile;
+  }
 }

@@ -44,7 +44,7 @@ export type Reminder =
   | "week-before-9am";
 
 export type Locale = "en" | "zh";
-export const APP_VIEWS = ["agenda", "month", "week", "day", "ideas", "insights", "review"] as const;
+export const APP_VIEWS = ["agenda", "month", "week", "day", "insights", "review"] as const;
 export type AppView = typeof APP_VIEWS[number];
 
 export function isAppView(value: unknown): value is AppView {

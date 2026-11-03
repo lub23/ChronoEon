@@ -1,0 +1,18 @@
+.startup-splash { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; overflow: hidden; background: var(--paper, #faf7ed); animation: startup-dismiss .22s ease 1.64s both; }
+.startup-emblem { width: clamp(170px, 24vw, 240px); text-align: center; transform: translateY(-12px); }
+.startup-emblem svg { width: 100%; display: block; overflow: visible; }
+.startup-pi { transform-origin: 512px 570px; animation: startup-pi .35s ease-out both; }
+.startup-gold-bar { animation: startup-bar .55s cubic-bezier(.22,.8,.3,1) .16s both; }
+.startup-gold-dot { animation: startup-dot .55s cubic-bezier(.22,.8,.3,1) .26s both; }
+.startup-orbit { stroke-dasharray: 1; stroke-dashoffset: 1; animation: startup-orbit .62s cubic-bezier(.3,.05,.25,1) .72s both; }
+.startup-wordmark { display: flex; align-items: baseline; justify-content: center; gap: 10px; white-space: nowrap; color: var(--ink, #272d26); animation: startup-wordmark .28s ease-out 1.22s both; }
+.startup-wordmark [lang="zh-CN"] { font: 30px/1.2 var(--font-hand); }
+.startup-wordmark [lang="en"] { font: 400 23px/1.2 var(--font-sans); letter-spacing: .015em; }
+.startup-wordmark i { font-style: normal; color: var(--ink-faint); }
+@keyframes startup-pi { from { opacity: 0; transform: translateY(18px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes startup-bar { 0% { opacity: 0; transform: translate(-1300px,-280px); } 65% { opacity: 1; transform: translate(20px,18px); } 84% { transform: translate(-7px,-8px); } 100% { opacity: 1; transform: none; } }
+@keyframes startup-dot { 0% { opacity: 0; transform: translate(1300px,-340px); } 65% { opacity: 1; transform: translate(-18px,18px); } 84% { transform: translate(6px,-8px); } 100% { opacity: 1; transform: none; } }
+@keyframes startup-orbit { to { stroke-dashoffset: 0; } }
+@keyframes startup-wordmark { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes startup-dismiss { to { opacity: 0; visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .startup-splash { animation: none; } .startup-splash * { animation: none !important; } .startup-orbit { stroke-dashoffset: 0; } }

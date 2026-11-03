@@ -3,18 +3,19 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppView } from "../domain/entry";
+import type { InsightsTab } from "../components/insightsTabs";
 import { useSwipeNavigation } from "./useSwipeNavigation";
 let host: HTMLDivElement; let root: Root;
 function Harness({ initial = "day", insights = false }: { initial?: AppView; insights?: boolean }) {
   const [view, setView] = useState<AppView>(initial); const [open, setOpen] = useState(false);
   const [date, setDate] = useState(new Date(2026, 8, 12));
-  const [tab, setTab] = useState<"bills" | "tasks" | "items">("bills");
+  const [tab, setTab] = useState<InsightsTab>("bills");
   const nav = useSwipeNavigation({ insightsTab: insights ? tab : undefined, onInsightsTabChange: insights ? setTab : undefined, enabled: true, selectedDate: date, onDateChange: setDate, activeView: view, menuOpen: open, onViewChange: setView, onMenuChange: setOpen });
   return <><div ref={nav.sidebarRef} data-open={open} data-side={nav.sidebarSide} /><div ref={nav.backdropRef} />
     <div ref={nav.pagerRef} data-view={view} data-tab={tab} data-month={date.getMonth() + 1} data-axis={nav.preview?.axis ?? "x"} className="view-pager">
       <div className="scroller" style={{ overflowX: "auto" }}><div className="touch-target" /></div>
       {nav.preview && <div className="preview" data-view={nav.preview.view} data-tab={nav.preview.insightsTab} data-month={nav.preview.date.getMonth() + 1} />}
-    </div><button className="next-month" onClick={() => nav.stepMonth(1)} /><button className="open-menu" onClick={nav.openSidebar} /><button className="choose-month" onClick={() => nav.selectView("month")} /><button className="choose-ideas" onClick={() => nav.selectView("ideas")} /></>;
+    </div><button className="next-month" onClick={() => nav.stepMonth(1)} /><button className="open-menu" onClick={nav.openSidebar} /><button className="choose-month" onClick={() => nav.selectView("month")} /><button className="choose-insights" onClick={() => nav.selectView("insights")} /></>;
 }
 function point(type: string, x: number, y = 100) {
   const event = new Event(type, { bubbles: true, cancelable: true });
@@ -47,7 +48,7 @@ describe("interactive mobile navigation", () => {
     act(() => vi.advanceTimersByTime(400));
     expect(pager.dataset.month).toBe("11");
   });
-  it("pages through bills, tasks and items before opening the sidebar", () => {
+  it("pages through bills, tasks, items and ideas before opening the sidebar", () => {
     act(() => root.render(<Harness initial="insights" insights />));
     const pager = host.querySelector<HTMLElement>(".view-pager")!;
     Object.defineProperties(pager, { clientWidth: { value: 360 }, clientHeight: { value: 600 } });
@@ -55,6 +56,7 @@ describe("interactive mobile navigation", () => {
     expect(host.querySelector(".preview")?.getAttribute("data-tab")).toBe("tasks");
     end(120); expect(pager.dataset.tab).toBe("tasks");
     begin(); point("pointermove", 120); end(120); expect(pager.dataset.tab).toBe("items");
+    begin(); point("pointermove", 120); end(120); expect(pager.dataset.tab).toBe("ideas");
     begin(); point("pointermove", 30); end(30);
     expect(host.querySelector("[data-open]")?.getAttribute("data-open")).toBe("true");
   });
@@ -162,11 +164,11 @@ describe("interactive mobile navigation", () => {
     const pager = setup();
     act(() => host.querySelector<HTMLButtonElement>(".choose-month")!.click());
     act(() => vi.advanceTimersByTime(40));
-    act(() => host.querySelector<HTMLButtonElement>(".choose-ideas")!.click());
+    act(() => host.querySelector<HTMLButtonElement>(".choose-insights")!.click());
     act(() => vi.advanceTimersByTime(250));
     expect(pager.dataset.view).toBe("month");
     act(() => vi.advanceTimersByTime(300));
-    expect(pager.dataset.view).toBe("ideas"); expect(host.querySelector(".preview")).toBeNull();
+    expect(pager.dataset.view).toBe("insights"); expect(host.querySelector(".preview")).toBeNull();
   });
   it("lets opening the menu cancel an unfinished dock transition without a late page commit", () => {
     const pager = setup();

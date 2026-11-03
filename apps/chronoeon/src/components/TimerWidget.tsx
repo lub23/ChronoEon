@@ -1,3 +1,4 @@
+import type { GeoPlace, GeoPoint } from "@chronoeon/domain";
 import { useEffect, useRef, useState } from "react";
 import { useFocusTrap, useModalDismiss } from "./modalLayer";
 import { formatTimerDuration, inferCategory, type CaptureHistoryItem, type ChronoEonSettings, type Locale } from "@chronoeon/domain";
@@ -19,6 +20,8 @@ interface TimerWidgetProps {
   onClose: () => void;
   /** Local entries teach the timer's category suggestion; kept on-device. */
   history?: readonly CaptureHistoryItem[];
+  places?: GeoPlace[];
+  onPlaceLocated?: (address: string, point: GeoPoint) => void;
 }
 
 /**
@@ -26,7 +29,7 @@ interface TimerWidgetProps {
  * field is focused on open and Enter starts the recording, so a thought about
  * "I should time this" never costs more than the thing being timed.
  */
-export function TimerWidget({ locale, settings, timer, open, onConfirm, onPin, onNotice, onClose, history = [] }: TimerWidgetProps) {
+export function TimerWidget({ locale, settings, timer, open, onConfirm, onPin, onNotice, onClose, history = [], places = [], onPlaceLocated }: TimerWidgetProps) {
   const [category, setCategory] = useState(() => defaultTimerCategory(settings));
   const sheetRef = useRef<HTMLElement>(null);
   useFocusTrap(sheetRef, open);
@@ -85,7 +88,7 @@ export function TimerWidget({ locale, settings, timer, open, onConfirm, onPin, o
 
         {timer.active
           ? <TimerRunning locale={locale} settings={settings} timer={timer} onConfirm={onConfirm} onFinished={onClose} onPin={onPin} onNotice={onNotice} />
-          : <TimerStartForm disabled={!timer.ready} locale={locale} settings={settings} category={category} onCategoryChange={changeCategory} onTitleChange={setTitle} onStart={timer.start} onNotice={onNotice} history={history} />}
+          : <TimerStartForm disabled={!timer.ready} locale={locale} settings={settings} category={category} onCategoryChange={changeCategory} onTitleChange={setTitle} onStart={timer.start} onNotice={onNotice} history={history} places={places} onPlaceLocated={onPlaceLocated} />}
       </section>
     </div>
   );

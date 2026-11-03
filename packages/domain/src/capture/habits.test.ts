@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCaptureHabits, describeCaptureHabits } from "./habits";
+import { CaptureHabitLearner, buildCaptureHabits, describeCaptureHabits } from "./habits";
 import type { CaptureHistoryItem } from "./index";
 
 const lunch = (date: string): CaptureHistoryItem => ({ kind: "event", title: "午饭", category: "生活", location: "双清园", date, start: "12:00", end: "12:40" });
@@ -51,4 +51,14 @@ describe("capture habits", () => {
     ]).flat();
     expect(describeCaptureHabits(buildCaptureHabits(many), "zh", 800).length).toBeLessThanOrEqual(900);
   });
+});
+
+it("incrementally relearns edited titles and removes deleted habits", () => {
+  const learner = new CaptureHabitLearner();
+  const first = { ...lunch("2026-11-01"), id: "a" }, second = { ...lunch("2026-11-02"), id: "b" };
+  const profile = learner.update([first, second]);
+  expect(profile.titles[0].count).toBe(2);
+  expect(learner.update([first, second])).toBe(profile);
+  expect(learner.update([first, { ...second, title: "Coffee" }]).titles).toEqual([]);
+  expect(learner.update([first]).total).toBe(1);
 });
